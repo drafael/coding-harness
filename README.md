@@ -4,7 +4,7 @@ Reusable agent skills and workflows for everyday development.
 ## Prerequisites
 To use an AI coding agent in your terminal, you’ll need:
 
-- Essential CLI tools: [node/npm](https://nodejs.org/), [ripgrep (`rg`)](https://github.com/burntsushi/ripgrep#ripgrep-rg) or [fd](https://github.com/sharkdp/fd#fd), and [jq](https://github.com/jqlang/jq#jq)
+- Essential CLI tools: [`node`/`npm`](https://nodejs.org/), [ripgrep (`rg`)](https://github.com/burntsushi/ripgrep#ripgrep-rg) or [`fd`](https://github.com/sharkdp/fd#fd), and [`jq`](https://github.com/jqlang/jq#jq)
 - A modern terminal emulator, such as:
   - [WezTerm](https://wezterm.org/) (cross-platform)
   - [Alacritty](https://alacritty.org) (cross-platform)
@@ -57,7 +57,9 @@ After brainstorming:
 
 ```text
 start implementation of the YYYY-MM-DD-user-story-implementation-plan.md
+
 write tests for new and modified code
+
 code review uncommitted changes
 ```
 
@@ -65,7 +67,9 @@ code review uncommitted changes
 
 ```text
 /debug-error """stack trace or errors in logs"""
+
 /clarify why the response status is 500 instead of 201
+
 add test and branch coverage for UserController
 ```
 
@@ -73,4 +77,12 @@ add test and branch coverage for UserController
 
 ```text
 refactor code in the user login flow, following guidelines from the java-coder skill
+```
+
+### Documenting
+
+```text
+create a sequence diagram in SVG format with white background of the endpoint /api/v1/users
+
+create a ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users
 ```
