@@ -13,7 +13,9 @@ These are non-negotiable standards. Apply them to every piece of Java or Spring 
 - **Favor readability over cleverness** — write for the next person who reads this code
 - **Comment only complex or non-obvious logic** — never restate what the code already expresses
 - **Choose names that reveal intent** for variables, methods, and classes
-  - Exception: catch-block variables should be a single character (e.g., `catch (Exception e)`)
+  - Exception: catch-block variables should be a single character by default (e.g., `catch (Exception e)`, `catch (Throwable t)`), 
+    - or `catch (Exception ignored)` for empty catch blocks, 
+    - or `catch (Exception ex)`, or `catch (Throwable cause)` to avoid name conflicts
 - **Follow established language and project conventions**
 
 ---
@@ -25,6 +27,7 @@ These are non-negotiable standards. Apply them to every piece of Java or Spring 
 - Always use **static imports** for utility methods, including but not limited to:
   - `Collections.emptyList()`, `Collections.emptyMap()`, `Collections.emptySet()`
   - `Collectors.toList()`, `Collectors.toSet()`, `Collectors.toMap()`, `Collectors.joining()`
+  - `Predicate.not(...)` — write `not(User::isDeleted)`, not `Predicate.not(User::isDeleted)`
 
 ---
 
@@ -59,6 +62,13 @@ For the full guidance — including the `@RequiredArgsConstructor` / `@Builder` 
 - Prefer `String.formatted(...)` over `+` string concatenation
 - Prefer **stream-based functional iteration** over `for`/`while` loops
 - Prefer the **ternary operator** or a **`switch` expression** over `if` statements where it improves clarity
+- Prefer **method references** over equivalent lambdas when the lambda only forwards its argument to a single method or constructor:
+  - ✅ `.map(String::toLowerCase)` | ❌ `.map(s -> s.toLowerCase())`
+  - ✅ `.forEach(System.out::println)` | ❌ `.forEach(x -> System.out.println(x))`
+  - ✅ `.map(User::new)` | ❌ `.map(dto -> new User(dto))`
+  - ✅ `.filter(Objects::nonNull)` | ❌ `.filter(x -> x != null)`
+  - Keep the lambda form when it adds logic (extra arguments, transformation, multiple statements) — readability wins over terseness
+- Prefer **functional interface composition** (`Function.andThen` / `compose`, `Consumer.andThen`, `Predicate.and` / `or` / `negate` / `Predicate.not`) over lambdas that only forward inputs through existing `Function`, `Consumer`, or `Predicate` values — see [`references/functional-composition.md`](references/functional-composition.md) for examples and when to keep the lambda.
 
 ---
 
