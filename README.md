@@ -49,38 +49,46 @@ Activate a skill with a slash command (for example, `/brainstorm`) or by using a
 
 ### Implement a user story
 
+Activate the [`brainstorm`](skills/brainstorm) skill:
 ```text
 /brainstorm """User story description"""
 ```
 
-After brainstorming:
-
+After brainstorming use the [`java-coder`](skills/java-coder) and [`code-review`](skills.code-review) skills:
 ```text
 start implementation of the YYYY-MM-DD-user-story-implementation-plan.md
-
-write tests for new and modified code
 
 code review uncommitted changes
 ```
 
-### Fix a bug
+### Write tests
 
+Activate the [`write-tests`](skills/write-tests) and [`test-coverage`](skills/test-coverage) skills:
 ```text
-/debug-error """stack trace or errors in logs"""
-
-/clarify why the response status is 500 instead of 201
+write tests for new and modified code
 
 add test and branch coverage for UserController
 ```
 
+### Fix a bug
+
+Activate the [`debug-error`](skills/debug-error) and/or [`clarify`](skills/clarify) skills:
+```text
+/debug-error """stack trace or errors in logs"""
+
+clarify why the response status is 500 instead of 201
+```
+
 ### Refactoring
 
+Activate the [`refactor-code`](skills/refactor-code) and [`java-coder`](skills/java-coder) skills:
 ```text
 refactor code in the user login flow, following guidelines from the java-coder skill
 ```
 
 ### Documenting
 
+Use the [`pretty-mermaid`](skills/pretty-mermaid) skill to generate diagrams:
 ```text
 create a sequence diagram in SVG format with white background of the endpoint /api/v1/users
 
