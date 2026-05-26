@@ -26,22 +26,18 @@ To use an AI coding agent in your terminal, you’ll need:
   - with [pi-web-access package](https://github.com/nicobailon/pi-web-access)
 
 ### Also worth trying
-- [Codex CLI](https://developers.openai.com/codex/quickstart?setup=cli) or [Codex app](https://developers.openai.com/codex/quickstart?setup=app)
-  - with [revdiff plugin](https://github.com/umputun/revdiff?tab=readme-ov-file#codex-plugin)
+- [Codex CLI](https://developers.openai.com/codex/quickstart?setup=cli) with [revdiff plugin](https://github.com/umputun/revdiff?tab=readme-ov-file#codex-plugin) or [Codex app](https://developers.openai.com/codex/quickstart?setup=app)
 - [OpenCode](https://opencode.ai/docs/#install)
-- [Gemini CLI](https://geminicli.com/docs/get-started/installation/)
 - [GitHub Copilot CLI](https://github.com/github/copilot-cli?tab=readme-ov-file#installation)
 
 ## [Skills](https://agentskills.io/)
 
 To use `coding-harness/skills` in your projects, copy or symlink the `skills` folder to:
 
-- For [Claude Code](https://code.claude.com/docs/en/skills#extend-claude-with-skills):
-  - `project-folder/.claude/skills`
-  - `~/.claude/skills`
-- For [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#skills), [OpenCode](https://opencode.ai/docs/skills#place-files), [Codex](https://developers.openai.com/codex/skills#where-to-save-skills), [Gemini CLI](https://geminicli.com/docs/cli/skills/#skill-discovery-tiers), and [Copilot](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills):
-  - `project-folder/.agents/skills`
-  - `~/.agents/skills`
+- For [Claude Code](https://code.claude.com/docs/en/skills#extend-claude-with-skills): 
+  - `project-folder/.claude/skills` or `~/.claude/skills`
+- For [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#skills), [OpenCode](https://opencode.ai/docs/skills#place-files), [Codex](https://developers.openai.com/codex/skills#where-to-save-skills), [Copilot](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills): 
+  - `project-folder/.agents/skills` or `~/.agents/skills`
 
 ## Usage and workflow
 
@@ -54,10 +50,16 @@ Activate the [`brainstorm`](skills/brainstorm) skill:
 /brainstorm """User story description"""
 ```
 
-After brainstorming use the [`java-coder`](skills/java-coder) and [`code-review`](skills.code-review) skills:
+After brainstorming use the [`java-coder`](skills/java-coder) skill:
 ```text
-start implementation of the YYYY-MM-DD-user-story-implementation-plan.md
+implement the plan YYYY-MM-DD-user-story-implementation-plan.md 
+  using java coder skill and provide human verifiable proofs and/or artifacts
+```
 
+### Code review
+
+Activate the [`code-review`](skills.code-review) skill:
+```text
 code review uncommitted changes
 ```
 
@@ -66,7 +68,8 @@ code review uncommitted changes
 Activate the [`write-tests`](skills/write-tests) and [`test-coverage`](skills/test-coverage) skills:
 ```text
 write tests for new and modified code
-
+```
+```text
 add test and branch coverage for UserController
 ```
 
@@ -75,7 +78,8 @@ add test and branch coverage for UserController
 Activate the [`debug-error`](skills/debug-error) and/or [`clarify`](skills/clarify) skills:
 ```text
 /debug-error """stack trace or errors in logs"""
-
+```
+```text
 clarify why the response status is 500 instead of 201
 ```
 
@@ -91,6 +95,7 @@ refactor code in the user login flow, following guidelines from the java-coder s
 Use the [`pretty-mermaid`](skills/pretty-mermaid) skill to generate diagrams:
 ```text
 create a sequence diagram in SVG format with white background of the endpoint /api/v1/users
-
+```
+```text
 create a ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users
 ```
