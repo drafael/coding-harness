@@ -111,7 +111,7 @@ someMethodWithLambda(e -> {
 
 // ✅ Single line when it fits
 someMethod(firstArgument, secondArgument);
-
+```
 
 ## Tech Stack
 
