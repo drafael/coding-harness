@@ -2,28 +2,21 @@
 Reusable agent skills and workflows for everyday development.
 
 ## Prerequisites
-To use an AI coding agent in your terminal, you’ll need:
 
-- Essential CLI tools: [`node`/`npm`](https://nodejs.org/), [ripgrep (`rg`)](https://github.com/burntsushi/ripgrep#ripgrep-rg) or [`fd`](https://github.com/sharkdp/fd#fd), and [`jq`](https://github.com/jqlang/jq#jq)
-- A modern terminal emulator, such as:
-  - [WezTerm](https://wezterm.org/) (cross-platform)
-  - [Alacritty](https://alacritty.org) (cross-platform)
-  - [Ghostty](https://ghostty.org/) (Linux and macOS)
-  - [Kitty](https://sw.kovidgoyal.net/kitty/) (Linux and macOS)
-  - [Warp](https://warp.dev/) (macOS)
-  - PowerShell v6+ (Windows)
-- A subscription plan or API keys for the LLM providers you want to use
+Before installing an agent, review the [prerequisites](docs/prerequisites.md) for required CLI tools, terminal setup, and provider access.
 
 ## Installation
 
-### Recommended AI coding agents
-- [Claude Code](https://code.claude.com/docs/en/quickstart#step-1%3A-install-claude-code)
-  - with [revdiff plugin](https://github.com/umputun/revdiff?tab=readme-ov-file#claude-code-plugin)
-  - with [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc#codex-plugin-for-claude-code)
-- [Pi Coding Agent](https://pi.dev)
-  - with [revdiff package](https://github.com/umputun/revdiff?tab=readme-ov-file#pi-package)
-  - with [pi-subagents package](https://github.com/nicobailon/pi-subagents)
-  - with [pi-web-access package](https://github.com/nicobailon/pi-web-access)
+### Recommended terminal coding agents
+- [Claude Code](https://code.claude.com/docs/en/quickstart#step-1%3A-install-claude-code) - Anthropic’s terminal-native coding agent.
+  - [revdiff plugin](https://github.com/umputun/revdiff?tab=readme-ov-file#claude-code-plugin) - Interactive diff review and annotation workflow.
+  - [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc#codex-plugin-for-claude-code) - Adds OpenAI Codex integration to Claude Code.
+- [Pi Coding Agent](https://pi.dev) - Extensible terminal coding agent with packages, tools, skills, and TUI support.
+  - [revdiff package](https://github.com/umputun/revdiff?tab=readme-ov-file#pi-package) - Interactive code review and diff navigation.
+  - [pi-subagents package](https://github.com/nicobailon/pi-subagents) - Delegates work to focused subagents and chains.
+  - [pi-web-access package](https://github.com/nicobailon/pi-web-access) - Adds web search, content fetching, and library research tools.
+  - [pi-intercom package](https://github.com/nicobailon/pi-intercom) - Lets multiple Pi sessions communicate locally.
+  - [pi-review-loop package](https://github.com/nicobailon/pi-review-loop) - Automates repeated code-review passes until issues are resolved.
 
 ### Also worth trying
 - [Codex CLI](https://developers.openai.com/codex/quickstart?setup=cli) with [revdiff plugin](https://github.com/umputun/revdiff?tab=readme-ov-file#codex-plugin) or [Codex app](https://developers.openai.com/codex/quickstart?setup=app)
