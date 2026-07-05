@@ -12,9 +12,11 @@ If **Apache Commons Lang v3+** is already on the classpath, use it heavily and a
 - Use `ObjectUtils.isEmpty(collection)` for null-or-empty collection checks:
   - ✅ `if (ObjectUtils.isEmpty(items)) { ... }`
   - ❌ `if (items == null || items.isEmpty()) { ... }`
-- Use `ObjectUtils.firstNonNull(...)` for multi-step null fallback assignment chains:
+- Use `ObjectUtils.firstNonNull(...)` when initializing the same variable from multiple nullable fallback sources — prefer one expression over repeated `if` assignments:
   - ✅ `Color color = ObjectUtils.firstNonNull(UIManager.getColor("A"), UIManager.getColor("B"), fallback);`
   - ❌ `Color color = UIManager.getColor("A"); if (color == null) { color = UIManager.getColor("B"); } if (color == null) { color = fallback; }`
+  - ✅ `var endpoint = ObjectUtils.firstNonNull(configuredEndpoint, environmentEndpoint, defaultEndpoint);`
+  - ❌ `var endpoint = configuredEndpoint; if (endpoint == null) { endpoint = environmentEndpoint; } if (endpoint == null) { endpoint = defaultEndpoint; }`
   - Keep ternary-only fallback expressions unchanged. Do **not** replace simple expressions like `return value != null ? value : fallback;` with `ObjectUtils.firstNonNull(value, fallback)`.
 
 **Deprecated `StringUtils` comparison/search methods** — Commons Lang 3.18+ deprecated the case-sensitive/insensitive method pairs on `StringUtils` in favor of the `Strings` facade. Use `Strings.CS` (case-sensitive) and `Strings.CI` (case-insensitive) singletons instead — never call the deprecated `StringUtils` variants:

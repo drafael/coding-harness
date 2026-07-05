@@ -87,8 +87,10 @@ For the full guidance — including the `@RequiredArgsConstructor` / `@Builder` 
 
 ### Sensitive Data & `record` Classes
 
-- **Always override `toString`** in `record` classes to prevent sensitive fields from leaking into logs
-  - Fields to mask include (but are not limited to): `password`, `ssn`, `apiKey`, `clientSecret`, `secretKey`
+- **Do not override `toString` by default** in `record` classes — use the generated implementation unless the record contains sensitive, secret, or PII data
+- **Override `toString` only when a record has fields that must not leak into logs or error messages**
+  - Fields to mask include (but are not limited to): `password`, `ssn`, `apiKey`, `token`, `clientSecret`, `secretKey`, `privateKey`, `accessKey`, `refreshToken`
+  - When overriding, include non-sensitive fields normally and replace sensitive values with a fixed mask like `"****"`; never partially reveal secrets unless explicitly required by the domain
 
 ---
 
