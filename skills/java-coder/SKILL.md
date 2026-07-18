@@ -1,6 +1,6 @@
 ---
 name: java-coder
-description: Java/Spring Boot coding standards and preferences. Load this skill whenever writing, reviewing, or refactoring Java or Spring Boot code to ensure consistent style and architecture.
+description: Java, Spring Boot, and Swing desktop coding standards and preferences. Load this skill whenever writing, reviewing, or refactoring Java code to ensure consistent style and architecture.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
@@ -13,8 +13,8 @@ These are non-negotiable standards. Apply them to every piece of Java or Spring 
 - **Favor readability over cleverness** — write for the next person who reads this code
 - **Comment only complex or non-obvious logic** — never restate what the code already expresses
 - **Choose names that reveal intent** for variables, methods, and classes
-  - Exception: catch-block variables should be a single character by default (e.g., `catch (Exception e)`, `catch (Throwable t)`), 
-    - or `catch (Exception ignored)` for empty catch blocks, 
+  - Exception: catch-block variables should be a single character by default (e.g., `catch (Exception e)`, `catch (Throwable t)`),
+    - or `catch (Exception ignored)` for empty catch blocks,
     - or `catch (Exception ex)`, or `catch (Throwable cause)` to avoid name conflicts
 - **Follow established language and project conventions**
 
@@ -129,6 +129,10 @@ someMethod(firstArgument, secondArgument);
 
 For Spring Boot–specific rules — dependency injection, layered architecture, API design, error handling, validation, and code style — see [`references/spring-boot-rules.md`](references/spring-boot-rules.md).
 
+## Desktop Applications
+
+For local, primarily single-user Java desktop applications, use the proportional design, Swing/EDT, WebView, GraalJS, FlatLaf, and HiDPI guidance in [`references/desktop-apps.md`](references/desktop-apps.md). Project context and demonstrated risk override public-server defaults; this never weakens credential secrecy, OAuth correctness, user-data integrity, or EDT safety.
+
 ## Formatting
 
 Resolve formatting rules in this order — stop at the first match:
@@ -159,11 +163,13 @@ Use the **java-coder** and **test-coverage** skills if available
 - Extract expected values into named constants only when they appear in multiple test cases; inline single-use values
 
 **Scope**
-- Only test business logic and services — never write tests for JPA/Hibernate entities, DTOs, `@Configuration` beans, or Spring Data repositories
+- For Spring/server applications, focus tests on business logic and services — do not test JPA/Hibernate entities, DTOs, `@Configuration` beans, or Spring Data repository implementation details
+- For desktop applications, also test application-owned EDT, lifecycle, persistence, theme, rendering, and fallback behavior as described in [`references/desktop-apps.md`](references/desktop-apps.md); do not duplicate native-library test suites
 
 ## Security
 
-- Never hardcode credentials, secrets, or tokens — always externalise them via environment variables or a secrets manager
-- Validate and sanitize all user input at system boundaries; trust nothing from the outside
-- Apply OWASP best practices by default — injection, broken access control, and insecure design are never acceptable
+- Never hardcode credentials, secrets, or tokens — use an appropriate external credential source or secure application-owned store
+- Validate and sanitize data at real trust boundaries, especially remotely supplied commands, paths, markup, and URLs
+- Apply OWASP best practices to public web services and other exposed network boundaries — injection, broken access control, and insecure design are never acceptable
 - Keep security concerns consistent across the stack; a secure API means nothing if the service layer bypasses it
+- For local single-user desktop applications, apply the proportional threat-model guidance in [`references/desktop-apps.md`](references/desktop-apps.md) instead of importing server-grade assumptions by default
