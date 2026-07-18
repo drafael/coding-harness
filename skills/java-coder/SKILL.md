@@ -1,10 +1,14 @@
 ---
 name: java-coder
-description: Java, Spring Boot, and Swing desktop coding standards and preferences. Load this skill whenever writing, reviewing, or refactoring Java code to ensure consistent style and architecture.
+description: Mandatory for every task in a Java codebase, including planning, implementation, debugging, refactoring, review, testing, Maven or Gradle build and dependency changes, performance or security analysis, and Java-related documentation. Detect Java projects from pom.xml, Gradle files, gradlew, or .java sources. Load before inspecting or changing the repository even when the user does not explicitly mention Java. Covers Java 21+, Spring Boot, Swing/EDT, code style, testing, security, and desktop UI.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
 # Java Coding Standards
+
+## Activation Scope
+
+This skill is mandatory for every task in a Java codebase, not only direct Java source edits. Apply it while planning, investigating, debugging, reviewing, testing, changing Maven or Gradle configuration and dependencies, analyzing security or performance, and updating Java-related documentation. Load task-relevant files under `references/` before making decisions or changes.
 
 These are non-negotiable standards. Apply them to every piece of Java or Spring Boot code you write or modify.
 

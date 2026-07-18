@@ -1,7 +1,7 @@
 # Java Coder Skill
 
 ## Description
-Enforces Java and Spring Boot coding standards for consistent architecture, style, testing, and security when writing, reviewing, or refactoring Java code.
+Enforces Java, Spring Boot, and Swing desktop standards for every task in a Java codebase, including planning, implementation, debugging, review, testing, build and dependency changes, security analysis, and Java-related documentation.
 
 ## Usage Examples
 - "Apply java-coder standards while implementing this Spring service."
