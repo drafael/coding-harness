@@ -1,121 +1,58 @@
 ---
 name: refactor-code
-description: Intelligently refactor and improve code quality with incremental, test-backed changes. Use when the user asks to "refactor", "clean up code", "improve code quality", "restructure", or "simplify this code".
+description: Simplify and improve code through narrow, behavior-preserving, test-backed changes without speculative architecture or scope growth. Use when the user asks to "refactor", "clean up code", "improve code quality", "restructure", or "simplify this code".
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
-# Intelligently Refactor and Improve Code Quality
+# Focused Refactoring
 
-Intelligently refactor and improve code quality.
+Refactor for a specific, demonstrated benefit while preserving external behavior. Load applicable language/framework skills and repository instructions first.
 
-## Instructions
+## Principles
 
-Follow this systematic approach to refactor code: **$ARGUMENTS**
+- Prefer less code, fewer concepts, and clearer control flow over abstraction, extensibility, or pattern use.
+- Keep the change within the requested boundary. Ask before crossing packages, processes, layers, or public APIs.
+- A new abstraction needs multiple current consumers or a clear existing contract. Hypothetical reuse does not count.
+- Small duplication is preferable when sharing would create coupling or obscure behavior.
+- Do not combine refactoring with dependency upgrades, formatting sweeps, security programs, performance rewrites, or unrelated cleanup.
+- Do not change valid behavior, add arbitrary limits, or harden against theoretical threats under the label of refactoring.
 
-1. **Pre-Refactoring Analysis**
-   - Identify the code that needs refactoring and the reasons why
-   - Understand the current functionality and behavior completely
-   - Review existing tests and documentation
-   - Identify all dependencies and usage points
+## Workflow
 
-2. **Test Coverage Verification**
-   - Ensure comprehensive test coverage exists for the code being refactored
-   - If tests are missing, write them BEFORE starting refactoring
-   - Run all tests to establish a baseline
-   - Document current behavior with additional tests if needed
+1. **Establish the target**
+   - Identify the concrete readability, duplication, complexity, or maintenance problem.
+   - Read the implementation, callers, tests, and repository conventions.
+   - State the smallest viable change and what behavior must remain unchanged.
 
-3. **Refactoring Strategy**
-   - Define clear goals for the refactoring (performance, readability, maintainability)
-   - Choose appropriate refactoring techniques:
-     - Extract Method/Function
-     - Extract Class/Component
-     - Rename Variable/Method
-     - Move Method/Field
-     - Replace Conditional with Polymorphism
-     - Eliminate Dead Code
-   - Plan the refactoring in small, incremental steps
+2. **Establish evidence**
+   - Run the smallest relevant existing tests before editing.
+   - Add characterization tests only when changed behavior is otherwise unprotected or ambiguous; do not build an exhaustive test framework first.
+   - For performance work, require a measurement or an obviously material hot-path problem.
 
-4. **Environment Setup**
-   - Ensure all tests pass before starting
-   - Set up any additional tooling needed (profilers, analyzers)
+3. **Refactor incrementally**
+   - Make one coherent, reversible change at a time.
+   - Prefer rename, inline, delete, simplify, or local extraction before new types or architecture.
+   - Use existing project primitives and dependencies.
+   - Run focused validation after each meaningful step.
 
-5. **Incremental Refactoring**
-   - Make small, focused changes one at a time
-   - Run tests after each change to ensure nothing breaks
-   - Commit working changes frequently with descriptive messages
-   - Use IDE refactoring tools when available for safety
+4. **Control scope**
+   - If the work requires several new production modules, a generalized framework, a lifecycle/ownership protocol, or subsystem redesign, stop and ask for approval with a simpler alternative and regression risk.
+   - If two attempts fail or remain unverified, revert to the last known-good state and reassess the actual boundary instead of layering more machinery.
 
-6. **Code Quality Improvements**
-   - Improve naming conventions for clarity
-   - Eliminate code duplication (DRY principle)
-   - Simplify complex conditional logic
-   - Reduce method/function length and complexity
-   - Improve separation of concerns
+5. **Finish cleanly**
+   - Run the appropriate broader validation.
+   - Review the complete diff for behavior changes and remove dead experiments, unnecessary APIs, speculative limits, unused dependencies, duplicate paths, and one-consumer abstractions.
+   - Update documentation only where the refactor changed an actual contract or operating procedure.
 
-7. **Performance Optimizations**
-   - Identify and eliminate performance bottlenecks
-   - Optimize algorithms and data structures
-   - Reduce unnecessary computations
-   - Improve memory usage patterns
+## Prohibited Defaults
 
-8. **Design Pattern Application**
-   - Apply appropriate design patterns where beneficial
-   - Improve abstraction and encapsulation
-   - Enhance modularity and reusability
-   - Reduce coupling between components
+Do not automatically:
 
-9. **Error Handling Improvement**
-   - Standardize error handling approaches
-   - Improve error messages and logging
-   - Add proper exception handling
-   - Enhance resilience and fault tolerance
+- Apply design patterns, polymorphism, services, repositories, factories, or dependency injection merely to appear cleaner.
+- Eliminate every instance of duplication.
+- Add resilience, retries, caching, feature flags, monitoring, rollout machinery, or migration compatibility without a current requirement.
+- Rewrite working library behavior with application-owned approximations.
+- Add production hooks solely for tests.
+- Commit, format the whole repository, update snapshots, or change generated files unless requested or required by repository policy.
 
-10. **Documentation Updates**
-    - Update code comments to reflect changes
-    - Revise API documentation if interfaces changed
-    - Update inline documentation and examples
-    - Ensure comments are accurate and helpful
-
-11. **Testing Enhancements**
-    - Add tests for any new code paths created
-    - Improve existing test quality and coverage
-    - Remove or update obsolete tests
-    - Ensure tests are still meaningful and effective
-
-12. **Static Analysis**
-    - Run linting tools to catch style and potential issues
-    - Use static analysis tools to identify problems
-    - Check for security vulnerabilities
-    - Verify code complexity metrics
-
-13. **Performance Verification**
-    - Run performance benchmarks if applicable
-    - Compare before/after metrics
-    - Ensure refactoring didn't degrade performance
-    - Document any performance improvements
-
-14. **Integration Testing**
-    - Run full test suite to ensure no regressions
-    - Test integration with dependent systems
-    - Verify all functionality works as expected
-    - Test edge cases and error scenarios
-
-15. **Code Review Preparation**
-    - Review all changes for quality and consistency
-    - Ensure refactoring goals were achieved
-    - Prepare clear explanation of changes made
-    - Document benefits and rationale
-
-16. **Documentation of Changes**
-    - Create a summary of refactoring changes
-    - Document any breaking changes or new patterns
-    - Update project documentation if needed
-    - Explain benefits and reasoning for future reference
-
-17. **Deployment Considerations**
-    - Plan deployment strategy for refactored code
-    - Consider feature flags for gradual rollout
-    - Prepare rollback procedures
-    - Set up monitoring for the refactored components
-
-Remember: Refactoring should preserve external behavior while improving internal structure. Always prioritize safety over speed, and maintain comprehensive test coverage throughout the process.
+Success means the resulting code is easier to understand and has equal or lower conceptual complexity—not merely more modular files.

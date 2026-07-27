@@ -41,6 +41,22 @@ Never silently change the runtime, package manager, lockfile format, module syst
 - Keep generated files generated; change their source or generator instead.
 - Avoid speculative abstractions. Extract shared code when real duplication or a stable boundary justifies it.
 
+## Scope and Complexity Discipline
+
+These rules are mandatory for implementation, debugging, security, reliability, and review work:
+
+- Start from the concrete failure and change the narrowest responsible boundary.
+- Do not redesign adjacent packages, processes, or layers unless the user approves the expanded scope.
+- Prefer a local function or module change over a new service, framework, protocol, ownership model, or lifecycle abstraction.
+- A new abstraction needs multiple current production consumers or a clear existing contract; hypothetical reuse does not count.
+- Before adding several production modules, crossing process/package boundaries, or changing architecture, pause and present the simpler alternative and regression risk.
+- Treat plans as revisable hypotheses, not checklists. Revalidate each step against what investigation and tests demonstrate.
+- Do not add production hooks solely to simulate implausible failures in tests.
+- Revert failed approaches instead of preserving or layering over them. After two unsuccessful or unverified attempts, stop and trace the complete boundary before trying again.
+- Before completion, audit the whole diff and remove speculative limits, dead helpers, unused dependencies, duplicate lifecycle paths, and one-consumer abstractions.
+
+For TypeScript desktop applications, load [`references/desktop.md`](references/desktop.md) before changing security, IPC/RPC, lifecycle, shutdown, native-view, rendering, updater, or resource-ownership behavior.
+
 ## Type Safety
 
 - New projects use explicit strict TypeScript settings. Existing non-strict projects require a deliberate migration, not an unrelated flag flip.
@@ -135,7 +151,9 @@ Test behavior and trust boundaries rather than implementation trivia. See [`refe
 - Never interpolate untrusted values into shell commands, SQL, HTML, paths, URLs, regular expressions, or IAM policies without the appropriate safe API and policy checks.
 - Treat package lifecycle scripts, build plugins, CDK applications, and third-party constructs as executable code.
 - Keep browser, renderer, WebView, IPC/RPC, and native capability surfaces narrow and deny by default.
-- Apply proportional controls based on exposure while preserving credential secrecy, user-data integrity, and safe update/signing behavior.
+- Apply proportional controls based on demonstrated exposure while preserving credential secrecy, user-data integrity, and safe update/signing behavior.
+- Before adding security machinery, identify the producer, trust boundary, attacker capability, likely impact, and why ordinary validation or recovery is insufficient.
+- Do not invent arbitrary quotas or silently reject, truncate, or degrade valid behavior to defend against a theoretical threat.
 
 Detailed guidance: [`references/security.md`](references/security.md).
 

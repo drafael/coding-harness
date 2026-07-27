@@ -1,6 +1,27 @@
 # TypeScript Desktop Applications
 
-Apply the shared rule to every stack: a renderer/WebView is a trust boundary. Expose the smallest typed native API, validate at runtime, authorize privileged operations, and test denial paths.
+Apply these rules proportionally to the application's real exposure. Preserve credential secrecy, update integrity, user-data integrity, and narrow privileged APIs without importing public-server or multi-tenant assumptions into a restartable single-user application.
+
+## Start With the Concrete Failure
+
+Before adding infrastructure, answer:
+
+1. What concrete failure or privilege boundary is involved?
+2. Has it occurred, or does current code make it likely?
+3. What is the smallest local fix?
+4. Can normal validation, cleanup, cancellation, or restart recovery handle it?
+5. Can the relevant packaged/native boundary actually be tested?
+
+If these answers do not justify the complexity, defer the work.
+
+For rendering, native bridges, callbacks, IPC/RPC, cancellation, and lifecycle changes:
+
+- Trace the complete path and fix the boundary that actually fails.
+- Preserve known-good rendering, layout, framework behavior, and cleanup unless evidence implicates them.
+- Keep bridge payloads small and semantic; prefer source or identifiers over complete rendered output when the privileged side can recreate it.
+- Do not compensate for an untested native boundary with acknowledgements, quotas, generations, leases, or lifecycle protocols.
+- After two failed or unverified attempts, revert to the last known-good behavior and reproduce the failure at the real boundary before continuing.
+- Treat unit and mocked integration tests as evidence only for the layer they execute. Require packaged smoke tests for native and operating-system behavior.
 
 ## Detect the Stack
 
@@ -12,9 +33,9 @@ A Bun lockfile does not make Electron into Electrobun. In a migration or monorep
 
 ## Shared Boundary Rules
 
-- Renderer TypeScript types do not validate compromised or malformed runtime messages.
+- TypeScript types do not validate runtime messages; validate data at real privilege or trust boundaries.
 - Define narrow use-case operations, not generic `send`, `execute`, filesystem, shell, or arbitrary RPC surfaces.
-- Validate payloads/results, bound sizes and frequency, authorize sensitive operations, and sanitize errors.
+- Validate payloads and authorize sensitive operations. Add size or frequency limits only when an existing contract, measured failure, cost, or credible exposure justifies them.
 - Keep filesystem, process, shell, keychain, updater, and signing operations in the privileged process/core.
 - Parse and allowlist external URLs and navigation. Never pass unchecked renderer input to a shell or `openExternal` equivalent.
 - Prefer packaged local UI. Remote content receives no privileged bridge unless a narrowly justified design proves otherwise.
@@ -99,9 +120,9 @@ Common layers:
 1. Unit-test domain logic and schemas.
 2. Contract-test each IPC/RPC/command allow and deny path.
 3. Component-test UI with the native bridge mocked at its public surface.
-4. Test invalid origins, paths, URLs, payload sizes, and disposed-window behavior.
-5. Package/install/launch and smoke-test native APIs on each supported OS/architecture.
-6. Test signing, update verification, interrupted update, and rollback/recovery.
+4. Test denial and disposed-window behavior at the privilege boundaries the application actually exposes.
+5. Package/install/launch and smoke-test relevant native APIs on supported targets.
+6. Test signing and update recovery when the application owns those capabilities.
 
 Electron can use framework test helpers and Playwright's Electron support with awareness of its support status. Tauri supports Rust tests, frontend IPC/window mocks, and WebDriver-oriented integration. Electrobun requires more application-owned Bun and packaged smoke testing.
 

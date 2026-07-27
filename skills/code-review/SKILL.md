@@ -1,62 +1,58 @@
 ---
 name: code-review
-description: Perform a comprehensive code quality review covering security, performance, architecture, and testing. Use when the user asks to "review code", "check code quality", "audit code", or "review this codebase".
+description: Perform a focused, evidence-based code review covering correctness, regressions, security, performance, architecture, and testing without inventing speculative work. Use when the user asks to "review code", "check code quality", "audit code", or "review this codebase".
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
-# Comprehensive Code Quality Review
+# Evidence-Based Code Review
 
-Perform comprehensive code quality review.
+Review the requested code or diff in repository context. Load applicable language/framework skills and follow repository instructions before judging conventions.
 
-## Instructions
+## Scope
 
-Follow these steps to conduct a thorough code review:
+- Review the user-specified target. For uncommitted work, inspect the complete diff and relevant call paths rather than auditing unrelated code.
+- Distinguish regressions introduced by the change from pre-existing issues.
+- Do not broaden a focused review into an architecture, dependency, formatting, or security program without approval.
 
-1. **Repository Analysis**
-   - Examine the repository structure and identify the primary language/framework
-   - Check for configuration files (pom.xml, package.json, requirements.txt, Cargo.toml, etc.)
-   - Review README and documentation for context
+## Finding Standard
 
-2. **Code Quality Assessment**
-   - Scan for code smells, anti-patterns, and potential bugs
-   - Check for consistent coding style and naming conventions
-   - Identify unused imports, variables, or dead code
-   - Review error handling and logging practices
+Report an issue only when you can explain:
 
-3. **Security Review**
-   - Look for common security vulnerabilities (SQL injection, XSS, etc.)
-   - Check for hardcoded secrets, API keys, or passwords
-   - Review authentication and authorization logic
-   - Examine input validation and sanitization
+1. The concrete failure or maintainability cost.
+2. The reachable code path or credible conditions that trigger it.
+3. The actual impact and proportionate severity.
+4. The smallest practical correction.
 
-4. **Performance Analysis**
-   - Identify potential performance bottlenecks
-   - Check for inefficient algorithms or database queries
-   - Review memory usage patterns and potential leaks
-   - Analyze bundle size and optimization opportunities
+Use file paths and line numbers. Do not inflate severity, list theoretical possibilities as defects, or manufacture findings to appear comprehensive. If no actionable issues exist, say so.
 
-5. **Architecture & Design**
-   - Evaluate code organization and separation of concerns
-   - Check for proper abstraction and modularity
-   - Review dependency management and coupling
-   - Assess scalability and maintainability
+## Review Priorities
 
-6. **Testing Coverage**
-   - Check existing test coverage and quality
-   - Identify areas lacking proper testing
-   - Review test structure and organization
-   - Suggest additional test scenarios
+1. Correctness, data integrity, and user-visible regressions.
+2. Cancellation, concurrency, cleanup, and error propagation on realistic paths.
+3. Security at actual trust and privilege boundaries.
+4. Performance on demonstrated hot paths or where complexity clearly creates material cost.
+5. Tests for likely behavior and important boundaries.
+6. Readability and maintainability of the changed design.
 
-7. **Documentation Review**
-   - Evaluate code comments and inline documentation
-   - Check API documentation completeness
-   - Review README and setup instructions
-   - Identify areas needing better documentation
+## Complexity and Security Guardrails
 
-8. **Recommendations**
-   - Prioritize issues by severity (critical, high, medium, low)
-   - Provide specific, actionable recommendations
-   - Suggest tools and practices for improvement
-   - Create a summary report with next steps
+- Flag overengineering when a direct fix became a framework, protocol, ownership system, stack of limits, or abstraction with one production consumer.
+- Prefer existing primitives and local fixes. Do not recommend design patterns, generalized services, scalability work, or dependencies for hypothetical future use.
+- Security findings must identify the producer, trust boundary, attacker capability, and plausible impact. Do not import public-server or multi-tenant assumptions into a different deployment model.
+- Do not recommend arbitrary quotas, timeouts, sanitizers, or deny-by-default behavior that rejects valid inputs without a contract or credible risk.
+- Tests prove only the boundary they execute. Do not treat mocks, source assertions, or unit tests as proof of native, packaged, external-service, or end-to-end behavior.
+- Do not request production hooks solely to test implausible failures.
 
-Remember to be constructive and provide specific examples with file paths and line numbers where applicable.
+## Regression and Diff Audit
+
+Check whether the change:
+
+- Preserves known-good behavior outside the requested fix.
+- Adds unrelated scope, dead helpers, duplicate lifecycle paths, speculative limits, unused dependencies, or compatibility scaffolding for failed approaches.
+- Reimplements behavior already owned by a mature library.
+- Claims integration behavior that was not exercised at the relevant boundary.
+- Has a simpler rollback or local alternative.
+
+## Output
+
+List actionable findings first, ordered by severity. Keep summaries concise. Separate residual/manual validation risks from code defects. Avoid praise-heavy filler, exhaustive low-value suggestions, and implementation plans the user did not request.

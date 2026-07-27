@@ -14,6 +14,20 @@ Before adding infrastructure, answer:
 
 If these answers do not justify the complexity, defer the work.
 
+### Failure-Boundary and Regression Guardrail
+
+Before changing a desktop rendering, native bridge, callback, cancellation, or lifecycle path:
+
+1. Trace the complete path from the user action to the failing boundary.
+2. Identify which boundary is actually unproven; do not patch downstream code when transport or native delivery is failing upstream.
+3. Preserve the last known-good renderer, styles, layout, provider behavior, and cleanup semantics unless evidence implicates them.
+4. Keep native callback payloads small and semantic. Prefer source or an identifier that Java can process over transporting complete HTML, SVG, images, or other rendered output.
+5. Test each layer honestly. Pure Java/JavaScript tests can validate payload construction and parsing, but only a packaged native smoke test can validate WKWebView, WebView2, WebKitGTK, JCEF, OS callbacks, or external application launch.
+6. If a native fix cannot be exercised, label it unverified; do not compensate by adding acknowledgements, quotas, leases, generations, or lifecycle protocols.
+7. After two failed or unverified attempts, revert to the last known-good behavior and stop. Reproduce the problem at the actual boundary before making another code change.
+
+A visual or native regression is not permission to replace a working library's renderer, CSS, geometry, or syntax handling with application-owned approximations.
+
 Prioritize work that:
 
 - Prevents user-data loss or corruption.

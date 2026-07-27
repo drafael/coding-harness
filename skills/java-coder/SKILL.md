@@ -22,6 +22,23 @@ These are non-negotiable standards. Apply them to every piece of Java or Spring 
     - or `catch (Exception ex)`, or `catch (Throwable cause)` to avoid name conflicts
 - **Follow established language and project conventions**
 
+## Scope and Complexity Discipline
+
+These rules are mandatory for implementation, debugging, security, reliability, and review work:
+
+- Start from the concrete failure and change the narrowest responsible boundary.
+- Do not redesign neighboring subsystems unless the user explicitly approves that expanded scope.
+- Prefer a local method or class change over a new service, framework, protocol, ownership model, or lifecycle abstraction.
+- A new abstraction needs multiple current production consumers or a clear existing contract. A hypothetical future consumer does not count.
+- Before adding more than a few production types or crossing subsystem boundaries, pause and present the simpler alternative and regression risk to the user.
+- A plan is not evidence that every proposed mechanism is necessary. Revalidate each step against what investigation and tests actually demonstrate.
+- Do not add production APIs or hooks solely to simulate implausible failures in tests.
+- Do not preserve failed approaches as compatibility scaffolding. Revert to the last known-good behavior, isolate the failing boundary, and try the smallest different fix.
+- After two unsuccessful or unverified attempts at the same issue, stop iterating. Reassess the premise, trace the full data/control path, and require boundary-appropriate evidence.
+- Before completion, audit the whole diff and remove speculative limits, dead helpers, duplicate lifecycle paths, unused dependencies, and one-consumer abstractions.
+
+For local Java desktop applications, load [`references/desktop-apps.md`](references/desktop-apps.md) before making security, lifecycle, shutdown, native-view, rendering, or resource-ownership changes.
+
 ---
 
 ### Imports

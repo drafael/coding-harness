@@ -17,7 +17,7 @@ Common boundaries include:
 - Electron/Electrobun/Tauri IPC, RPC, commands, WebViews, and native capabilities.
 - Package plugins, lifecycle scripts, CDK constructs, and synthesis plugins.
 
-For each boundary: identify the producer, validate structure, normalize deliberately, authorize the operation, bound resource use, and produce a safe error.
+For each relevant boundary, identify the producer and required guarantees. Validate and authorize where needed; add resource bounds only when exposure, cost, an existing contract, or observed behavior justifies them.
 
 ## Validation and Authorization
 
@@ -111,8 +111,8 @@ Do not add elaborate adversarial machinery to a trusted local-only path without 
 
 ## Desktop and TUI Boundaries
 
-- Treat renderer/WebView input as untrusted even in a local desktop application.
-- Keep native bridge operations narrow, validate payloads, authorize privileged actions, and verify sender/origin where supported.
+- Treat data crossing from a renderer/WebView into privileged native operations as a trust boundary; ordinary renderer-local state does not by itself justify server-grade machinery.
+- Keep privileged bridge operations narrow, validate payloads, authorize sensitive actions, and verify sender/origin where the stack supports and requires it.
 - Sanitize terminal control sequences from untrusted filenames, logs, and remote content.
 - Restore terminal/native resources on every exit path.
 - Verify update signatures and OS code signing separately; never bundle private keys.
