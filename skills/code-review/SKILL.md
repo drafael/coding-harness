@@ -1,7 +1,6 @@
 ---
 name: code-review
 description: Find actionable defects and risks through a focused, evidence-based review of correctness, regressions, security, performance, architecture, and testing. Use for requests to review, audit, critique, or identify improvements. Use explain-code instead when the user only wants to understand current behavior or architecture.
-allowed-tools: Read, Grep, Glob, Bash
 ---
 
 # Evidence-Based Code Review

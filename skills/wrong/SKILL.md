@@ -1,63 +1,66 @@
 ---
 name: wrong
-description: Reset after the user rejects the assistant's current answer, plan, implementation, or problem-solving direction. Use for "your approach is wrong", "start over", "try a different approach", or when the attempted solution has demonstrably failed. Do not use for ordinary reports that a system behaves incorrectly or differs from expectations; use clarify instead.
-allowed-tools: Read, Grep, Glob, EnterPlanMode, AskUserQuestion
+description: Reset after the user rejects the assistant's current answer, plan, implementation, or problem-solving direction. Use for "your approach is wrong", "start over", "try a different approach", or when the attempted solution has demonstrably failed. Use clarify for incorrect system behavior and brainstorm when the user wants multiple new designs or alternatives.
 ---
 
-# Wrong — Reset and Re-evaluate
+# Wrong: reset and re-evaluate
 
-The user has rejected the current approach or the attempted solution has failed. Stop extending or defending it. Re-examine the problem from the beginning.
+The user has rejected the current approach or the attempted solution has failed. Stop extending or defending it. Return to the last supported facts and reassess the problem.
 
-## Boundary with `clarify`
+## Boundaries
 
-Use `wrong` when the object of rejection is the assistant's work or the active solution path. Use `clarify` when the object under investigation is system behavior, configuration, documentation, or historical design intent.
+Use `wrong` when the object of rejection is the assistant's work or the active solution path.
 
 - “Your fix is wrong; start over” → `wrong`
-- “This endpoint returns the wrong status; why?” → `clarify`
 - “That explanation does not match the code” → `wrong`, then re-investigate
-- “The documentation does not match the code” → `clarify`
+- “This endpoint returns the wrong status; why?” → `clarify`
+- “Explore three alternative architectures” → `brainstorm`
+
+A rejection does not automatically require several new designs, a formal plan, implementation, or comprehensive tests. Match the response to what the user rejected and requested.
 
 ## Workflow
 
-### Step 1: Re-analyze the Core Problem
+### 1. Identify the rejected claim or approach
 
-State the problem in clear, simple terms. What exactly are we trying to solve?
+State concisely:
 
-### Step 2: Identify Missing Context
+- what the assistant attempted;
+- what the user says is wrong;
+- which assumptions or evidence supported the failed direction;
+- what remains established.
 
-Determine what additional information is needed about:
-- The existing codebase and its patterns
-- Performance requirements or constraints
-- Integration points with other systems
-- Expected usage patterns or scale
-- Any domain-specific requirements not yet mentioned
+Do not make the user repeat context already present in the conversation.
 
-### Step 3: Propose Fresh Approaches
+### 2. Discard the failed premise
 
-Suggest 2-3 alternative solutions that:
-- Follow project best practices and idioms
-- Match the existing code's style and architecture patterns
-- Are maintainable and testable
-- Solve the exact problem without over-engineering
-- Don't use shortcuts or hacks
+Stop layering fixes on the rejected approach. Remove it from the working hypothesis unless independent evidence still supports a specific part.
 
-### Step 4: Explain Trade-offs
+If changes were already made, inspect the actual diff before deciding whether to revise or revert them. Do not preserve failed machinery as compatibility scaffolding.
 
-For each proposed approach, briefly explain:
-- Why this approach fits the problem
-- What the main benefits and drawbacks are
-- How it integrates with the existing codebase
+### 3. Re-investigate the responsible boundary
 
-### Step 5: Recommend the Best Path Forward
+Read the relevant code, configuration, documentation, errors, or prior evidence. Trace the full path when the earlier answer relied on an incomplete local view.
 
-Which approach is most appropriate and why?
+After two unsuccessful or unverified attempts at the same issue, stop iterating. Reassess the premise, data flow, ownership, and acceptance boundary before trying again.
 
-## Requirements
+### 4. Choose the proportional next step
 
-- Solution must be production-ready, not a proof of concept
-- Code should be idiomatic and follow established patterns
-- Include comprehensive tests with edge cases
-- Provide complete, runnable code with no placeholders
-- Ensure the solution is maintainable
+- **Clear correction:** acknowledge it briefly and provide or apply the smallest corrected answer requested.
+- **Missing decisive context:** ask one focused question.
+- **Concrete failure:** use the appropriate debugging workflow and reproduce it where possible.
+- **Several meaningful alternatives or a design reset:** use `brainstorm` before implementation.
+- **Consequential change:** explain scope and obtain approval before expanding it.
 
-**Ask clarifying questions before proceeding.**
+Do not force option lists when one correction is clearly supported.
+
+### 5. Validate the new direction
+
+Check the evidence that failed previously and the boundary affected by the correction. For code changes, run focused tests or validation proportional to the change. Do not claim the issue is resolved from reasoning alone when an executable or observable check exists.
+
+## Response style
+
+- Acknowledge the rejected direction without arguing.
+- Explain the corrected understanding, not a defense of the prior answer.
+- Name remaining uncertainty.
+- Keep the reset focused; do not turn a small correction into a redesign.
+- If the evidence still conflicts with the user's premise, show that evidence respectfully instead of pretending agreement.

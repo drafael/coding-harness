@@ -34,7 +34,7 @@ To use `coding-harness/skills` in your projects, copy or symlink the `skills` fo
 
 ## Usage and workflow
 
-Activate a skill with a slash command (for example, `/brainstorm`) or by using a trigger phrase from the skill metadata (for example, `let's brainstorm`).
+Activate a skill with the host’s command syntax (Pi uses `/skill:<name>`; other hosts may use `/<name>`) or a trigger phrase from its metadata.
 
 ### Implement a user story
 
@@ -51,10 +51,20 @@ implement the plan YYYY-MM-DD-user-story-implementation-plan.md
 
 ### Code review
 
-Activate the [`code-review`](skills.code-review) skill:
+Activate the [`code-review`](skills/code-review) skill:
 ```text
 code review uncommitted changes
 ```
+
+### Session reflection
+
+The [`reflect`](skills/reflect) skill is manual-only. In Pi, invoke it after a substantial session with:
+
+```text
+/skill:reflect
+```
+
+It proposes evidence-backed improvements to existing skills and waits for individual approval before editing.
 
 ### Write tests
 
