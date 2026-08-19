@@ -1,21 +1,39 @@
-# Clarify Skill
+# Clarify skill
 
-## Description
-Confusion-handling skill for cases where expected behavior and actual behavior do not match. It investigates evidence first, explains what is happening, and determines whether the issue is misunderstanding, configuration/docs related, or a real defect.
+Investigates mismatches between expected and actual behavior, explains current mechanics, and distinguishes intended behavior from configuration, documentation, implementation, and design problems.
 
-## Usage Examples
-- "I don’t understand why this endpoint returns 404 only in prod."
-- "Wait, shouldn’t this config flag enable retries?"
-- "I expected X but got Y — can you explain what’s happening?"
-- "This doesn’t make sense; why is behavior different now?"
+It can also investigate historical design rationale when the question asks why a decision, threshold, workaround, or constraint exists.
 
-## Origin
-- Original upstream skill: `plugins/workflow/skills/clarify/SKILL.md`
-- Upstream repository: [umputun/cc-thingz](https://github.com/umputun/cc-thingz)
+## Example requests
 
-## Credits
-- Original author: **Umputun**
-- Local adaptation/usage in this repo: `coding-harness`
+- "I don’t understand why this endpoint returns 404 only in production."
+- "Shouldn’t this configuration flag enable retries?"
+- "I expected X but got Y. What is happening?"
+- "Why was this limit set to 100?"
+- "Is this behavior intentional or a regression?"
 
-## License
-- Upstream license (MIT): [umputun/cc-thingz/LICENSE](https://github.com/umputun/cc-thingz/blob/master/LICENSE)
+## Structure
+
+- `SKILL.md` contains the compact routing, diagnosis, explanation, and assessment workflow.
+- `references/historical-rationale.md` contains the scalable design-archaeology playbook.
+- `references/evidence-and-confidence.md` contains confidence levels, citation discipline, contradiction handling, and gap reporting.
+
+`SKILL.md` is self-sufficient for routine expectation mismatches. Supporting references are intended for on-demand loading when the host supports it. The instructions do not depend on a named model, provider, tool, command syntax, runtime, or agent harness.
+
+## Design principles
+
+- Treat misunderstanding and defects as competing hypotheses.
+- Separate current mechanics from historical intent.
+- Support claims with evidence and calibrate inferences.
+- Preserve contradictions and admit unknowns.
+- Scale investigation effort to impact and ambiguity.
+- Clarify before changing anything.
+
+## Origins and license
+
+This vendor-neutral compilation adapts ideas from:
+
+- [Umputun’s `clarify`](https://github.com/umputun/cc-thingz/tree/master/plugins/workflow/skills/clarify).
+- [Cursor pstack `why`](https://github.com/cursor/plugins/tree/main/pstack/skills/why).
+
+Both upstream works are distributed under the MIT License. See `LICENSE` for the retained notices.

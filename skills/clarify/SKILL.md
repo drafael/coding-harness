@@ -1,214 +1,116 @@
 ---
 name: clarify
-description: This skill should be used when user appears confused, frustrated, or shows misalignment between expectations and reality. Triggers on phrases like "I don't understand", "this doesn't make sense", "confused", "wait, shouldn't it...", "why is this happening", "I thought X did Y", contradictory statements, or frustration signals. Analyzes the confusion, explains the actual behavior, and determines if there's a real issue to address.
-allowed-tools: EnterPlanMode, AskUserQuestion
+description: Investigate and explain mismatches between expected and actual behavior, unclear system behavior, and questions about design rationale. Use when someone is confused, frustrated, asks why something happens or was designed a certain way, or suspects documentation, configuration, or implementation is wrong.
+license: See LICENSE
 ---
 
 # Clarify
 
-Handle user confusion by verifying intent, explaining actual behavior, and determining if there's a real issue.
+Turn confusion into an evidence-backed explanation. Determine what happens, what was expected, why the gap exists, and whether anything should change.
 
-**Primary goal**: Clarify and explain, not fix. Most confusion stems from misunderstanding or forgetting, not from bugs.
+## Core posture
 
-## Activation Triggers
+Do not assume the person is mistaken or that the system is broken. Treat both as hypotheses.
 
-- "confused", "I'm confused", "this is confusing"
-- "I don't understand", "doesn't make sense", "makes no sense"
-- "wait, shouldn't it...", "but I thought..."
-- "why is this happening", "why does this..."
-- "I expected X but got Y"
-- "this is wrong", "something's off"
-- frustration signals, contradictory statements
-- questions that reveal misconceptions about system behavior
+Separate these questions:
 
-## Important Context
+- **Mechanics:** What does the system do now, and how?
+- **Expectation:** What did the person expect, and what contract supports that expectation?
+- **Rationale:** Why was the current design chosen or retained?
+- **Assessment:** Is this intended behavior, a configuration or documentation problem, a defect, or still unknown?
 
-Users often:
-- **Work on multiple projects in parallel** and may confuse behaviors between them
-- **Forget how things were implemented** especially after time away
-- **Have outdated mental models** based on old versions or different projects
-- **Mix up similar concepts** from different codebases or frameworks
+Code can establish current mechanics. Code shape alone rarely proves historical intent. Comments, tests, commits, reviews, tickets, documents, incidents, and conversations may provide rationale.
 
-But also:
-- **Users are experienced developers** - their instincts are often correct
-- **Real bugs exist** - about half of confusion cases point to actual issues
-- **User expectations are reasonable** - if something feels wrong, investigate thoroughly
+## Load references only when needed
 
-**Do not assume either way.** Investigate before concluding. Both outcomes are equally valid:
-- User misremembered/mixed things up -> clarify with evidence
-- System has a genuine issue -> proceed to plan mode for fix
+Routine behavior mismatches should use this file alone.
 
-## Workflow
+- Read [references/historical-rationale.md](references/historical-rationale.md) for design intent, rejected alternatives, unexplained thresholds, regressions, postmortems, or “why does this code still exist?”
+- Read [references/evidence-and-confidence.md](references/evidence-and-confidence.md) when rationale is indirect, sources conflict, the answer is consequential, or confidence must be calibrated explicitly.
 
-### Phase 1: Identify the Confusion
+## Route the question
 
-1. **Extract the core question** - What specifically is the user asking about?
-2. **Identify the expectation** - What did the user expect to happen?
-3. **Identify the reality** - What is actually happening?
-4. **Locate the gap** - Where is the misalignment?
-5. **Consider context mixing** - Could user be thinking of a different project/feature?
+Classify the request before investigating:
 
-Categories of confusion:
-- **Memory gap** - user forgot how it works, needs a reminder
-- **Project mixing** - user confused this with another project they're working on
-- **Outdated mental model** - user's understanding is based on old behavior
-- **Architectural** - misunderstanding system design, component relationships, data flow
-- **Behavioral** - expecting different runtime behavior than what occurs
-- **Configuration** - settings not producing expected results
-- **Documentation** - docs don't match implementation or are unclear
-- **Conceptual** - misunderstanding underlying concepts or patterns
-- **Implementation** - code doesn't work as assumed
+1. **Current behavior mismatch:** expected X, observed Y.
+2. **Mechanics question:** asks what or how the system behaves.
+3. **Historical rationale:** asks why a design, constraint, threshold, or workaround exists.
+4. **Potential defect:** observed behavior appears to violate a contract or reasonable expectation.
+5. **Mixed:** requires separate answers about current mechanics and historical motivation.
 
-### Phase 2: Investigate
+Use conversation context when the target is clear. Ask one focused question only when investigating the wrong target would waste meaningful effort or risk changing the wrong thing.
 
-Before explaining, gather evidence:
+## Investigate current behavior
 
-1. **Read relevant code** - Understand actual implementation
-2. **Check configuration** - Verify settings and their effects
-3. **Review documentation** - See what's documented vs actual behavior
-4. **Trace the flow** - Follow execution path if behavioral confusion
+1. State the expected and observed behavior in concrete terms. Do not invent either side.
+2. Identify the relevant target: files, symbols, configuration, inputs, environment, and version.
+3. Inspect the smallest useful evidence set:
+   - implementation and callers;
+   - configuration and defaults;
+   - tests and documented contracts;
+   - runtime output, logs, or reproduction evidence when available;
+   - recent changes when behavior may have shifted.
+4. Trace the relevant data or control flow when a local reading is insufficient.
+5. Compare implementation, documentation, configuration, and observation. Record contradictions instead of smoothing them over.
 
-Do not guess or assume. Investigate the actual system state.
+Do not guess from framework conventions when repository evidence is available. Do not broaden into historical archaeology unless the question asks for intent or current evidence cannot explain the discrepancy.
 
-### Phase 3: Explain (Gently)
+## Investigate rationale
 
-Structure the explanation with patience and care:
+For historical-intent questions, load the rationale reference and scale the search to the decision’s impact and ambiguity. Anchor the search in concrete code, then inspect available history and decision records. Treat the user’s proposed explanation as one hypothesis, not the conclusion.
 
-1. **Acknowledge the confusion** - Validate that it's understandable, confusion is normal
-2. **State the expectation** - "You expected X to do Y"
-3. **State the reality** - "Actually, X does Z because..."
-4. **Explain why** - Provide the reasoning/design decision behind the behavior
-5. **Show evidence** - Point to specific code, config, or docs
+Claims about intent require explicit evidence or calibrated inference. A source search that returns nothing establishes only that the search found nothing, not that no rationale ever existed.
 
-Tone guidelines:
-- Be gentle, not condescending - user may have simply forgotten
-- Avoid "you're wrong" framing - use "here's how it actually works"
-- If user mixed up projects, clarify without judgment
-- Remind that it's easy to forget details when working on multiple things
+## Assess the result
 
-Keep explanations:
-- Concrete, not abstract
-- Backed by evidence from the codebase
-- Focused on the specific case, not general theory
+Use the narrowest supported outcome:
 
-### Phase 4: Assess
+- **Intended behavior:** implementation matches the relevant contract.
+- **Mental-model mismatch:** the expectation came from a different version, project, concept, or undocumented assumption.
+- **Configuration issue:** supported behavior is disabled or configured differently.
+- **Documentation issue:** behavior is coherent, but the documentation is missing, stale, or misleading.
+- **Implementation defect:** behavior violates the contract or produces an unintended result.
+- **Design concern:** behavior is intentional but the trade-off is no longer acceptable.
+- **Unknown:** available evidence does not resolve the question.
 
-**Start with the most common cases first:**
+Do not label something “user error.” Explain the specific mismatch and its evidence.
 
-**A) Memory gap - user simply forgot**
-- User implemented this but forgot how it works
-- System is working exactly as designed
-- Resolution: gentle reminder with code references
+## Explain
 
-**B) Project mixing - wrong mental context**
-- User is thinking of a different project or codebase
-- This project works differently than user's current mental model
-- Resolution: clarify which project this is and how it differs
+Match the response to the complexity of the question. A simple misunderstanding may need only a short paragraph. Use sections only when they improve navigation.
 
-**C) Outdated understanding**
-- System changed since user last worked on it
-- Or user's mental model never matched reality
-- Resolution: explain current behavior with evidence
+A complete explanation normally covers:
 
-**D) Documentation issue**
-- System works correctly but docs are misleading/missing
-- Resolution: suggest updating docs, may use EnterPlanMode
+- what was expected;
+- what actually happens;
+- the evidence that establishes each;
+- why the gap exists, distinguishing documented rationale from inference;
+- the assessment and next action, if any.
 
-**E) Configuration issue**
-- System can do what user expects but isn't configured for it
-- Resolution: suggest configuration changes
+Cite file paths and line ranges for mechanics. Cite commits, reviews, tickets, documents, incidents, or comments for historical intent. Name important gaps and contradictory evidence.
 
-**F) Real issue - design or implementation problem**
-- User's expectation is reasonable AND system genuinely doesn't meet it
-- This indicates a bug, design flaw, or missing feature
-- Resolution: **MUST proceed to Phase 5**
+Keep the tone direct and respectful. Acknowledge that the expectation was understandable when the contract, naming, or documentation reasonably suggests it. Avoid canned reassurance, blame, and unnecessary tutorials.
 
-### Phase 5: Plan the Fix (for real issues)
+## Deciding whether to fix
 
-If Phase 4 identified a real issue (category F):
+Clarification comes before modification. If the user requested only an explanation, do not silently edit code or documentation.
 
-#### Step 1: Summarize and Assess Scope
+When evidence confirms a problem:
 
-Explain to user what fixing this involves:
+1. State the problem and its impact.
+2. Describe scope as trivial, localized, moderate, significant, or architectural, with a reason.
+3. Present alternatives only when real trade-offs exist.
+4. Ask for confirmation when the fix expands scope, changes behavior, or was not requested.
+5. Use a planning workflow when the change needs one; otherwise provide or apply the smallest appropriate fix using the host’s available capabilities.
 
-**Scope categories:**
-- **Trivial** - Simple fix, single file, no side effects
-- **Localized** - Few files, contained to one component
-- **Moderate** - Multiple components affected, requires testing
-- **Significant** - Cross-cutting concern, affects multiple subsystems
-- **Architectural** - Fundamental design change, may require rethinking approach
+Do not force a formal plan for a trivial correction, and do not implement a consequential change merely because the investigation found one.
 
-Be explicit: "This is a [scope] change because [reason]."
+## Final check
 
-User must understand the magnitude before deciding to proceed.
+Before answering, verify:
 
-#### Step 2: Present Options (if multiple approaches exist)
-
-When there are multiple valid solutions, use **AskUserQuestion** tool to present choices:
-
-- List 2-4 options with clear trade-off descriptions
-- Put recommended option first with "(Recommended)" suffix
-- Include "Do nothing" as an option when relevant:
-  - Issue is cosmetic or low-impact
-  - Workaround exists
-  - Fix is risky relative to benefit
-  - Issue is edge case that rarely occurs
-- Let user choose the approach
-
-#### Step 3: Proceed to Plan Mode
-
-After user confirms or selects an approach:
-
-1. **Use EnterPlanMode** - Create implementation plan for the chosen approach
-2. Plan should reflect the scope assessment from Step 1
-
-**CRITICAL**: Do not attempt to fix issues without planning. Always use EnterPlanMode for:
-- Bug fixes
-- Design changes
-- Missing features
-- Documentation updates that require code understanding
-
-## Response Format
-
-```
-## Understanding Your Confusion
-
-**What you expected**: [user's expectation]
-**What actually happens**: [actual behavior]
-
-## Why This Happens
-
-[Explanation with evidence - code references, config, docs]
-
-## Assessment
-
-[One of: Not an issue / Documentation issue / Real issue / Configuration issue]
-
-[If real issue]:
-This is a real issue that should be addressed. I recommend switching to plan mode to design a proper fix.
-
-Should I enter plan mode to plan the solution?
-```
-
-## Guidelines
-
-**Mindset:**
-- Users are experienced developers - trust their instincts
-- About half of confusion cases are real issues, half are misunderstandings
-- Users work on many projects - confusion between them is normal
-- Memory is fallible - be patient when reminding how things work
-
-**Approach:**
-- Never dismiss confusion as "user error" - investigate first
-- Never assume something is broken without evidence either
-- Always back explanations with evidence from the actual codebase
-- If unsure, ask clarifying questions before investigating
-- Keep the tone helpful, not condescending
-- If the confusion reveals a real problem, treat it as valuable feedback
-- Don't over-explain - focus on the specific confusion, not general tutorials
-
-**Fixing:**
-- **Investigate first, then determine outcome**
-- If it's a misunderstanding -> explain clearly with evidence
-- If it's a real issue -> proceed to plan mode for fix
-- **Use EnterPlanMode when investigation confirms a genuine bug/flaw**
+- Did I distinguish mechanics, expectation, rationale, and assessment?
+- Is every claim supported, clearly inferred, or marked unknown?
+- Did I treat the user’s hypothesis independently?
+- Did I preserve contradictions and evidence gaps?
+- Is the response proportional to the question?
