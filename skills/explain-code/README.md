@@ -1,22 +1,46 @@
-# Explain Code Skill
+# Explain code skill
 
-## Description
-Analyzes code and explains it from high-level intent down to detailed logic, control flow, data flow, and implementation choices.
+Explains current code behavior, structure, control flow, data flow, and component ownership at the depth requested.
 
-## Usage Examples
+## Example requests
+
 - "Explain how this module works end to end."
-- "Walk me through this function line by line."
-- "What does this service do and how does data flow through it?"
-- "Explain this code path and its edge cases."
+- "Walk through this function line by line."
+- "What happens after this event is published?"
+- "Map the request flow and show where state changes."
+- "Which component owns this data?"
 
-## Origin (Custom Command Conversion)
-This local skill was created by converting a custom slash command from the upstream repository.
-- Original command: `.claude/commands/dev/explain-code.md`
-- Upstream repository: [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)
+## Boundaries
 
-## Credits
-- Original command author: **Quintin Henry**
-- Converted/adapted into local skill format for this repo: `coding-harness`
+- `explain-code` describes current mechanics.
+- `clarify` handles expectation mismatches and historical rationale.
+- `code-review` finds defects and architectural concerns.
+- `refactor-code` changes existing structure.
+- `brainstorm` explores future designs and ownership options.
 
-## License
-- Upstream repository README marks license as **MIT**: [qdhenry/Claude-Command-Suite](https://github.com/qdhenry/Claude-Command-Suite)
+## Structure
+
+- `SKILL.md` contains the compact routing, evidence, exploration, and explanation workflow.
+- `references/exploration-playbook.md` covers multi-file and subsystem tracing.
+- `references/explanation-patterns.md` provides adaptive structures for common flows.
+- `references/language-notes.md` covers language semantics when they affect behavior.
+
+`SKILL.md` is self-sufficient for routine explanations. References are intended for on-demand loading when the host supports it. The instructions do not depend on a named model, provider, tool, command syntax, runtime, or agent harness.
+
+## Design principles
+
+- Trace actual code instead of guessing from names.
+- Scale depth to the question.
+- Separate mechanics, documented contracts, and historical intent.
+- State unresolved gaps.
+- Do not turn explanation into unsolicited review or refactoring.
+- Use diagrams only when they clarify a relationship.
+
+## Origins and license
+
+This vendor-neutral compilation adapts ideas from:
+
+- [Quintin Henry’s Claude Command Suite `explain-code`](https://github.com/qdhenry/Claude-Command-Suite/blob/main/.claude/commands/dev/explain-code.md).
+- [Cursor pstack `how`](https://github.com/cursor/plugins/tree/main/pstack/skills/how).
+
+The first upstream repository identifies itself as MIT in its README badge but does not provide a separate license text or copyright notice. Cursor pstack `how` is MIT-licensed. See `LICENSE` for details and the retained pstack notice.

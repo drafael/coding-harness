@@ -1,6 +1,6 @@
 ---
 name: refactor-code
-description: Simplify and improve code through narrow, behavior-preserving, test-backed changes without speculative architecture or scope growth. Use when the user asks to "refactor", "clean up code", "improve code quality", "restructure", or "simplify this code".
+description: Change existing code through narrow, behavior-preserving, test-backed simplification without speculative architecture or scope growth. Use for requests to refactor, clean up, restructure, or simplify code. Use explain-code instead when the user only wants an explanation of the current structure.
 allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 

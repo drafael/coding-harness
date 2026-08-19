@@ -1,7 +1,7 @@
 # Refactor Code Skill
 
 ## Description
-Guides safe, incremental refactoring with test-backed changes to improve readability, maintainability, and design quality without changing external behavior.
+Guides safe, incremental refactoring with test-backed changes to improve readability and maintainability without changing external behavior. Use `explain-code` instead when no code change is requested.
 
 ## Usage Examples
 - "Refactor this class to reduce complexity without changing behavior."

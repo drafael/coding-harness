@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: Use before any creative work or significant changes. Activates on "brainstorm", "let's brainstorm", "deep analysis", "analyze this feature", "think through", "help me design", "explore options for", or when user asks for thorough analysis of changes, features, or architectural decisions. Guides collaborative dialogue to turn ideas into designs through one-at-a-time questions, approach exploration, and incremental validation.
+description: Use before creative work, significant changes, or requests to design future behavior, architecture, ownership, or alternatives. Activates on "brainstorm", "let's brainstorm", "deep analysis", "analyze this feature", "think through", "help me design", or "explore options for". Use explain-code instead for neutral explanations of how the current code or architecture works.
 ---
 
 # Brainstorm

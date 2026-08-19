@@ -1,194 +1,102 @@
 ---
 name: explain-code
-description: Analyze and explain code functionality with structured breakdowns. Use when the user asks to "explain this code", "how does this work", "what does this do", or "walk me through this code".
-allowed-tools: Read, Grep, Glob
+description: Explain current code behavior, structure, runtime flow, data flow, and component ownership. Use for code walkthroughs, line-by-line explanations, subsystem mental models, and questions about what code does or how it works. Use clarify for expectation mismatches or historical intent, code-review for finding problems, refactor-code for changing structure, and brainstorm for designing new architecture.
+license: See LICENSE
 ---
 
-# Analyze and Explain Code Functionality
+# Explain code
 
-Analyze and explain code functionality.
+Build an accurate mental model of the code at the depth the question requires. Explain current mechanics from evidence in the repository, not from names, conventions, or plausible assumptions.
 
-## Instructions
+## Boundaries
 
-Follow this systematic approach to explain code: **$ARGUMENTS**
+This skill owns neutral explanation:
 
-1. **Code Context Analysis**
-   - Identify the programming language and framework
-   - Understand the broader context and purpose of the code
-   - Identify the file location and its role in the project
-   - Review related imports, dependencies, and configurations
+- what code does;
+- how control and data flow through it;
+- which types and components participate;
+- where responsibilities currently live;
+- which behavior is non-obvious.
 
-2. **High-Level Overview**
-   - Provide a summary of what the code does
-   - Explain the main purpose and functionality
-   - Identify the problem the code is solving
-   - Describe how it fits into the larger system
+Route other intents explicitly:
 
-3. **Code Structure Breakdown**
-   - Break down the code into logical sections
-   - Identify classes, functions, and methods
-   - Explain the overall architecture and design patterns
-   - Map out data flow and control flow
+- Use `clarify` when observed behavior differs from expectations, the user asks whether behavior is wrong, or the question concerns historical design rationale.
+- Use `code-review` when the user asks for defects, risks, architectural criticism, security findings, or improvement recommendations.
+- Use `refactor-code` when the user wants code changed while preserving behavior.
+- Use `brainstorm` when the user wants new architecture, alternative ownership, or future design options.
 
-4. **Line-by-Line Analysis**
-   - Explain complex or non-obvious lines of code
-   - Describe variable declarations and their purposes
-   - Explain function calls and their parameters
-   - Clarify conditional logic and loops
+Do not turn an explanation into an unsolicited review or redesign. Mention a likely defect only when it is necessary to explain the observed flow, and label it as unverified unless the evidence establishes it.
 
-5. **Algorithm and Logic Explanation**
-   - Describe the algorithm or approach being used
-   - Explain the logic behind complex calculations
-   - Break down nested conditions and loops
-   - Clarify recursive or asynchronous operations
+## Evidence rules
 
-6. **Data Structures and Types**
-   - Explain data types and structures being used
-   - Describe how data is transformed or processed
-   - Explain object relationships and hierarchies
-   - Clarify input and output formats
+Read the actual implementation and relevant context. Never infer HTTPS, validation, sanitization, authorization, indexes, pooling, caching, complexity, error recovery, or other properties merely because they would be conventional.
 
-7. **Framework and Library Usage**
-   - Explain framework-specific patterns and conventions
-   - Describe library functions and their purposes
-   - Explain API calls and their expected responses
-   - Clarify configuration and setup code
+Distinguish:
 
-8. **Error Handling and Edge Cases**
-   - Explain error handling mechanisms
-   - Describe exception handling and recovery
-   - Identify edge cases being handled
-   - Explain validation and defensive programming
+- **Observed mechanics:** established by code, tests, configuration, or runtime evidence.
+- **Documented contract:** established by public interfaces, specifications, or documentation.
+- **Historical intent:** requires explicit rationale evidence and belongs to `clarify`.
+- **Unknown:** a connection or behavior that available evidence does not establish.
 
-9. **Performance Considerations**
-   - Identify performance-critical sections
-   - Explain optimization techniques being used
-   - Describe complexity and scalability implications
-   - Point out potential bottlenecks or inefficiencies
+Cite relevant paths, symbols, and line ranges. State gaps rather than filling them with a plausible story.
 
-10. **Security Implications**
-    - Identify security-related code sections
-    - Explain authentication and authorization logic
-    - Describe input validation and sanitization
-    - Point out potential security vulnerabilities
+## Load references only when needed
 
-11. **Testing and Debugging**
-    - Explain how the code can be tested
-    - Identify debugging points and logging
-    - Describe mock data or test scenarios
-    - Explain test helpers and utilities
+Routine function and module explanations should use this file alone.
 
-12. **Dependencies and Integrations**
-    - Explain external service integrations
-    - Describe database operations and queries
-    - Explain API interactions and protocols
-    - Clarify third-party library usage
+- Read [references/exploration-playbook.md](references/exploration-playbook.md) for multi-file features, subsystem architecture, cross-component flows, or unclear entry points.
+- Read [references/explanation-patterns.md](references/explanation-patterns.md) when choosing a structure for algorithms, requests, events, asynchronous work, database operations, or diagrams.
+- Read [references/language-notes.md](references/language-notes.md) only when language semantics are central to the explanation.
 
-**Explanation Format Examples:**
+## Assess scope and audience
 
-**For Complex Algorithms:**
-```
-This function implements a depth-first search algorithm:
+Determine what the user wants to understand and how much context they need.
 
-1. Line 1-3: Initialize a stack with the starting node and a visited set
-2. Line 4-8: Main loop - continue until stack is empty
-3. Line 9-11: Pop a node and check if it's the target
-4. Line 12-15: Add unvisited neighbors to the stack
-5. Line 16: Return null if target not found
+- **Narrow:** a line, expression, function, or small class. Explain directly.
+- **Module:** several related functions or one component. Trace its entry points, state, dependencies, and outputs.
+- **Subsystem:** multiple files, packages, services, or processes. Load the exploration playbook and build a component and flow map.
 
-Time Complexity: O(V + E) where V is vertices and E is edges
-Space Complexity: O(V) for the visited set and stack
-```
+Infer the audience from the request and conversation. Default to a technically competent reader who is unfamiliar with this part of the codebase. Explain language basics only when they are relevant or requested.
 
-**For API Integration Code:**
-```
-This code handles user authentication with a third-party service:
+If the target is ambiguous, use available context when one interpretation is clearly most likely. Ask one focused question when choosing the wrong target would produce a materially different explanation.
 
-1. Extract credentials from request headers
-2. Validate credential format and required fields
-3. Make API call to authentication service
-4. Handle response and extract user data
-5. Create session token and set cookies
-6. Return user profile or error response
+## Explore
 
-Error Handling: Catches network errors, invalid credentials, and service unavailability
-Security: Uses HTTPS, validates inputs, and sanitizes responses
-```
+Use the smallest evidence set that can answer the question:
 
-**For Database Operations:**
-```
-This function performs a complex database query with joins:
+1. Locate the target and its role in the project.
+2. Find the entry point or caller that triggers it.
+3. Follow calls and data transformations through the requested boundary.
+4. Read central types, interfaces, configuration, and dependencies.
+5. Identify inputs, outputs, state changes, side effects, and error paths.
+6. Check tests or call sites when they clarify contracts or edge cases.
+7. Record anything unresolved, surprising, or easy to misunderstand.
 
-1. Build base query with primary table
-2. Add LEFT JOIN for related user data
-3. Apply WHERE conditions for filtering
-4. Add ORDER BY for consistent sorting
-5. Implement pagination with LIMIT/OFFSET
-6. Execute query and handle potential errors
-7. Transform raw results into domain objects
+For complex subsystems, divide exploration into independent slices only when that reduces uncertainty. Parallel exploration is optional when the host supports it; never require named models, tools, or subagent types.
 
-Performance Notes: Uses indexes on filtered columns, implements connection pooling
-```
+## Explain
 
-13. **Common Patterns and Idioms**
-    - Identify language-specific patterns and idioms
-    - Explain design patterns being implemented
-    - Describe architectural patterns in use
-    - Clarify naming conventions and code style
+Adapt the response rather than completing a fixed checklist. A subsystem explanation commonly includes:
 
-14. **Potential Improvements**
-    - Suggest code improvements and optimizations
-    - Identify possible refactoring opportunities
-    - Point out maintainability concerns
-    - Recommend best practices and standards
+- **Overview:** what the component does and where it fits.
+- **Key concepts:** only the types or abstractions needed to follow the flow.
+- **How it works:** the trigger, sequence, decisions, transformations, boundaries, and result.
+- **Where things live:** a short map of important files and symbols.
+- **Gotchas and gaps:** non-obvious behavior and anything the evidence did not resolve.
 
-15. **Related Code and Context**
-    - Reference related functions and classes
-    - Explain how this code interacts with other components
-    - Describe the calling context and usage patterns
-    - Point to relevant documentation and resources
+For a narrow request, skip unnecessary sections. If the user asks for line-by-line analysis, group obvious lines and spend detail on non-obvious behavior. For an algorithm, explain its invariant and steps before discussing complexity. State complexity only when it can be derived from the implementation and relevant data structures.
 
-16. **Debugging and Troubleshooting**
-    - Explain how to debug issues in this code
-    - Identify common failure points
-    - Describe logging and monitoring approaches
-    - Suggest testing strategies
+Use concrete language: “`OrderService.submit()` writes the record, then publishes `OrderCreated`” is better than “the service delegates processing.” Include short code excerpts only when they clarify a specific point.
 
-**Language-Specific Considerations:**
+Use a diagram only when it makes a multi-stage or cross-component relationship easier to understand. Choose a portable text or Mermaid representation supported by the environment. Skip decorative diagrams and do not duplicate clear prose.
 
-**JavaScript/TypeScript:**
-- Explain async/await and Promise handling
-- Describe closure and scope behavior
-- Clarify this binding and arrow functions
-- Explain event handling and callbacks
+## Final check
 
-**Python:**
-- Explain list comprehensions and generators
-- Describe decorator usage and purpose
-- Clarify context managers and with statements
-- Explain class inheritance and method resolution
+Before answering, verify:
 
-**Java:**
-- Explain generics and type parameters
-- Describe annotation usage and processing
-- Clarify stream operations and lambda expressions
-- Explain exception hierarchy and handling
-
-**Go:**
-- Explain goroutines and channel usage
-- Describe interface implementation
-- Clarify error handling patterns
-- Explain package structure and imports
-
-**Rust:**
-- Explain ownership and borrowing
-- Describe lifetime annotations
-- Clarify pattern matching and Option/Result types
-- Explain trait implementations
-
-Remember to:
-- Use clear, non-technical language when possible
-- Provide examples and analogies for complex concepts
-- Structure explanations logically from high-level to detailed
-- Include visual diagrams or flowcharts when helpful
-- Tailor the explanation level to the intended audience
+- Did I answer the requested scope and audience level?
+- Did I trace actual code rather than infer from names?
+- Are mechanics separate from contract and historical intent?
+- Did I cite the important files and symbols?
+- Did I disclose unresolved gaps?
+- Did I avoid unsolicited review, refactoring, and speculative claims?

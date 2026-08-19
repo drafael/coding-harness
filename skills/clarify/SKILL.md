@@ -1,6 +1,6 @@
 ---
 name: clarify
-description: Investigate and explain expected-versus-actual behavior, unclear system behavior, and design rationale. Use when someone asks why a system behaves or was designed a certain way, or suspects a configuration, documentation, or implementation defect. Do not use when the user is rejecting the assistant's current answer or approach; use wrong instead.
+description: Investigate expected-versus-actual behavior, suspected defects, and historical design rationale. Use when someone asks why observed behavior differs from expectations, whether behavior is wrong, or why a design decision exists. Use explain-code for neutral questions about what code does or how it works, and wrong when the user rejects the assistant's current approach.
 license: See LICENSE
 ---
 
@@ -33,12 +33,12 @@ Routine behavior mismatches should use this file alone.
 Classify the request before investigating:
 
 1. **Current behavior mismatch:** expected X, observed Y.
-2. **Mechanics question:** asks what or how the system behaves.
+2. **Mechanics needed for diagnosis:** current flow must be established to resolve a mismatch.
 3. **Historical rationale:** asks why a design, constraint, threshold, or workaround exists.
 4. **Potential defect:** observed behavior appears to violate a contract or reasonable expectation.
 5. **Mixed:** requires separate answers about current mechanics and historical motivation.
 
-Route explicit rejection of the assistant's previous answer, plan, implementation, or problem-solving direction to `wrong`. Keep reports that the software, configuration, or documentation is wrong here. In short: “your approach is wrong” requires a reset; “the system behaves incorrectly” requires investigation.
+Route neutral walkthroughs of what code does or how it works to `explain-code`. Route explicit rejection of the assistant's previous answer, plan, implementation, or problem-solving direction to `wrong`. Keep reports that the software, configuration, or documentation is wrong here. In short: “how does this work?” needs explanation, “why does this behave incorrectly?” needs clarification, and “your approach is wrong” needs a reset.
 
 Use conversation context when the target is clear. Ask one focused question only when investigating the wrong target would waste meaningful effort or risk changing the wrong thing.
 

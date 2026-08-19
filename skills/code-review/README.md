@@ -1,7 +1,7 @@
 # Code Review Skill
 
 ## Description
-Performs a structured code quality review across architecture, security, performance, testing, and documentation.
+Finds actionable defects and risks across correctness, architecture, security, performance, testing, and documentation. Use `explain-code` instead for explanation-only requests.
 
 ## Usage Examples
 - "Review this codebase for quality and maintainability."

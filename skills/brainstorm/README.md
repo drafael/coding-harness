@@ -1,7 +1,7 @@
 # Brainstorm Skill
 
 ## Description
-Collaborative design skill used before implementation. It helps turn ideas into practical designs by clarifying goals, comparing alternatives, and validating a chosen direction step by step.
+Collaborative design skill used before implementation. It turns ideas into practical designs by clarifying goals, comparing alternatives, and validating a chosen direction step by step. Use `explain-code` for neutral descriptions of the current architecture.
 
 ## Usage Examples
 - "Let’s brainstorm a caching strategy for our API."
