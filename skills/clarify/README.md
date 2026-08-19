@@ -2,7 +2,7 @@
 
 Investigates mismatches between expected and actual behavior, explains current mechanics, and distinguishes intended behavior from configuration, documentation, implementation, and design problems.
 
-It can also investigate historical design rationale when the question asks why a decision, threshold, workaround, or constraint exists.
+It can also investigate historical design rationale when the question asks why a decision, threshold, workaround, or constraint exists. If the user is rejecting the assistant’s current answer or approach rather than questioning the system, use the separate `wrong` skill.
 
 ## Example requests
 

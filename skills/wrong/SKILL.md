@@ -1,12 +1,21 @@
 ---
 name: wrong
-description: Reset and re-evaluate when current approach isn't working. Use when user says "wrong", "this isn't working", "wrong approach", "start over", "try again", "bad direction", or when the current solution path has hit a dead end and needs a fresh perspective.
+description: Reset after the user rejects the assistant's current answer, plan, implementation, or problem-solving direction. Use for "your approach is wrong", "start over", "try a different approach", or when the attempted solution has demonstrably failed. Do not use for ordinary reports that a system behaves incorrectly or differs from expectations; use clarify instead.
 allowed-tools: Read, Grep, Glob, EnterPlanMode, AskUserQuestion
 ---
 
 # Wrong — Reset and Re-evaluate
 
-The current approach isn't working as expected. Step back and re-examine the problem from the beginning.
+The user has rejected the current approach or the attempted solution has failed. Stop extending or defending it. Re-examine the problem from the beginning.
+
+## Boundary with `clarify`
+
+Use `wrong` when the object of rejection is the assistant's work or the active solution path. Use `clarify` when the object under investigation is system behavior, configuration, documentation, or historical design intent.
+
+- “Your fix is wrong; start over” → `wrong`
+- “This endpoint returns the wrong status; why?” → `clarify`
+- “That explanation does not match the code” → `wrong`, then re-investigate
+- “The documentation does not match the code” → `clarify`
 
 ## Workflow
 
