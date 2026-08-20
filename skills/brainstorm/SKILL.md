@@ -28,22 +28,7 @@ Once the problem is understood:
 2. **When one approach is clearly supported**, explain why alternatives do not fit instead of inventing options
 3. **Lead with the recommendation** and present it conversationally, not as a formal document
 
-Example format:
-```
-I see three approaches:
-
-**Option A: [name]** (recommended)
-- how it works: ...
-- pros: ...
-- cons: ...
-
-**Option B: [name]**
-- how it works: ...
-- pros: ...
-- cons: ...
-
-Which direction appeals to you?
-```
+When comparing approaches, use Markdown headings such as `#### Option A: Name (recommended)` and `#### Option B: Name`, followed by bullets for how each works and its trade-offs. Do not wrap the response in a code fence or put option titles between paired emphasis markers such as `**`; unmatched markers render as literal text.
 
 ### Phase 3: Present Design
 
