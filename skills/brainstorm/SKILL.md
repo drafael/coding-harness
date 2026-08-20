@@ -1,6 +1,7 @@
 ---
 name: brainstorm
-description: Use before creative work, significant changes, or requests to design future behavior, architecture, ownership, or alternatives. Activates on "brainstorm", "let's brainstorm", "deep analysis", "analyze this feature", "think through", "help me design", or "explore options for". Use explain-code instead for neutral explanations of how the current code or architecture works.
+description: Design future behavior, architecture, ownership, features, or substantive alternatives through collaborative exploration before implementation. Use when the user explicitly asks to brainstorm, design, explore options, or think through a future change, or when another active skill identifies consequential design decisions that still need exploration. Use explain-code for neutral current-code walkthroughs and technical-writing, when available, to structure an agreed design.
+license: See LICENSE
 ---
 
 # Brainstorm
@@ -23,9 +24,9 @@ Do not overwhelm with multiple questions. One question per message. If a topic n
 
 Once the problem is understood:
 
-1. **Propose 2-3 different approaches** with trade-offs
-2. **Lead with recommended option** and explain reasoning
-3. **Present conversationally** - not a formal document yet
+1. **Compare 2-3 approaches when several are credible** and explain their trade-offs
+2. **When one approach is clearly supported**, explain why alternatives do not fit instead of inventing options
+3. **Lead with the recommendation** and present it conversationally, not as a formal document
 
 Example format:
 ```
@@ -50,23 +51,25 @@ After approach is selected:
 
 1. **Break design into sections** of 200-300 words each
 2. **Ask after each section** whether it looks right
-3. **Cover**: architecture, components, data flow, error handling, testing
+3. **Cover relevant concerns** - for example, architecture, components, data flow, failure handling, and validation
 4. **Be ready to backtrack** if something doesn't make sense
 
 Do not present entire design at once. Incremental validation catches misunderstandings early.
 
-### Phase 4: Next Steps
+### Phase 4: Next steps
 
-Write plan to file `YYYY-MM-DD-<topic>.md` with implementation steps
+Create an implementation plan only when the user requested one or approves it after the design. When the host can write files and the user wants an artifact, use `YYYY-MM-DD-<topic>.md`; otherwise return the plan in the response.
+
+When `technical-writing` is installed and loadable, apply it to a substantial plan without reopening approved design decisions.
 
 ## Key Principles
 
 - **One question at a time** - do not overwhelm with multiple questions
 - **Multiple choice preferred** - easier to answer than open-ended when possible
 - **YAGNI ruthlessly** - remove unnecessary features from all designs, keep scope minimal
-- **Explore alternatives** - always propose 2-3 approaches before settling
+- **Explore real alternatives** - compare credible options without inventing choices to fill a quota
 - **Incremental validation** - present design in sections, validate each
 - **Be flexible** - go back and clarify when something doesn't make sense
 - **Lead with recommendation** - have an opinion, explain why, but let user decide
-- **Duplication vs abstraction** - when code repeats, ask user: prefer duplication (simpler, no coupling) or abstraction (DRY but adds complexity)? explain trade-offs before deciding
+- **Duplication vs abstraction** - discuss the trade-off only when both options are credible; prefer the simplest option that meets current needs
 

@@ -1,6 +1,6 @@
 ---
 name: explain-code
-description: Explain current code behavior, structure, runtime flow, data flow, and component ownership. Use for code walkthroughs, line-by-line explanations, subsystem mental models, and questions about what code does or how it works. Use clarify for expectation mismatches or historical intent, code-review for finding problems, refactor-code for changing structure, and brainstorm for designing new architecture.
+description: Explain current code behavior, structure, runtime flow, data flow, and component ownership. Use for conversational walkthroughs, line-by-line explanations, subsystem mental models, and questions about what code does or how it works. Use technical-writing, when available, for substantial standalone documentation; explain-code supplies its mechanics and evidence. Use clarify for expectation mismatches or historical intent, code-review for finding problems, refactor-code for changing structure, and brainstorm for new architecture.
 license: See LICENSE
 ---
 
@@ -24,6 +24,7 @@ Route other intents explicitly:
 - Use `code-review` when the user asks for defects, risks, architectural criticism, security findings, or improvement recommendations.
 - Use `refactor-code` when the user wants code changed while preserving behavior.
 - Use `brainstorm` when the user wants new architecture, alternative ownership, or future design options.
+- Use `technical-writing`, when available, when the deliverable is a substantial standalone document such as an architecture guide. Use this skill to establish the document's current-code mechanics and evidence.
 
 Do not turn an explanation into an unsolicited review or redesign. Mention a likely defect only when it is necessary to explain the observed flow, and label it as unverified unless the evidence establishes it.
 

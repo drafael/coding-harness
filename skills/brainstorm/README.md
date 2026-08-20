@@ -1,13 +1,15 @@
 # Brainstorm Skill
 
 ## Description
-Collaborative design skill used before implementation. It turns ideas into practical designs by clarifying goals, comparing alternatives, and validating a chosen direction step by step. Use `explain-code` for neutral descriptions of the current architecture.
+Collaborative design skill used before implementation. It turns ideas into practical designs by clarifying goals, comparing alternatives, and validating a chosen direction step by step. It can also accept a handoff from another active skill when consequential design decisions still need exploration. Use `explain-code` for neutral descriptions of current architecture and `technical-writing`, when available, to structure an agreed design.
 
 ## Usage Examples
 - "Let’s brainstorm a caching strategy for our API."
 - "Help me design a new notifications module."
 - "Explore options for multi-tenant auth in this project."
 - "Think through this feature architecture before we implement."
+
+The skill writes an implementation-plan file only when the user requests an artifact and the host supports file editing. Otherwise, it returns an approved plan in the response.
 
 ## Origin
 - Original upstream skill: `plugins/brainstorm/skills/brainstorm/SKILL.md`
@@ -18,4 +20,5 @@ Collaborative design skill used before implementation. It turns ideas into pract
 - Local adaptation/usage in this repo: `coding-harness`
 
 ## License
-- Upstream license (MIT): [umputun/cc-thingz/LICENSE](https://github.com/umputun/cc-thingz/blob/master/LICENSE)
+
+The upstream skill is distributed under the MIT License. See `LICENSE` for the retained notice.

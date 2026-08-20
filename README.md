@@ -40,13 +40,13 @@ Activate a skill with the host’s command syntax (Pi uses `/skill:<name>`; othe
 
 Activate the [`brainstorm`](skills/brainstorm) skill:
 ```text
-/brainstorm """User story description"""
+let's brainstorm this user story: """User story description"""
 ```
 
-After brainstorming use the [`java-coder`](skills/java-coder) skill:
+If brainstorming produced an implementation plan, use the project-appropriate coding skill, such as [`java-coder`](skills/java-coder) or [`typescript-coder`](skills/typescript-coder):
 ```text
-implement the plan YYYY-MM-DD-user-story-implementation-plan.md 
-  using java coder skill and provide human verifiable proofs and/or artifacts
+implement the plan YYYY-MM-DD-user-story-implementation-plan.md
+  using the applicable project coding skill and provide human-verifiable evidence
 ```
 
 ### Code review
@@ -80,7 +80,7 @@ add test and branch coverage for UserController
 
 Activate the [`debug-error`](skills/debug-error) and/or [`clarify`](skills/clarify) skills:
 ```text
-/debug-error """stack trace or errors in logs"""
+debug this error: """stack trace or errors in logs"""
 ```
 ```text
 clarify why the response status is 500 instead of 201
@@ -93,6 +93,16 @@ Activate the [`refactor-code`](skills/refactor-code) and [`java-coder`](skills/j
 refactor code in the user login flow, following guidelines from the java-coder skill
 ```
 
+### Technical writing
+
+Use the [`technical-writing`](skills/technical-writing) skill for substantial technical documents and design artifacts:
+
+```text
+review this deployment runbook for incorrect assumptions, missing prerequisites, and unsafe recovery steps
+```
+
+Use [`unslop`](skills/unslop) alone for small style-only edits.
+
 ### Documenting
 
 Use the [`pretty-mermaid`](skills/pretty-mermaid) skill to generate diagrams:
@@ -100,5 +110,5 @@ Use the [`pretty-mermaid`](skills/pretty-mermaid) skill to generate diagrams:
 create a sequence diagram in SVG format with white background of the endpoint /api/v1/users
 ```
 ```text
-create a ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users
+create an ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users
 ```

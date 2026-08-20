@@ -1,12 +1,14 @@
 ---
 name: unslop
-description: Edit or review prose to remove formulaic AI-writing patterns while preserving facts, meaning, and the author's existing voice. Use for documentation, articles, reports, messages, release notes, and other prose. Do not use for code-only tasks or text that must remain verbatim.
+description: Edit or review prose to remove formulaic AI-writing patterns while preserving facts, meaning, and the author's existing voice. Use for small style-only edits, articles, reports, messages, release notes, and other prose, or as the final pass after substantial technical writing. When technical-writing is available, use it first for substantial technical documentation and design artifacts. Do not use for code-only tasks or text that must remain verbatim.
 license: See LICENSE
 ---
 
 # Unslop
 
 Make prose clearer, more specific, and less formulaic without changing who wrote it or what it claims.
+
+When `technical-writing` is installed and loadable, use it first for substantial technical documentation and design artifacts, then return here for the final prose pass. Without it, keep this skill limited to prose-level editing; do not infer missing technical structure or facts.
 
 ## Core contract
 

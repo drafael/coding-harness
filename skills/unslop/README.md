@@ -4,7 +4,7 @@ Edits prose to remove formulaic AI-writing patterns while preserving facts, mean
 
 ## Activation
 
-Use for documentation, articles, reports, messages, release notes, and other prose-writing or editing tasks. It does not apply indiscriminately to code, exact quotations, structured data, or text that must remain verbatim.
+Use for small style-only edits, articles, reports, messages, release notes, and other prose, or as the final pass after substantial writing. When `technical-writing` is available, use it first for substantial technical documentation and design artifacts. Without that skill, keep `unslop` limited to prose-level editing. It does not apply indiscriminately to code, exact quotations, structured data, or text that must remain verbatim.
 
 Example requests:
 
