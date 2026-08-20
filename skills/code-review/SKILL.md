@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Find actionable defects and risks through a focused, evidence-based review of correctness, regressions, security, performance, architecture, and testing. Use for requests to review, audit, critique, or identify improvements. Use explain-code instead when the user only wants to understand current behavior or architecture.
+description: Find actionable defects and risks through a focused, evidence-based review of correctness, regressions, security, performance, architecture, and testing. Use for requests to review, audit, critique, or identify improvements. Use blast-radius, when explicitly invoked and available, for cross-boundary consequence tracing and executable safety proof of a concrete change. Use explain-code when the user only wants to understand current behavior or architecture.
 ---
 
 # Evidence-Based Code Review
@@ -11,6 +11,7 @@ Review the requested code or diff in repository context. Load applicable languag
 
 - Review the user-specified target. For uncommitted work, inspect the complete diff and relevant call paths rather than auditing unrelated code.
 - Distinguish regressions introduced by the change from pre-existing issues.
+- Use `blast-radius`, when explicitly invoked and available, when the primary task is to trace what a concrete change could break beyond the obvious diff and prove its decision-critical safety assumptions.
 - Do not broaden a focused review into an architecture, dependency, formatting, or security program without approval.
 
 ## Finding Standard

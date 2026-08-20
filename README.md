@@ -56,6 +56,16 @@ Activate the [`code-review`](skills/code-review) skill:
 code review uncommitted changes
 ```
 
+### Blast-radius analysis
+
+The [`blast-radius`](skills/blast-radius) skill is manual-only. In Pi, invoke it with a bounded local comparison:
+
+```text
+/skill:blast-radius Analyze the blast radius of HEAD~1..HEAD.
+```
+
+It traces credible effects beyond the obvious diff and seeks executable proof for decision-critical safety assumptions.
+
 ### Session reflection
 
 The [`reflect`](skills/reflect) skill is manual-only. In Pi, invoke it after a substantial session with:
