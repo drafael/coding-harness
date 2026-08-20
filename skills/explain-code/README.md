@@ -17,6 +17,7 @@ Explains current code behavior, structure, control flow, data flow, and componen
 - `code-review` finds defects and architectural concerns.
 - `refactor-code` changes existing structure.
 - `brainstorm` explores future designs and ownership options.
+- `teach`, when explicitly invoked and available, owns progressive learning conversations; `explain-code` supplies their current-code mechanics and evidence.
 - `technical-writing`, when available, owns substantial standalone documents; `explain-code` supplies their current-code mechanics and evidence.
 
 ## Structure

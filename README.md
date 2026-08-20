@@ -66,6 +66,16 @@ The [`reflect`](skills/reflect) skill is manual-only. In Pi, invoke it after a s
 
 It proposes evidence-backed improvements to existing skills and waits for individual approval before editing.
 
+### Learn a codebase
+
+The [`teach`](skills/teach) skill is manual-only. In Pi, invoke it with the learning request:
+
+```text
+/skill:teach Teach me how request retries work in this service.
+```
+
+It explains repository-backed code progressively without modifying the project.
+
 ### Write tests
 
 Activate the [`write-tests`](skills/write-tests) and [`test-coverage`](skills/test-coverage) skills:
