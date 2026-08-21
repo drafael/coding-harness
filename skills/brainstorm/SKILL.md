@@ -28,7 +28,7 @@ Once the problem is understood:
 2. **When one approach is clearly supported**, explain why alternatives do not fit instead of inventing options
 3. **Lead with the recommendation** and present it conversationally, not as a formal document
 
-When comparing approaches, use Markdown headings such as `#### Option A: Name (recommended)` and `#### Option B: Name`, followed by bullets for how each works and its trade-offs. Do not wrap the response in a code fence or put option titles between paired emphasis markers such as `**`; unmatched markers render as literal text.
+When comparing approaches, put each option label on its own plain-text line in the form `Option A: Name (recommended)` or `Option B: Name`, followed by bullets for how it works and its trade-offs. Do not prefix option labels with Markdown heading markers, bullets, numbering, backticks, or emphasis markers, and do not wrap the response in a code fence. The labels must remain readable without Markdown rendering.
 
 ### Phase 3: Present Design
 
