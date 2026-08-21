@@ -9,6 +9,12 @@ Use a modern terminal emulator, such as:
 - [Warp](https://warp.dev/) (macOS) - AI-assisted terminal with command blocks, history, and collaboration features.
 - PowerShell v6+ (Windows) - Cross-platform shell and terminal experience commonly available on Windows.
 
+## Agentic terminals
+
+- [agterm](https://agterm.com/)
+- [Kero](https://kero.sh/)
+- [Herdr](https://herdr.dev/)
+
 ## Configuration examples
 
 These examples are based on the Ghostty, Kitty, and WezTerm templates from the public [`drafael/dotfiles`](https://github.com/drafael/dotfiles) repository. They focus on settings that work well with coding agents: large scrollback, clipboard access, shell integration, split resizing, and `Shift+Enter` for inserting a newline.
@@ -55,7 +61,6 @@ keybind = cmd+ctrl+j=resize_split:down,20
 shell-integration = detect
 shell-integration-features = no-cursor,sudo,title
 term = xterm-256color
-scrollback-limit = 100000
 ```
 
 ### Kitty
@@ -79,7 +84,6 @@ clipboard_control     write-clipboard read-clipboard write-primary read-primary
 
 shell_integration enabled no-cursor
 term              xterm-256color
-scrollback_lines  100000
 
 map shift+enter send_text all \n
 enabled_layouts splits:split_axis=horizontal
