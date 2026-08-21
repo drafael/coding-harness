@@ -27,9 +27,9 @@ Before installing an agent, review the [prerequisites](docs/prerequisites.md) fo
 
 To use `coding-harness/skills` in your projects, copy or symlink the `skills` folder to:
 
-- For [Claude Code](https://code.claude.com/docs/en/skills#extend-claude-with-skills): 
+- For [Claude Code](https://code.claude.com/docs/en/skills#extend-claude-with-skills):
   - `project-folder/.claude/skills` or `~/.claude/skills`
-- For [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#skills), [OpenCode](https://opencode.ai/docs/skills#place-files), [Codex](https://developers.openai.com/codex/skills#where-to-save-skills), [Copilot](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills): 
+- For [Pi Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#skills), [OpenCode](https://opencode.ai/docs/skills#place-files), [Codex](https://developers.openai.com/codex/skills#where-to-save-skills), [Copilot](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills):
   - `project-folder/.agents/skills` or `~/.agents/skills`
 
 ## Usage and workflow
@@ -48,6 +48,26 @@ If brainstorming produced an implementation plan, use the project-appropriate co
 implement the plan YYYY-MM-DD-user-story-implementation-plan.md
   using the applicable project coding skill and provide human-verifiable evidence
 ```
+
+### Architecture design
+
+The [`architect`](skills/architect) skill is manual-only. Use it after behavior and important constraints are understood to produce a caller-first, implementation-ready structural design. In Pi:
+
+```text
+/skill:architect Architect the types, signatures, and module boundaries for this approved design.
+```
+
+It returns a design by default. Implementation requires an explicit request or later approval.
+
+### Candidate arena
+
+The [`arena`](skills/arena) skill is manual-only for direct use. Invoke it when several independent attempts at the same bounded artifact would improve the decision. In Pi:
+
+```text
+/skill:arena Produce three independent designs for this parser contract and synthesize the strongest result.
+```
+
+It returns one coherent synthesis and the applicable verification result rather than a collection of candidate fragments.
 
 ### Code review
 

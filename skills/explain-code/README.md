@@ -16,7 +16,8 @@ Explains current code behavior, structure, control flow, data flow, and componen
 - `clarify` handles expectation mismatches and historical rationale.
 - `code-review` finds defects and architectural concerns.
 - `refactor-code` changes existing structure.
-- `brainstorm` explores future designs and ownership options.
+- `brainstorm` explores unresolved future behavior, ownership, and substantive alternatives.
+- `architect`, when explicitly invoked and available, turns an understood problem into an implementation-ready structural design; `explain-code` supplies its current-code mechanics and evidence.
 - `teach`, when explicitly invoked and available, owns progressive learning conversations; `explain-code` supplies their current-code mechanics and evidence.
 - `technical-writing`, when available, owns substantial standalone documents; `explain-code` supplies their current-code mechanics and evidence.
 

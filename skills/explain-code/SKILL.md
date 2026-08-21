@@ -1,6 +1,6 @@
 ---
 name: explain-code
-description: Explain current code behavior, structure, runtime flow, data flow, and component ownership. Use for ordinary walkthroughs, line-by-line explanations, subsystem mental models, and questions about what code does or how it works. Use teach, when explicitly invoked and available, for progressive learning; technical-writing, when available, for substantial standalone documentation; clarify for expectation mismatches or historical intent; code-review for finding problems; refactor-code for changing structure; and brainstorm for new architecture.
+description: Explain current code behavior, structure, runtime flow, data flow, and component ownership. Use for ordinary walkthroughs, line-by-line explanations, subsystem mental models, and questions about what code does or how it works. Use teach, when explicitly invoked and available, for progressive learning; technical-writing, when available, for substantial standalone documentation; clarify for expectation mismatches or historical intent; code-review for finding problems; refactor-code for structural changes; brainstorm for unresolved future design; and architect, when explicitly invoked and available, for implementation-ready structural design.
 license: See LICENSE
 ---
 
@@ -23,7 +23,8 @@ Route other intents explicitly:
 - Use `clarify` when observed behavior differs from expectations, the user asks whether behavior is wrong, or the question concerns historical design rationale.
 - Use `code-review` when the user asks for defects, risks, architectural criticism, security findings, or improvement recommendations.
 - Use `refactor-code` when the user wants code changed while preserving behavior.
-- Use `brainstorm` when the user wants new architecture, alternative ownership, or future design options.
+- Use `brainstorm` when the user wants to explore unresolved future behavior, alternative ownership, or substantive design options.
+- Use `architect`, when explicitly invoked and available, when an understood problem needs caller-first types, signatures, data structures, and module boundaries. Use this skill to supply its current-code mechanics and evidence.
 - Use `teach`, when explicitly invoked and available, for a progressive learning conversation. Use this skill to supply its current-code mechanics and evidence.
 - Use `technical-writing`, when available, when the deliverable is a substantial standalone document such as an architecture guide. Use this skill to establish the document's current-code mechanics and evidence.
 

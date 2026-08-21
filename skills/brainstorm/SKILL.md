@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: Design future behavior, architecture, ownership, features, or substantive alternatives through collaborative exploration before implementation. Use when the user explicitly asks to brainstorm, design, explore options, or think through a future change, or when another active skill identifies consequential design decisions that still need exploration. Use explain-code for neutral current-code walkthroughs and technical-writing, when available, to structure an agreed design.
+description: Explore unresolved future behavior, architecture, ownership, features, or substantive alternatives through collaborative dialogue before implementation. Use when the user explicitly asks to brainstorm, explore options, or think through a future change, or when another active skill identifies consequential decisions that still need exploration. Use explain-code for neutral current-code walkthroughs, architect when explicitly invoked for implementation-ready structural design, and technical-writing when available to structure an agreed design.
 license: See LICENSE
 ---
 
@@ -44,6 +44,8 @@ Do not present entire design at once. Incremental validation catches misundersta
 ### Phase 4: Next steps
 
 Create an implementation plan only when the user requested one or approves it after the design. When the host can write files and the user wants an artifact, use `YYYY-MM-DD-<topic>.md`; otherwise return the plan in the response.
+
+When `architect` is installed and the user explicitly invokes it, hand off the approved problem and constraints for caller-first types, signatures, data structures, and module boundaries. Do not make this handoff mandatory or reopen approved choices.
 
 When `technical-writing` is installed and loadable, apply it to a substantial plan without reopening approved design decisions.
 
