@@ -5,6 +5,7 @@
 ### Model uncertainty honestly
 
 - Use `unknown` for external or unproven values and narrow it with control flow, predicates, or runtime schemas.
+- Prefer compiler-supported narrowing through discriminants, `in`, `typeof`, and `instanceof`. A user-defined type guard must prove every part of its claim that the input type does not already guarantee; never use a guard as a named unchecked cast.
 - Do not use `any` as a convenient escape hatch. When an untyped dependency forces it, contain the unsafe value in one adapter and return a safe type.
 - Avoid double assertions such as `value as unknown as Target`; they usually bypass a real contract mismatch.
 - Prefer `@ts-expect-error` with a short reason over `@ts-ignore` when intentionally testing or isolating an expected compiler failure. Remove it when no longer necessary.
@@ -16,7 +17,10 @@
 - Prefer unions or `as const` maps for application-domain constants. Preserve enums when an established public API, generated contract, or framework requires them.
 - Prefer `readonly` contracts and immutable updates where they clarify ownership. Do not clone large structures reflexively or ban local mutation inside an owned implementation.
 - Prefer `satisfies` when checking an expression against a contract while retaining its useful inferred type.
+- Derive local views from a canonical schema, generated type, or stable public contract with `typeof`, `Pick`, or `Omit` when that avoids duplicated truth. Do not use `Parameters` or `ReturnType` when it would couple a public contract to an implementation detail.
 - Use branded/opaque types only when confusing structurally identical values has caused or is likely to cause real defects.
+- Model cardinality and structural invariants in types when doing so removes repeated checks, assertions, or "impossible" throws. A proven non-empty collection can use `[T, ...T[]]`; fixed-size groups can use tuple collections.
+- Keep the simpler type when its operations remain total. When emptiness is valid, return `T | undefined` rather than strengthening the input or hiding the case with an assertion.
 
 ### Functions and classes
 
