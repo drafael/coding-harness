@@ -145,10 +145,15 @@ Use [`unslop`](skills/unslop) alone for small style-only edits.
 
 ### Documenting
 
-Use the [`pretty-mermaid`](skills/pretty-mermaid) skill to generate diagrams:
+Choose the diagram skill based on the artifact you need:
+
+- Use [`pretty-mermaid`](skills/pretty-mermaid) for Mermaid-as-code, themed SVG rendering, ASCII output, or batch rendering.
+- Use [`diagram-design`](skills/diagram-design) for editorial standalone HTML/SVG diagrams, branded styling, or redraws of Mermaid and draw.io sources.
+
 ```text
-create a sequence diagram in SVG format with white background of the endpoint /api/v1/users
+/skill:pretty-mermaid create an ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users
 ```
+
 ```text
-create an ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users
+/skill:diagram-design create an editorial architecture diagram of this service as standalone HTML
 ```

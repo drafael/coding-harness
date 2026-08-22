@@ -1,0 +1,787 @@
+diff --git a/skills/diagram-design/references/doctor.md b/skills/diagram-design/references/doctor.md
+index a2d4b37..6d31149 100644
+--- a/skills/diagram-design/references/doctor.md
++++ b/skills/diagram-design/references/doctor.md
+@@ -36,11 +36,11 @@ Run all checks in this order and report each as `pass`, `warn`, or `fail`.
+ - `fail` if version is below 3.10.
+ 
+ 2. Playwright availability for PNG export
+-- Check whether Playwright import works in the active Python interpreter (`import playwright`).
+-- Check whether Chromium is installed for Playwright (`playwright install --help` availability is sufficient for command presence; prefer also checking browser cache when practical).
+-- If missing, mark `warn` and print exact setup hint:
+-  - `pip install playwright && playwright install chromium`
+-- Never auto-install dependencies.
++- Resolve `scripts/export_png.py` from the installed skill root and run it with the selected Python interpreter and `--check`.
++- The exporter discovers Python Playwright environments and Playwright-managed or system Chromium-family browsers. Do not duplicate that logic with an active-interpreter import check or browser-cache heuristic.
++- If the command passes, report the exact Python interpreter, browser path, and browser version from its output.
++- If it fails, mark `warn` and preserve its interpreter-specific install commands or `DIAGRAM_DESIGN_CHROMIUM` override guidance in the fix.
++- Never auto-install dependencies or download a browser.
+ 
+ 3. Expected script presence (maintainer-checkout mode only)
+ - Verify these repository scripts exist:
+@@ -109,11 +109,12 @@ Always print:
+ ```text
+ Doctor summary: WARN (6 pass, 2 warn, 0 fail)
+ [PASS] Python 3.11.9 found at /usr/bin/python3
+-[WARN] Playwright package not found in active interpreter
++[WARN] No Python Playwright installation discovered
+ [PASS] scripts/verify-drawio-import.py present
+ ...
+ 
+ Next actions
+-- Install PNG export dependencies: pip install playwright && playwright install chromium
++- Install PNG export dependencies: /usr/bin/python3 -m pip install playwright
++- Install managed Chromium if no system browser is available: /usr/bin/python3 -m playwright install chromium
+ - Re-run: /diagram-design:doctor --strict
+ ```
+diff --git a/skills/diagram-design/references/export.md b/skills/diagram-design/references/export.md
+index 9f26e92..09541d2 100644
+--- a/skills/diagram-design/references/export.md
++++ b/skills/diagram-design/references/export.md
+@@ -48,48 +48,38 @@ Tools that don't fetch remote fonts at import time (offline Illustrator, some Fi
+ 
+ ## PNG export procedure
+ 
+-Render **the original HTML** (not the extracted SVG) and screenshot only the `<svg>` element's bounding box. This keeps font loading reliable (already wired in the source HTML) while satisfying the "diagram only" rule. The PNG always has a **transparent background** (`omit_background=True`) so it can be placed on any slide or doc colour without a white halo. For motion-enabled HTML, append `?motion=static`, await `document.fonts.ready`, and assert the motion root has `data-frame="static"` before capture; never export at an arbitrary wall-clock delay.
++Render **the original HTML** (not the extracted SVG) and capture only the `<svg>` at its `viewBox` dimensions. This keeps font loading reliable (already wired in the source HTML) while satisfying the "diagram only" rule. Use `omit_background=True` so browser-canvas transparency is preserved. A template that paints its own paper `<rect>` remains intentionally opaque; removing that rect would also break label masks and the authored palette. For motion-enabled HTML, append `?motion=static`, await `document.fonts.ready`, and assert the motion root has `data-frame="static"` before capture; never export at an arbitrary wall-clock delay.
+ 
+ ### Detection
+ 
+-Before running anything, verify Playwright is installed:
++Use the packaged exporter relative to this loaded reference. Do not assume the skill is under the current project:
+ 
++```bash
++python3 <skill-dir>/scripts/export_png.py --check
+ ```
+-python -c "import playwright" 2>NUL || python -c "import playwright"
+-```
+-
+-If the import fails, surface this exact instruction to the user and stop:
+ 
+-> Playwright isn't installed. To enable PNG export, run:
+-> ```
+-> pip install playwright
+-> playwright install chromium
+-> ```
+-> Then ask me to export again.
++The exporter searches in this order:
+ 
+-Don't auto-install. The user asked for one feature, not a system change.
++1. Python from `DIAGRAM_DESIGN_PYTHON`, the active interpreter, active virtual/Conda environments, project `.venv` or `venv`, then `python3` and `python` on `PATH`.
++2. Playwright's managed Chromium.
++3. The executable named by `DIAGRAM_DESIGN_CHROMIUM`.
++4. Chrome, Chromium, or Edge found on `PATH` or in standard macOS, Linux, and Windows install locations.
+ 
+-### Rasterize
++When Playwright exists in another discovered Python environment, the exporter re-executes itself with that interpreter. It reports the selected Python and browser. It never installs or downloads dependencies.
+ 
+-Write the snippet below to a temp file and run it with `python <tmp.py> <src.html> <out.png>`:
++If no Python Playwright installation is found, surface the exporter's interpreter-specific setup commands and stop. If Playwright is installed but no Chromium-family browser launches, surface its browser setup command and the `DIAGRAM_DESIGN_CHROMIUM` override. Do not replace those diagnostics with a generic import check.
+ 
+-```python
+-from playwright.sync_api import sync_playwright
+-import sys, pathlib
++### Rasterize
+ 
+-src, out = sys.argv[1], sys.argv[2]
+-scale = int(sys.argv[3]) if len(sys.argv) > 3 else 2
++Run the packaged exporter:
+ 
+-with sync_playwright() as p:
+-    browser = p.chromium.launch()
+-    page = browser.new_page(device_scale_factor=scale)
+-    page.goto(f"file://{pathlib.Path(src).resolve()}")
+-    page.wait_for_load_state("networkidle")
+-    page.locator("svg").first.screenshot(path=out, omit_background=True)
+-    browser.close()
++```bash
++python3 <skill-dir>/scripts/export_png.py <src.html> <out.png> --scale 2
+ ```
+ 
+-Default `device_scale_factor=2` for crisp output. Accept `1` for compact assets or `3` for print/retina hero use, passed as a third CLI arg.
++The script opens the original HTML with `?motion=static`, waits for fonts, verifies the static motion frame when present, sizes the first `<svg>` to its `viewBox`, and screenshots it with a transparent background. It refuses the multi-diagram `assets/index.html` gallery and an SVG without valid `viewBox` dimensions.
++
++Default `device_scale_factor=2` for crisp output. Accept any scale from `1` through `4`, including a fractional value computed for an exact target size.
+ 
+ ### Output naming
+ 
+diff --git a/skills/diagram-design/scripts/export_png.py b/skills/diagram-design/scripts/export_png.py
+new file mode 100644
+index 0000000..cba3ef3
+--- /dev/null
++++ b/skills/diagram-design/scripts/export_png.py
+@@ -0,0 +1,430 @@
++#!/usr/bin/env python3
++"""Export a Diagram Design HTML file to PNG with local runtime discovery."""
++
++from __future__ import annotations
++
++import argparse
++import math
++import os
++import shutil
++import subprocess
++import sys
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Callable, Iterable, Mapping, Sequence
++
++PYTHON_OVERRIDE = "DIAGRAM_DESIGN_PYTHON"
++BROWSER_OVERRIDE = "DIAGRAM_DESIGN_CHROMIUM"
++REEXEC_MARKER = "DIAGRAM_DESIGN_PLAYWRIGHT_REEXEC"
++PLAYWRIGHT_PROBE = (
++    "import sys; from playwright.sync_api import sync_playwright; "
++    "raise SystemExit(0 if sys.version_info >= (3, 10) else 2)"
++)
++BROWSER_COMMANDS = (
++    "chromium",
++    "chromium-browser",
++    "google-chrome",
++    "google-chrome-stable",
++    "chrome",
++    "microsoft-edge",
++    "msedge",
++)
++
++
++class DiscoveryError(RuntimeError):
++    """Raised when no usable Playwright runtime or Chromium browser is found."""
++
++
++@dataclass(frozen=True)
++class BrowserCandidate:
++    label: str
++    executable: Path | None
++
++
++def unique_paths(paths: Iterable[Path]) -> list[Path]:
++    result: list[Path] = []
++    seen: set[str] = set()
++    for path in paths:
++        expanded = path.expanduser()
++        key = str(expanded.absolute())
++        if key in seen:
++            continue
++        seen.add(key)
++        result.append(expanded)
++    return result
++
++
++def resolve_command(value: str, which: Callable[[str], str | None]) -> Path:
++    expanded = Path(value).expanduser()
++    if expanded.is_absolute() or "/" in value or "\\" in value:
++        return expanded
++    resolved = which(value)
++    return Path(resolved) if resolved else expanded
++
++
++def python_candidates(
++    source: Path | None = None,
++    *,
++    environ: Mapping[str, str] = os.environ,
++    which: Callable[[str], str | None] = shutil.which,
++    current_executable: str = sys.executable,
++    cwd: Path | None = None,
++) -> list[Path]:
++    """Return Python interpreters in deterministic discovery order."""
++    candidates: list[Path] = []
++    override = environ.get(PYTHON_OVERRIDE)
++    if override:
++        candidates.append(resolve_command(override, which))
++
++    candidates.append(Path(current_executable))
++
++    for variable in ("VIRTUAL_ENV", "CONDA_PREFIX"):
++        prefix = environ.get(variable)
++        if prefix:
++            candidates.extend(
++                (
++                    Path(prefix) / "bin/python3",
++                    Path(prefix) / "bin/python",
++                    Path(prefix) / "Scripts/python.exe",
++                )
++            )
++
++    roots = [cwd or Path.cwd()]
++    if source is not None:
++        roots.append(source.resolve().parent)
++    for root in unique_paths(roots):
++        for directory in (".venv", "venv"):
++            candidates.extend(
++                (
++                    root / directory / "bin/python3",
++                    root / directory / "bin/python",
++                    root / directory / "Scripts/python.exe",
++                )
++            )
++
++    for command in ("python3", "python"):
++        resolved = which(command)
++        if resolved:
++            candidates.append(Path(resolved))
++
++    return unique_paths(candidates)
++
++
++def interpreter_has_playwright(python: Path) -> bool:
++    if not python.is_file():
++        return False
++    try:
++        result = subprocess.run(
++            [str(python), "-c", PLAYWRIGHT_PROBE],
++            capture_output=True,
++            check=False,
++            text=True,
++            timeout=10,
++        )
++    except (OSError, subprocess.TimeoutExpired):
++        return False
++    return result.returncode == 0
++
++
++def find_playwright_python(
++    candidates: Sequence[Path],
++    probe: Callable[[Path], bool] = interpreter_has_playwright,
++) -> Path | None:
++    return next((candidate for candidate in candidates if probe(candidate)), None)
++
++
++def import_playwright_or_reexec(source: Path | None) -> None:
++    try:
++        from playwright.sync_api import sync_playwright  # noqa: F401
++
++        return
++    except ImportError as error:
++        import_error = error
++
++    if os.environ.get(REEXEC_MARKER) != "1":
++        candidates = python_candidates(source)
++        discovered = find_playwright_python(candidates)
++        if discovered is not None and discovered.absolute() != Path(sys.executable).absolute():
++            environment = dict(os.environ)
++            environment[REEXEC_MARKER] = "1"
++            os.execve(
++                str(discovered),
++                [str(discovered), str(Path(__file__).resolve()), *sys.argv[1:]],
++                environment,
++            )
++
++    raise DiscoveryError(
++        "Python Playwright was not found in the active interpreter, project virtual "
++        "environments, or PATH. Install it with:\n"
++        f"  {sys.executable} -m pip install playwright\n"
++        f"  {sys.executable} -m playwright install chromium"
++    ) from import_error
++
++
++def platform_browser_paths(
++    *,
++    platform_name: str = sys.platform,
++    environ: Mapping[str, str] = os.environ,
++    home: Path | None = None,
++) -> list[Path]:
++    user_home = home or Path.home()
++    if platform_name == "darwin":
++        application_roots = (Path("/Applications"), user_home / "Applications")
++        relative_paths = (
++            "Google Chrome.app/Contents/MacOS/Google Chrome",
++            "Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
++            "Chromium.app/Contents/MacOS/Chromium",
++            "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
++        )
++        return [root / relative for root in application_roots for relative in relative_paths]
++
++    if platform_name.startswith("win"):
++        roots = [
++            Path(value)
++            for variable in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)")
++            if (value := environ.get(variable))
++        ]
++        relative_paths = (
++            "Google/Chrome/Application/chrome.exe",
++            "Chromium/Application/chrome.exe",
++            "Microsoft/Edge/Application/msedge.exe",
++        )
++        return [root / relative for root in roots for relative in relative_paths]
++
++    return [
++        Path("/usr/bin/chromium"),
++        Path("/usr/bin/chromium-browser"),
++        Path("/usr/bin/google-chrome"),
++        Path("/usr/bin/google-chrome-stable"),
++        Path("/usr/bin/microsoft-edge"),
++        Path("/snap/bin/chromium"),
++    ]
++
++
++def system_browser_candidates(
++    *,
++    environ: Mapping[str, str] = os.environ,
++    which: Callable[[str], str | None] = shutil.which,
++    platform_name: str = sys.platform,
++    home: Path | None = None,
++) -> list[BrowserCandidate]:
++    candidates: list[BrowserCandidate] = []
++    override = environ.get(BROWSER_OVERRIDE)
++    if override:
++        candidates.append(
++            BrowserCandidate(
++                f"{BROWSER_OVERRIDE} override",
++                resolve_command(override, which),
++            )
++        )
++
++    paths: list[Path] = []
++    for command in BROWSER_COMMANDS:
++        resolved = which(command)
++        if resolved:
++            paths.append(Path(resolved))
++    paths.extend(
++        platform_browser_paths(
++            platform_name=platform_name,
++            environ=environ,
++            home=home,
++        )
++    )
++
++    existing_labels = {
++        str(candidate.executable.expanduser().absolute())
++        for candidate in candidates
++        if candidate.executable is not None
++    }
++    for path in unique_paths(paths):
++        key = str(path.expanduser().absolute())
++        if key not in existing_labels and path.is_file():
++            candidates.append(BrowserCandidate(path.name, path))
++            existing_labels.add(key)
++    return candidates
++
++
++def launch_browser(playwright, candidates: Sequence[BrowserCandidate] | None = None):
++    """Launch managed Chromium, then explicit and discovered system browsers."""
++    attempts: list[str] = []
++    managed_path = Path(playwright.chromium.executable_path)
++    if managed_path.is_file():
++        try:
++            return playwright.chromium.launch(), f"Playwright Chromium ({managed_path})"
++        except Exception as error:  # Playwright exposes runtime-specific subclasses.
++            attempts.append(f"Playwright Chromium: {error}")
++    else:
++        attempts.append(f"Playwright Chromium not found at {managed_path}")
++
++    resolved_candidates = (
++        list(candidates) if candidates is not None else system_browser_candidates()
++    )
++    for candidate in resolved_candidates:
++        executable = candidate.executable
++        if executable is None or not executable.expanduser().is_file():
++            attempts.append(f"{candidate.label}: executable not found at {executable}")
++            continue
++        try:
++            browser = playwright.chromium.launch(executable_path=str(executable.expanduser()))
++            return browser, f"{candidate.label} ({executable.expanduser()})"
++        except Exception as error:  # Continue to the next installed Chromium-family browser.
++            attempts.append(f"{candidate.label}: {error}")
++
++    detail = "\n  - ".join(attempts) if attempts else "No browser candidates were found."
++    raise DiscoveryError(
++        "Playwright is installed, but no usable Chromium-family browser was found. "
++        f"Discovery attempts:\n  - {detail}\n"
++        f"Install the managed browser with:\n  {sys.executable} -m playwright install chromium\n"
++        f"Or set {BROWSER_OVERRIDE} to a Chrome, Chromium, or Edge executable."
++    )
++
++
++def scale_value(value: str) -> float:
++    try:
++        scale = float(value)
++    except ValueError as error:
++        raise argparse.ArgumentTypeError("scale must be a number from 1 through 4") from error
++    if not 1 <= scale <= 4:
++        raise argparse.ArgumentTypeError("scale must be from 1 through 4")
++    return scale
++
++
++def viewbox_dimensions(value: str | None) -> tuple[float, float]:
++    if value is None:
++        raise DiscoveryError("SVG diagram has no viewBox; refusing to guess export dimensions.")
++    try:
++        parts = [float(part) for part in value.replace(",", " ").split()]
++    except ValueError as error:
++        raise DiscoveryError(f"SVG diagram has an invalid viewBox: {value}") from error
++    if len(parts) != 4:
++        raise DiscoveryError(f"SVG diagram has an invalid viewBox: {value}")
++    width, height = parts[2], parts[3]
++    if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
++        raise DiscoveryError(f"SVG diagram has an invalid viewBox: {value}")
++    return width, height
++
++
++def size_svg_for_export(page, diagram) -> tuple[float, float]:
++    width, height = viewbox_dimensions(diagram.get_attribute("viewBox"))
++    diagram.evaluate(
++        """(svg, size) => {
++            document.body.replaceChildren(svg);
++            document.documentElement.style.cssText = 'margin:0;padding:0;overflow:hidden';
++            document.body.style.cssText = 'margin:0;padding:0;overflow:hidden';
++            svg.style.setProperty('display', 'block', 'important');
++            svg.style.setProperty('width', `${size.width}px`, 'important');
++            svg.style.setProperty('height', `${size.height}px`, 'important');
++            svg.style.setProperty('min-width', '0', 'important');
++            svg.style.setProperty('max-width', 'none', 'important');
++        }""",
++        {"width": width, "height": height},
++    )
++    page.set_viewport_size({"width": math.ceil(width), "height": math.ceil(height)})
++    return width, height
++
++
++def render_png(source: Path, output: Path, scale: float) -> tuple[str, str]:
++    from playwright.sync_api import sync_playwright
++
++    source = source.expanduser().resolve()
++    output = output.expanduser().resolve()
++    if not source.is_file():
++        raise DiscoveryError(f"Source HTML file not found: {source}")
++    if source.name == "index.html" and source.parent.name == "assets":
++        raise DiscoveryError("Refusing to export the multi-diagram assets/index.html gallery.")
++
++    output.parent.mkdir(parents=True, exist_ok=True)
++    with sync_playwright() as playwright:
++        browser, browser_description = launch_browser(playwright)
++        try:
++            page = browser.new_page(device_scale_factor=scale)
++            page.goto(f"{source.as_uri()}?motion=static", wait_until="networkidle")
++            page.evaluate("document.fonts.ready")
++
++            motion_root = page.locator("[data-motion-root]").first
++            if motion_root.count() and motion_root.get_attribute("data-frame") != "static":
++                raise DiscoveryError("Motion diagram did not resolve to its static export frame.")
++
++            diagram = page.locator("svg").first
++            if not diagram.count():
++                raise DiscoveryError(f"No SVG diagram found in {source}")
++            width, height = size_svg_for_export(page, diagram)
++            bounding_box = diagram.bounding_box()
++            if bounding_box is None:
++                raise DiscoveryError("SVG diagram has no rendered bounding box.")
++            if abs(bounding_box["width"] - width) > 0.01 or abs(
++                bounding_box["height"] - height
++            ) > 0.01:
++                raise DiscoveryError(
++                    "SVG diagram did not resolve to its viewBox dimensions before capture."
++                )
++            page.screenshot(
++                path=str(output),
++                omit_background=True,
++                clip={"x": 0, "y": 0, "width": width, "height": height},
++            )
++            return browser_description, browser.version
++        finally:
++            browser.close()
++
++
++def check_environment() -> tuple[str, str]:
++    from playwright.sync_api import sync_playwright
++
++    with sync_playwright() as playwright:
++        browser, browser_description = launch_browser(playwright)
++        try:
++            return browser_description, browser.version
++        finally:
++            browser.close()
++
++
++def parser() -> argparse.ArgumentParser:
++    argument_parser = argparse.ArgumentParser(
++        description=(
++            "Export a Diagram Design HTML file to PNG using discovered "
++            "Playwright and Chromium."
++        ),
++    )
++    argument_parser.add_argument("source", nargs="?", type=Path, help="source diagram HTML")
++    argument_parser.add_argument("output", nargs="?", type=Path, help="output PNG path")
++    argument_parser.add_argument("--scale", type=scale_value, default=2.0)
++    argument_parser.add_argument(
++        "--check",
++        action="store_true",
++        help="discover and launch a browser without exporting",
++    )
++    return argument_parser
++
++
++def main(argv: Sequence[str] | None = None) -> int:
++    arguments = parser().parse_args(argv)
++    if not arguments.check and arguments.source is None:
++        parser().error("source is required unless --check is used")
++
++    source = arguments.source.expanduser() if arguments.source is not None else None
++    try:
++        import_playwright_or_reexec(source)
++        if arguments.check:
++            browser_description, browser_version = check_environment()
++            print(
++                f"Playwright ready: python={sys.executable}; "
++                f"browser={browser_description}; version={browser_version}"
++            )
++            return 0
++
++        assert source is not None
++        output = arguments.output or source.with_suffix(".png")
++        browser_description, browser_version = render_png(source, output, arguments.scale)
++        print(
++            f"PNG written to {output.expanduser().resolve()} using "
++            f"{browser_description}; version={browser_version}; scale={arguments.scale:g}"
++        )
++        return 0
++    except DiscoveryError as error:
++        print(f"export_png: {error}", file=sys.stderr)
++        return 2
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/skills/diagram-design/scripts/test_export_png.py b/skills/diagram-design/scripts/test_export_png.py
+new file mode 100644
+index 0000000..8c7603a
+--- /dev/null
++++ b/skills/diagram-design/scripts/test_export_png.py
+@@ -0,0 +1,238 @@
++#!/usr/bin/env python3
++"""Tests for export_png.py runtime and Chromium discovery."""
++
++from __future__ import annotations
++
++import argparse
++import importlib.util
++import sys
++import tempfile
++from pathlib import Path
++
++SCRIPT = Path(__file__).with_name("export_png.py")
++
++
++def load_module():
++    sys.dont_write_bytecode = True
++    spec = importlib.util.spec_from_file_location("diagram_design_export_png", SCRIPT)
++    if spec is None or spec.loader is None:
++        raise AssertionError("could not load export_png.py")
++    module = importlib.util.module_from_spec(spec)
++    sys.modules[spec.name] = module
++    spec.loader.exec_module(module)
++    return module
++
++
++def touch(path: Path) -> Path:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text("placeholder\n", encoding="utf-8")
++    path.chmod(0o755)
++    return path
++
++
++class FakeBrowser:
++    version = "123.0"
++
++    def close(self) -> None:
++        return None
++
++
++class FakeChromium:
++    def __init__(self, executable_path: Path, outcomes: list[object]) -> None:
++        self.executable_path = str(executable_path)
++        self.outcomes = outcomes
++        self.launches: list[dict[str, str]] = []
++
++    def launch(self, **kwargs):
++        self.launches.append(kwargs)
++        outcome = self.outcomes.pop(0)
++        if isinstance(outcome, Exception):
++            raise outcome
++        return outcome
++
++
++class FakePlaywright:
++    def __init__(self, chromium: FakeChromium) -> None:
++        self.chromium = chromium
++
++
++def main() -> int:
++    module = load_module()
++
++    with tempfile.TemporaryDirectory(prefix="export-png-test-") as temp_dir:
++        root = Path(temp_dir)
++        override = touch(root / "override/python")
++        current = touch(root / "current/python")
++        path_python = touch(root / "path/python3")
++        project_python = touch(root / "project/.venv/bin/python3")
++
++        def which_python(command: str) -> str | None:
++            return str(path_python) if command == "python3" else None
++
++        candidates = module.python_candidates(
++            root / "project/diagram.html",
++            environ={module.PYTHON_OVERRIDE: str(override)},
++            which=which_python,
++            current_executable=str(current),
++            cwd=root / "project",
++        )
++        if candidates[:3] != [override, current, project_python]:
++            raise AssertionError(f"unexpected Python candidate order: {candidates[:3]}")
++        if candidates.count(path_python) != 1:
++            raise AssertionError("PATH Python was not discovered exactly once")
++        print("OK: Python discovery prioritizes override, active runtime, and project virtualenv")
++
++        venv_link = root / "symlink-venv/python"
++        venv_link.parent.mkdir(parents=True)
++        try:
++            venv_link.symlink_to(current)
++        except OSError as error:
++            print(f"SKIP: virtualenv symlink identity check unavailable: {error}")
++        else:
++            distinct_invocations = module.unique_paths([venv_link, current])
++            if distinct_invocations != [venv_link, current]:
++                raise AssertionError(
++                    "virtualenv interpreter symlink was collapsed into its base Python"
++                )
++            print("OK: virtualenv interpreter remains distinct from its base Python binary")
++
++        unexpected_lookup = False
++
++        def reject_lookup(_command: str) -> str | None:
++            nonlocal unexpected_lookup
++            unexpected_lookup = True
++            return None
++
++        relative_override = module.resolve_command("./custom-python", reject_lookup)
++        if relative_override != Path("custom-python") or unexpected_lookup:
++            raise AssertionError(
++                "relative executable override was incorrectly resolved through PATH"
++            )
++        print("OK: explicit relative executable paths bypass PATH lookup")
++
++        probed: list[Path] = []
++
++        def probe(candidate: Path) -> bool:
++            probed.append(candidate)
++            return candidate == project_python
++
++        discovered = module.find_playwright_python(candidates, probe)
++        if discovered != project_python or probed[-1] != project_python:
++            raise AssertionError("Playwright interpreter probing did not stop at the first match")
++        print("OK: Playwright interpreter probe selects the first usable runtime")
++
++        browser_override = touch(root / "browsers/override-chrome")
++        path_browser = touch(root / "browsers/chromium")
++
++        def which_browser(command: str) -> str | None:
++            return str(path_browser) if command == "chromium" else None
++
++        browsers = module.system_browser_candidates(
++            environ={module.BROWSER_OVERRIDE: str(browser_override)},
++            which=which_browser,
++            platform_name="linux",
++            home=root,
++        )
++        if [candidate.executable for candidate in browsers[:2]] != [
++            browser_override,
++            path_browser,
++        ]:
++            raise AssertionError(f"unexpected browser candidate order: {browsers}")
++        print("OK: browser discovery prioritizes explicit override before PATH")
++
++        managed = touch(root / "managed/chrome")
++        managed_chromium = FakeChromium(managed, [FakeBrowser()])
++        browser, description = module.launch_browser(FakePlaywright(managed_chromium), [])
++        if not isinstance(browser, FakeBrowser) or managed_chromium.launches != [{}]:
++            raise AssertionError("managed Chromium was not launched first")
++        if "Playwright Chromium" not in description:
++            raise AssertionError(f"managed browser description missing: {description}")
++        print("OK: Playwright-managed Chromium is preferred")
++
++        missing_managed = root / "missing/chrome"
++        fallback_chromium = FakeChromium(
++            missing_managed,
++            [RuntimeError("broken override"), FakeBrowser()],
++        )
++        first = module.BrowserCandidate("override", browser_override)
++        second = module.BrowserCandidate("PATH Chromium", path_browser)
++        browser, description = module.launch_browser(
++            FakePlaywright(fallback_chromium),
++            [first, second],
++        )
++        if not isinstance(browser, FakeBrowser):
++            raise AssertionError("system browser fallback did not return a browser")
++        if fallback_chromium.launches != [
++            {"executable_path": str(browser_override)},
++            {"executable_path": str(path_browser)},
++        ]:
++            raise AssertionError(f"unexpected fallback launches: {fallback_chromium.launches}")
++        if "PATH Chromium" not in description:
++            raise AssertionError(f"fallback description missing: {description}")
++        print("OK: failed browser candidates fall through to the next installed browser")
++
++        no_browser = FakeChromium(missing_managed, [])
++        try:
++            module.launch_browser(FakePlaywright(no_browser), [])
++        except module.DiscoveryError as error:
++            if "playwright install chromium" not in str(error):
++                raise AssertionError(f"missing remediation in discovery error: {error}")
++        else:
++            raise AssertionError("missing browsers did not raise DiscoveryError")
++        print("OK: missing browser reports actionable remediation")
++
++    for value in ("1", "1.25", "2", "4"):
++        module.scale_value(value)
++    for value in ("0.5", "4.1", "invalid"):
++        try:
++            module.scale_value(value)
++        except argparse.ArgumentTypeError:
++            continue
++        raise AssertionError(f"invalid scale accepted: {value}")
++    print("OK: export scale accepts the documented 1 through 4 range")
++
++    if module.viewbox_dimensions("0 0 1000 600") != (1000.0, 600.0):
++        raise AssertionError("valid whitespace-separated viewBox was not parsed")
++    if module.viewbox_dimensions("0,0,1280,720") != (1280.0, 720.0):
++        raise AssertionError("valid comma-separated viewBox was not parsed")
++    for value in (None, "0 0 1000", "0 0 -1 600", "0 0 nan 600", "invalid"):
++        try:
++            module.viewbox_dimensions(value)
++        except module.DiscoveryError:
++            continue
++        raise AssertionError(f"invalid viewBox accepted: {value}")
++    print("OK: SVG viewBox dimensions are validated before rasterization")
++
++    class FakePage:
++        viewport: dict[str, int] | None = None
++
++        def set_viewport_size(self, size: dict[str, int]) -> None:
++            self.viewport = size
++
++    class FakeDiagram:
++        evaluation: tuple[str, dict[str, float]] | None = None
++
++        def get_attribute(self, name: str) -> str | None:
++            return "0 0 1000 600" if name == "viewBox" else None
++
++        def evaluate(self, expression: str, argument: dict[str, float]) -> None:
++            self.evaluation = (expression, argument)
++
++    fake_page = FakePage()
++    fake_diagram = FakeDiagram()
++    dimensions = module.size_svg_for_export(fake_page, fake_diagram)
++    if dimensions != (1000.0, 600.0) or fake_page.viewport != {
++        "width": 1000,
++        "height": 600,
++    }:
++        raise AssertionError("SVG export viewport did not follow the viewBox")
++    if fake_diagram.evaluation is None or "replaceChildren" not in fake_diagram.evaluation[0]:
++        raise AssertionError("SVG was not isolated from page layout before capture")
++    print("OK: SVG capture is isolated and sized to its viewBox")
++
++    print("All export PNG discovery tests passed")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
