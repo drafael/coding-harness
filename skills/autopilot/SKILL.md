@@ -1,7 +1,8 @@
 ---
 name: autopilot
 license: MIT
-description: Compile a bounded coding objective, independent queue, or ordered stack into an immutable charter and run it through the restart-resumable Autopilot CLI. Use when a user explicitly asks for unattended or resumable autonomous implementation with checkable completion conditions and explicit Git or delivery authority.
+description: Compile a bounded coding objective, independent queue, or ordered stack into an immutable charter and run it through the restart-resumable Autopilot CLI. Manual invocation only; use when the user explicitly invokes Autopilot for unattended or resumable autonomous implementation with checkable completion conditions and explicit Git or delivery authority.
+disable-model-invocation: true
 ---
 
 # Autopilot
@@ -21,7 +22,7 @@ Treat “I am going to sleep,” “work overnight,” and “have this ready in
 
 ## Lifecycle routing
 
-Handle lifecycle intent before compiling a coding objective. Recognize both short forms and natural-language equivalents:
+Handle lifecycle intent before compiling a coding objective. After explicit `/autopilot` invocation, recognize both short forms and natural-language equivalents:
 
 - `/autopilot status`: “What happened overnight?”, “Show progress.”
 - `/autopilot resume`: “Continue the interrupted run”, “Pick up where it left off.”

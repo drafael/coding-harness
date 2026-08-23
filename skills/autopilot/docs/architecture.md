@@ -8,7 +8,7 @@
 
 ## Summary
 
-Autopilot lets a user hand a bounded coding objective to a local agent harness and leave it unattended. The user starts with a natural-language request, defines a checkable completion condition, and grants specific effects such as commit, push, change-request creation, or merge. Autopilot compiles that request into an immutable run charter and drives the run until the charter is satisfied or recovery budgets are exhausted.
+Autopilot lets a user hand a bounded coding objective to a local agent harness and leave it unattended. The user explicitly invokes `/autopilot` with a natural-language request, defines a checkable completion condition, and grants specific effects such as commit, push, change-request creation, or merge. Autopilot compiles that request into an immutable run charter and drives the run until the charter is satisfied or recovery budgets are exhausted.
 
 A bundled TypeScript CLI is the sole lifecycle owner. Claude Code, Codex, Pi, and OpenCode integrations act as execution and user-interface adapters. Git owns code identity. An append-only journal owns lifecycle history. Verification receipts tied to exact commits or tree identities own evidence. Harness output cannot mutate lifecycle state or declare success directly.
 
@@ -29,7 +29,7 @@ The skill is the user-facing lifecycle interface. It invokes the copied runtime 
 
 Autopilot must:
 
-- Start from one natural-language command.
+- Start from one explicit `/autopilot` invocation with a natural-language objective.
 - Run one objective, a queue of independent items, or an ordered stack.
 - Support local-only delivery, change-request preparation, and authorized merge.
 - Use explicit per-run capability grants. Missing grants mean denial.
@@ -89,7 +89,7 @@ The harness proposes a charter from the request and repository evidence. The CLI
 
 Autopilot asks before unattended execution only when the objective, replacement behavior, ordering, delivery intent, or acceptance criteria require a genuine product decision. Missing tools or capabilities produce a preflight failure with setup instructions.
 
-Users manage lifecycle state through `/autopilot status`, `/autopilot resume`, `/autopilot stop`, and `/autopilot wrap up`, or equivalent natural language. The internal runtime commands are:
+Users manage lifecycle state through `/autopilot status`, `/autopilot resume`, `/autopilot stop`, and `/autopilot wrap up`, or natural wording supplied after explicit `/autopilot` invocation. The internal runtime commands are:
 
 ```bash
 autopilot [--state-dir <path>] start <charter-file>

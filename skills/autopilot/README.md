@@ -43,7 +43,7 @@ Return to the same repository and ask Autopilot directly:
 /autopilot wrap up with handoff
 ```
 
-Natural language works too: “What happened overnight?”, “Continue the interrupted work,” “Fix and resolve the PR comments,” or “Clean up the merged run and leave a handoff.” Autopilot discovers the current project’s run. If more than one run matches, it lists short choices and changes nothing until you select one.
+After explicit `/autopilot` invocation, natural lifecycle wording works too: `/autopilot What happened overnight?`, `/autopilot Continue the interrupted work`, `/autopilot Fix and resolve the PR comments`, or `/autopilot Clean up the merged run and leave a handoff`. Autopilot discovers the current project’s run. If more than one run matches, it lists short choices and changes nothing until you select one.
 
 `resume` continues an interrupted nonterminal run. `address review comments` snapshots unresolved feedback from the exact open PR/MR, creates a verified amendment successor, updates the same branch, and resolves provider-resolvable threads only after the fix passes. `stop` deliberately ends a run and preserves its work; a stopped run cannot be resumed and requires a sealed successor. `wrap up` is destructive: after live provider checks, it removes the exact remote branches, clean worktrees, local branches, and run-state chain. A handoff writes Markdown and JSON summaries under `.autopilot/handoffs/` before cleanup.
 

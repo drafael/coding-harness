@@ -358,7 +358,7 @@ docs/prerequisites.md
 
 ### Work
 
-1. Document natural-language invocation and charter compilation for each harness.
+1. Document explicit `/autopilot` invocation with a natural-language objective and charter compilation for each harness.
 2. Keep playbooks consistent with executable router behavior through conformance fixtures.
 3. Implement `autopilot doctor` without installation or authentication side effects.
 4. Document Node.js 24+, Git, harness, GitHub, and GitLab prerequisites.

@@ -38,7 +38,7 @@ Ask your coding agent in natural language or use the skill command syntax suppor
 
 ### Run a bounded unattended implementation
 
-Use [`autopilot`](skills/autopilot) when the objective has explicit completion predicates and the user wants restart-resumable execution through a supported coding harness:
+[`autopilot`](skills/autopilot) is manual-only. Invoke it explicitly when the objective has checkable completion predicates and the user wants restart-resumable execution through a supported coding harness:
 
 ```text
 /autopilot I am going to sleep. Work overnight on migrating this multi-module Java backend
