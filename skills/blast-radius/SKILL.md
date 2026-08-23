@@ -60,6 +60,7 @@ A symbol search is a starting point, not proof of complete impact. Follow implic
 - asynchronous ordering, lifecycle, teardown, caching, and concurrency;
 - reflection, dependency injection, plugin registration, and generated code;
 - pinned dependency behavior, lockfiles, and local patches;
+- distributed dependency metadata such as third-party notices, SBOMs, license manifests, packaged classpaths, and dependency inventories, when the repository maintains them;
 - cross-language or separately deployed consumers.
 
 Do not inventory every possible surface. Do not invent a caller, consumer, API, or risk to make the analysis look comprehensive. A relevant search with no matches establishes only the scope searched, not universal absence.
@@ -78,6 +79,8 @@ For each credible risk, establish:
 
 Keep confirmed risks separate from concerns investigated and cleared. Omit speculative risks without a reachable path or credible conditions. A result with no confirmed risk is valid.
 
+A confirmed behavioral difference is not automatically a merge blocker. Tie blocker severity to a supported contract, realistic impact, or explicit user requirement. When product relevance is ambiguous, present it as a decision to resolve rather than a defect to block on. This does not reduce the severity of losing supported data, security failures, or established compatibility violations.
+
 ## Grade the evidence
 
 For every decision-critical assumption, report the strongest level reached:
@@ -91,14 +94,17 @@ An assumption that stops before focused execution is **unverified by execution**
 
 ## Run proportionate proof
 
-Execute a decision-critical assumption when a focused check is safe, practical, and representative:
+Execute a decision-critical assumption when a focused check is safe, practical, and representative.
+
+When validating a branch or alternate worktree, bind each command to an explicit command-local working directory and verify that it resolves to the intended checkout before trusting the output. This is especially important for parallel checks that may otherwise share databases, ports, or generated directories. Do not add redundant directory changes when the execution API already guarantees and reports an immutable working directory.
 
 1. Prefer the smallest existing test or repository command that reaches the boundary.
 2. Exercise the same implementation, configuration, and pinned dependency version the application uses.
-3. Record the command, relevant output, and exact boundary exercised.
-4. Use mocks only when the claim concerns the mocked boundary.
-5. Do not present source assertions, unit tests, or mocks as proof of native, packaged, external-service, or end-to-end behavior.
-6. Do not add production hooks solely to manufacture proof.
+3. For a build-plugin upgrade, trace the goal or task, lifecycle phase, and profile that invoke the changed plugin, then run the smallest command that actually reaches that execution. A passing earlier phase is not proof when it never loads the plugin.
+4. Record the command, relevant output, and exact boundary exercised.
+5. Use mocks only when the claim concerns the mocked boundary.
+6. Do not present source assertions, unit tests, or mocks as proof of native, packaged, external-service, or end-to-end behavior.
+7. Do not add production hooks solely to manufacture proof.
 
 If execution is unsafe, unavailable, disproportionately expensive, or unable to represent the real boundary, state why verification stopped and mark the assumption unverified. Do not substitute an unrelated passing test.
 
