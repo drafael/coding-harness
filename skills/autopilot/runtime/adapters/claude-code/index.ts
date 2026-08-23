@@ -1,0 +1,26 @@
+import { CliHarnessAdapter } from "../../src/adapter-process.js";
+
+export function createClaudeCodeAdapter(): CliHarnessAdapter {
+  return new CliHarnessAdapter({
+    name: "claude-code",
+    executable: "claude",
+    versionArguments: ["--version"],
+    buildArguments: (_request, prompt) => [
+      "--print",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--no-session-persistence",
+      "--permission-mode", "dontAsk",
+      "--allowed-tools", "Read,Edit,Write,Glob,Grep,Bash",
+      "--disallowed-tools", "WebFetch,WebSearch",
+      "--safe-mode",
+      "--",
+      prompt,
+    ],
+    assurance: "cooperative",
+    maxConcurrency: 1,
+    cancellation: true,
+    limitations: ["Bash restrictions are cooperative.", "Safe mode excludes customizations; admin-managed policy may still apply.", "Executions cannot be reattached."],
+    expectsJsonLines: true,
+  });
+}

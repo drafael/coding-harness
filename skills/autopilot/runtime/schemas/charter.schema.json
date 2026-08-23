@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coding-harness.local/autopilot/charter.schema.json",
+  "title": "Autopilot proposed run charter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "sourceText",
+    "createdAt",
+    "repository",
+    "harnessAdapter",
+    "mode",
+    "work",
+    "delivery",
+    "grants",
+    "gates",
+    "waivers",
+    "limits",
+    "assumptions",
+    "minimumAssurance",
+    "resolutionSources"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "sourceText": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "harnessAdapter": { "enum": ["pi", "claude-code", "codex", "opencode"] },
+    "mode": { "enum": ["single", "independent-queue", "ordered-stack"] },
+    "work": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/workItem" } },
+    "delivery": { "enum": ["local-commits", "change-request-ready", "merge-verified"] },
+    "deliveryTarget": { "$ref": "#/$defs/deliveryTarget" },
+    "grants": { "type": "array", "items": { "$ref": "#/$defs/grant" } },
+    "gates": { "type": "array", "items": { "$ref": "#/$defs/gate" } },
+    "waivers": { "type": "array", "items": { "$ref": "#/$defs/waiver" } },
+    "limits": { "$ref": "#/$defs/limits" },
+    "assumptions": { "type": "array", "items": { "$ref": "#/$defs/assumption" } },
+    "minimumAssurance": { "enum": ["cooperative", "enforced"] },
+    "resolutionSources": {
+      "type": "object",
+      "additionalProperties": { "enum": ["invocation", "project", "user", "default", "repository"] }
+    },
+    "predecessorRunId": { "type": "string", "minLength": 1 },
+    "amends": { "$ref": "#/$defs/amendment" },
+    "reviewFeedback": { "$ref": "#/$defs/reviewFeedback" },
+    "commitPolicy": { "$ref": "#/$defs/commitPolicy" }
+  },
+  "$defs": {
+    "amendment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "itemId"],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reviewFeedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observedHeadCommit", "threads"],
+      "properties": {
+        "observedHeadCommit": { "type": "string", "minLength": 1 },
+        "threads": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["threadId", "contentHash", "url", "resolve"],
+            "properties": {
+              "threadId": { "type": "string", "minLength": 1 },
+              "contentHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "url": { "type": "string", "minLength": 1 },
+              "resolve": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "commitPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preCommitHook", "writableRoots", "environmentNames"],
+      "properties": {
+        "preCommitHook": { "enum": ["run", "skip"] },
+        "writableRoots": { "type": "array", "items": { "type": "string" } },
+        "environmentNames": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "baseRef", "baseCommit", "writableRoots"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "baseRef": { "type": "string", "minLength": 1 },
+        "baseCommit": { "type": "string", "minLength": 1 },
+        "writableRoots": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "deliveryTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "remote", "baseBranch"],
+      "properties": {
+        "provider": { "enum": ["github", "gitlab"] },
+        "remote": { "type": "string", "minLength": 1 },
+        "baseBranch": { "type": "string", "minLength": 1 }
+      }
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "actor"],
+      "properties": {
+        "family": {
+          "enum": [
+            "files.read",
+            "files.write",
+            "process.execute",
+            "network.access",
+            "credentials.use",
+            "git.commit",
+            "remote.push",
+            "change-request.open",
+            "change-request.update",
+            "review-thread.resolve",
+            "merge.execute"
+          ]
+        },
+        "actor": { "enum": ["worker", "runtime", "adapter", "delivery"] },
+        "paths": { "type": "array", "items": { "type": "string" } },
+        "commands": { "type": "array", "items": { "type": "string" } },
+        "repositories": { "type": "array", "items": { "type": "string" } },
+        "remotes": { "type": "array", "items": { "type": "string" } },
+        "branchPrefixes": { "type": "array", "items": { "type": "string" } },
+        "environmentNames": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "predicate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "gateId"],
+          "properties": { "type": { "const": "gate-passed" }, "gateId": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path"],
+          "properties": { "type": { "enum": ["path-present", "path-absent"] }, "path": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "query", "paths", "expectedCount"],
+          "properties": {
+            "type": { "const": "search-count" },
+            "query": { "type": "string", "minLength": 1 },
+            "paths": { "type": "array", "items": { "type": "string" } },
+            "expectedCount": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "workItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "objective", "writableRoots", "dependsOn", "acceptance", "branchName"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 72, "pattern": "^[^\\r\\n]+$" },
+        "objective": { "type": "string", "minLength": 1 },
+        "writableRoots": { "type": "array", "items": { "type": "string" } },
+        "dependsOn": { "type": "array", "items": { "type": "string" } },
+        "acceptance": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/predicate" } },
+        "branchName": { "type": "string", "minLength": 1 },
+        "ticket": { "type": "string", "minLength": 1 }
+      }
+    },
+    "gate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "executable", "arguments", "workingDirectory", "environmentNames", "appliesTo"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "type": { "const": "command" },
+            "executable": { "type": "string", "minLength": 1 },
+            "arguments": { "type": "array", "items": { "type": "string" } },
+            "workingDirectory": { "type": "string", "minLength": 1 },
+            "environmentNames": { "type": "array", "items": { "type": "string" } },
+            "appliesTo": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "query", "paths", "expectedCount", "appliesTo"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "type": { "const": "search" },
+            "query": { "type": "string", "minLength": 1 },
+            "paths": { "type": "array", "items": { "type": "string" } },
+            "expectedCount": { "type": "integer", "minimum": 0 },
+            "appliesTo": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "waiver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateId", "failurePattern", "alternativeGateIds", "reason"],
+      "properties": {
+        "gateId": { "type": "string", "minLength": 1 },
+        "failurePattern": { "type": "string", "minLength": 1 },
+        "alternativeGateIds": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxAttemptsPerItem",
+        "maxReplans",
+        "maxParallel",
+        "attemptTimeoutMs",
+        "idleTimeoutMs",
+        "maxAdapterLineBytes",
+        "maxRetainedOutputBytes"
+      ],
+      "properties": {
+        "maxAttemptsPerItem": { "type": "integer", "minimum": 1 },
+        "maxReplans": { "type": "integer", "minimum": 0 },
+        "maxParallel": { "type": "integer", "minimum": 1 },
+        "attemptTimeoutMs": { "type": "integer", "minimum": 1 },
+        "idleTimeoutMs": { "type": "integer", "minimum": 1 },
+        "maxAdapterLineBytes": { "type": "integer", "minimum": 1 },
+        "maxRetainedOutputBytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "assumption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "source"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

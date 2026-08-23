@@ -1,0 +1,108 @@
+# Recovery and durable state
+
+## State location
+
+The default state root is `<git-common-dir>/autopilot`, shared by the main checkout and linked worktrees. A run is stored under `runs/<run-id>/`:
+
+```text
+charter.json
+events.jsonl
+snapshot.json
+receipts/
+reports/
+leases/
+run.lock/
+```
+
+`events.jsonl` is canonical and hash-linked. `snapshot.json` is a rebuildable cache. Git owns commits and trees; receipts own gate observations.
+
+Each new worktree is a direct sibling of the canonical project repository:
+
+```text
+<repo-parent>/<repo-name>-autopilot-<run-id>-<item-id>
+```
+
+Names longer than 200 bytes retain a readable prefix and receive a deterministic identity hash suffix. Autopilot rejects symlinks, unmanaged non-empty destinations, and incompatible Git worktree registrations. It never searches for or silently adopts a similarly named sibling.
+
+Normal lifecycle requests use `/autopilot status`, `/autopilot resume`, `/autopilot stop`, and `/autopilot wrap up`; repository-scoped discovery supplies the run identity. For direct recovery with `--state-dir`, pass the same path to every command. The option moves only durable state; sibling worktree placement does not change.
+
+## Resume
+
+```bash
+node runtime/dist/src/cli.js --state-dir <same-path> resume <run-id>
+```
+
+Resume acquires the coordinator lock, validates the sealed charter and journal, rebuilds projection state, marks interrupted active attempts as blocked, assigns fresh leases, inspects existing worktrees and refs, and continues within the original limits. It does not re-open `SUCCEEDED` or `STOPPED` runs.
+
+## Address review comments with an amendment successor
+
+A successful run stays terminal. `/autopilot address review comments` first uses the runtime's read-only `review-feedback` operation to discover the latest successful leaf, verify its exact recorded PR/MR remains open at the accepted head, and snapshot unresolved GitHub review threads, PR comments and review summaries, or GitLab discussions. Comment bodies are untrusted data. Ambiguous, conflicting, untestable, authority-expanding, or out-of-scope requests require user clarification instead of automatic execution.
+
+The skill compiles selected actionable feedback into a new single-item charter with fresh grants, gates, and budgets:
+
+```json
+{
+  "predecessorRunId": "original-run",
+  "amends": {
+    "runId": "original-run",
+    "itemId": "original-item"
+  }
+}
+```
+
+Use the predecessor's confirmed remote commit as `repository.baseCommit`, and preserve its item ID, branch, repository, delivery provider, remote, and base branch. Bind `reviewFeedback.observedHeadCommit` to that commit and seal each selected comment's thread ID, content hash, URL, and provider-resolution flag. Use `change-request-ready` delivery with `remote.push` authority for the runtime and `change-request.update` authority for delivery. When at least one selected thread is provider-resolvable, explicitly grant `review-thread.resolve` to delivery. Start the successor normally; do not resume the terminal predecessor.
+
+Before creating successor state, Autopilot locks the managed branch and requires the predecessor run and item to be successful, its retained worktree to be clean, and its local branch to match the confirmed commit. Runtime preflight also requires the exact recorded change request to remain open with matching local, remote, and provider identities and every selected comment to retain its sealed identity and content. Delivery performs only an ordinary fast-forward push and confirms that the same change request reached the verified successor commit. It then resolves only the exact selected GitHub review threads or resolvable GitLab discussions. Provider-level PR comments and review summaries have no resolved state; Autopilot reports them as addressed by the verified commit without claiming provider resolution. Any new or changed feedback requires another successor.
+
+A terminal sibling worktree is retained but unleased. Do not edit, commit, push, reset, clean, remove, or bypass hooks in it manually. Any identity mismatch stops without changing the worktree or refs. Further review feedback amends the latest successful successor.
+
+New runs never migrate or adopt developer-preview worktrees from the former state-root `worktrees/` layout. Wrap-up has one narrow compatibility path: it may remove the exact clean registered worktree recorded by a retained legacy lease. If a manually reviewed PR advanced after the recorded Autopilot head, wrap-up accepts only a provider-merged fast-forward descendant when the legacy lease worktree, local branch, and remote branch all agree on that head.
+
+## Wrap up merged change requests
+
+```bash
+node runtime/dist/src/cli.js --state-dir <same-path> wrap-up [run-id]
+node runtime/dist/src/cli.js --state-dir <same-path> --handoff wrap-up [run-id]
+```
+
+`wrap-up` is destructive by design. It accepts only a successful, unsuperseded GitHub or GitLab run for which every exact recorded PR/MR is provider-confirmed as merged at Autopilot's accepted head and base branch. It preflights every item before mutation, then compare-deletes the remote branches, removes only clean registered sibling worktrees, compare-deletes local branches, and removes the complete successful amendment-chain state. Remote or local divergence, dirty worktrees, missing evidence, unmerged requests, stopped runs, and local-only runs fail closed.
+
+With no run ID, discovery automatically selects exactly one candidate. Multiple candidates produce a non-mutating list with exact follow-up commands. `--json` never prompts. Confirmed cleanup effects are restart-reconciled while canonical state exists; state is removed only after all Git effects complete. Each run directory is atomically renamed into a serialized state-root trash area before recursive removal, so an interrupted recursive deletion cannot corrupt a retained canonical run.
+
+Handoffs are skipped by default. `--handoff` writes `.autopilot/handoffs/<run-id>.json` and `.md` inside the project before deleting state. These files are not committed and may make the project checkout dirty. Existing different files and symlinked handoff directories are rejected.
+
+## Incomplete final journal record
+
+A process can exit after writing part of the final JSON line. Autopilot ignores that partial line for projection but refuses to append after it. Inspect the file, then explicitly remove only the incomplete tail:
+
+```bash
+node runtime/dist/src/cli.js --repair-journal --state-dir <same-path> resume <run-id>
+```
+
+The repair option never changes a complete record or bypasses a hash mismatch. A changed complete record is corruption and requires operator investigation, not automatic repair.
+
+## Stop
+
+```bash
+node runtime/dist/src/cli.js --state-dir <same-path> stop <run-id>
+```
+
+Without a live owner, stop acquires the run lock, appends a terminal operator event, and writes a final report. With a live foreground coordinator, it writes an atomic request bound to the current lock token. The owner cancels active adapter work and remains the only process that can append `RUN_STOPPED`. If success is recorded before the owner observes the request, success wins. Stop preserves canonical state, branches, receipts, and worktrees. Continuing requires a successor charter with a new run ID and an optional `predecessorRunId`.
+
+## Commit hooks
+
+New charters should explicitly set `commitPolicy.preCommitHook` to `run` or `skip`. Before sealing `run`, inspect the hook without executing it and include known outputs—such as generated version files—in `commitPolicy.writableRoots`, repository writable roots, and runtime `files.read`/`files.write` grants. Do not widen the worker's roots for hook-only outputs. If the effects cannot be bounded, ask rather than granting the entire repository. With `run`, Autopilot executes the configured executable `pre-commit` hook after the candidate tree first passes its gates. At attempt start it records the executable hook path and content identity together with Git ref and configuration identities. It refuses to execute changed hook content and rejects hook-created out-of-scope files, Git ref changes, or Git configuration changes—including remote redirection. It reruns all gates when the hook changes the tree, and verification gates themselves must not mutate files, refs, or configuration. The final commit is created from that exact verified tree without invoking hooks again. Other Git hook types are not supported in this release.
+
+A missing or non-executable pre-commit hook is recorded as `NOT_CONFIGURED`. A failing hook preserves its bounded output and resulting worktree. Hook code runs cooperatively with a filtered environment; list any required environment names in `commitPolicy.environmentNames` and authorize each through a matching runtime `credentials.use` grant. Scoped grants cannot authorize a different variable.
+
+## Locks
+
+`run.lock` is an atomic directory containing owner host, PID, start time, and token. A second live coordinator is denied. A dead same-host PID can be replaced through an atomic stale-lock rename. Cross-host and Windows behavior remain unverified until their fault-injection suites pass.
+
+## Reports
+
+- `reports/status.json`: current projection and the next skill command
+- `reports/final.json`: terminal state, blockers, and successor instructions
+- `reports/decisions.tsv`: generated projection of durable decision events
+
+A report is a projection. It cannot replace the charter, journal, Git objects, or receipts.

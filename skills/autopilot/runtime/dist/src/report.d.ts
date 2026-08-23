@@ -1,0 +1,54 @@
+import type { RunCharter } from "./charter.js";
+import type { JournalRecord } from "./journal.js";
+import type { RunProjection } from "./reducer.js";
+export interface RunReport {
+    readonly schemaVersion: 1;
+    readonly generatedAt: string;
+    readonly runId: string;
+    readonly charterHash: string;
+    readonly state: string;
+    readonly items: readonly {
+        readonly itemId: string;
+        readonly state: string;
+        readonly branchName: string;
+        readonly subject?: string;
+        readonly blocker?: string;
+        readonly attempts: number;
+    }[];
+    readonly lastReason: string;
+    readonly predicateSummary?: string;
+    readonly effects: readonly {
+        readonly effect: string;
+        readonly itemId?: string;
+        readonly observedState: string;
+        readonly idempotencyKey: string;
+    }[];
+    readonly receipts: readonly {
+        readonly itemId?: string;
+        readonly receiptId: string;
+        readonly status: string;
+    }[];
+    readonly waivers: readonly {
+        readonly gateId: string;
+        readonly reason: string;
+    }[];
+    readonly worktrees: readonly {
+        readonly itemId: string;
+        readonly path: string;
+    }[];
+    readonly decisions: number;
+    readonly assurance: string;
+    readonly continuationCommand?: string;
+    readonly successorInstruction?: string;
+    readonly amendment?: {
+        readonly runId: string;
+        readonly itemId: string;
+    };
+    readonly commitPolicy: {
+        readonly preCommitHook: "run" | "skip";
+        readonly writableRoots: readonly string[];
+        readonly environmentNames: readonly string[];
+    };
+    readonly unverifiedBoundaries: readonly string[];
+}
+export declare function writeReports(runDirectory: string, charter: RunCharter, projection: RunProjection, records: readonly JournalRecord[], assurance: string, unverifiedBoundaries: readonly string[], persist?: boolean): Promise<RunReport>;

@@ -1,0 +1,30 @@
+{
+  "name": "@coding-harness/autopilot-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Durable harness-agnostic lifecycle runtime for the Autopilot skill",
+  "type": "module",
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "autopilot": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist/",
+    "schemas/"
+  ],
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/make-executable.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters && tsc -p tsconfig.test.json --noEmit --noUnusedLocals --noUnusedParameters",
+    "format:check": "node scripts/format-check.mjs",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test .test-dist/test/*.test.js",
+    "test:coverage": "npm run build && tsc -p tsconfig.test.json && node --test --experimental-test-coverage .test-dist/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3"
+  }
+}

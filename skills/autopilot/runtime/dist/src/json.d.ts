@@ -1,0 +1,11 @@
+export declare function isRecord(value: unknown): value is Record<string, unknown>;
+export declare function expectRecord(value: unknown, path: string): Record<string, unknown>;
+export declare function expectString(value: unknown, path: string): string;
+export declare function expectOptionalString(value: unknown, path: string): string | undefined;
+export declare function expectStringArray(value: unknown, path: string): readonly string[];
+export declare function expectInteger(value: unknown, path: string, minimum?: number): number;
+export declare function expectBoolean(value: unknown, path: string): boolean;
+export declare function expectLiteral<T extends string>(value: unknown, allowed: readonly T[], path: string): T;
+export declare function assertKnownKeys(value: Record<string, unknown>, allowed: readonly string[], path: string): void;
+export declare function canonicalJson(value: unknown): string;
+export declare function sha256(value: string | Uint8Array): string;

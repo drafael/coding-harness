@@ -1,0 +1,134 @@
+import { GRANT_FAMILIES, type AssuranceLevel, type CapabilityGrant, type GrantFamily } from "./charter.js";
+import { AutopilotError } from "./errors.js";
+import { expectBoolean, expectInteger, expectLiteral, expectRecord, expectString, expectStringArray } from "./json.js";
+
+export interface CapabilityManifest {
+  readonly protocolVersion: 1;
+  readonly adapterName: string;
+  readonly adapterVersion: string;
+  readonly harnessVersion: string;
+  readonly families: readonly GrantFamily[];
+  readonly assurance: AssuranceLevel;
+  readonly unattended: boolean;
+  readonly maxConcurrency: number;
+  readonly eventStreaming: boolean;
+  readonly cancellation: boolean;
+  readonly restartReattachment: boolean;
+  readonly restrictions: "enforced" | "cooperative";
+  readonly limitations: readonly string[];
+}
+
+export interface ExecutionRequest {
+  readonly protocolVersion: 1;
+  readonly runId: string;
+  readonly itemId: string;
+  readonly attemptId: string;
+  readonly worktreePath: string;
+  readonly objective: string;
+  readonly acceptanceSummary: string;
+  readonly writableRoots: readonly string[];
+  readonly grants: readonly CapabilityGrant[];
+  readonly deadline: string;
+  readonly idleTimeoutMs: number;
+  readonly maximumLineBytes: number;
+  readonly maximumOutputBytes: number;
+}
+
+export interface ExecutionHandle {
+  readonly protocolVersion: 1;
+  readonly adapterExecutionId: string;
+  readonly startedAt: string;
+}
+
+export interface ExecutionObservation {
+  readonly protocolVersion: 1;
+  readonly adapterExecutionId: string;
+  readonly status: "completed" | "failed" | "cancelled" | "timed-out";
+  readonly exitCode: number;
+  readonly completedAt: string;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
+}
+
+export interface CancelResult {
+  readonly protocolVersion: 1;
+  readonly accepted: boolean;
+}
+
+export interface HarnessPort {
+  describe(): Promise<CapabilityManifest>;
+  launch(request: ExecutionRequest): Promise<ExecutionHandle>;
+  observe(handle: ExecutionHandle): Promise<ExecutionObservation>;
+  cancel(handle: ExecutionHandle): Promise<CancelResult>;
+}
+
+export type AdapterMessage =
+  | { readonly protocolVersion: 1; readonly type: "capabilities"; readonly manifest: CapabilityManifest }
+  | { readonly protocolVersion: 1; readonly type: "started"; readonly executionId: string }
+  | { readonly protocolVersion: 1; readonly type: "progress"; readonly executionId: string; readonly cursor: string }
+  | { readonly protocolVersion: 1; readonly type: "terminal"; readonly executionId: string; readonly status: ExecutionObservation["status"]; readonly exitCode: number };
+
+export function parseAdapterMessage(line: string, maximumBytes: number): AdapterMessage {
+  if (Buffer.byteLength(line) > maximumBytes) {
+    throw new AutopilotError("ADAPTER_MALFORMED", "adapter message exceeds the configured line limit");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line) as unknown;
+  } catch (error) {
+    throw new AutopilotError("ADAPTER_MALFORMED", "adapter message is not valid JSON", { cause: String(error) });
+  }
+  const object = expectRecord(parsed, "adapter message");
+  if (object.protocolVersion !== 1) {
+    throw new AutopilotError("ADAPTER_UNSUPPORTED", "adapter protocol version is not supported");
+  }
+  const type = expectLiteral(object.type, ["capabilities", "started", "progress", "terminal"], "adapter message.type");
+  if (type === "capabilities") {
+    const manifest = expectRecord(object.manifest, "adapter message.manifest");
+    if (manifest.protocolVersion !== 1 || !Array.isArray(manifest.families)) {
+      throw new AutopilotError("ADAPTER_MALFORMED", "capability manifest is malformed");
+    }
+    return {
+      protocolVersion: 1,
+      type,
+      manifest: {
+        protocolVersion: 1,
+        adapterName: expectString(manifest.adapterName, "manifest.adapterName"),
+        adapterVersion: expectString(manifest.adapterVersion, "manifest.adapterVersion"),
+        harnessVersion: expectString(manifest.harnessVersion, "manifest.harnessVersion"),
+        families: manifest.families.map((family, index) => expectLiteral(family, GRANT_FAMILIES, `manifest.families[${index}]`)),
+        assurance: expectLiteral(manifest.assurance, ["cooperative", "enforced"], "manifest.assurance"),
+        unattended: expectBoolean(manifest.unattended, "manifest.unattended"),
+        maxConcurrency: expectInteger(manifest.maxConcurrency, "manifest.maxConcurrency", 1),
+        eventStreaming: expectBoolean(manifest.eventStreaming, "manifest.eventStreaming"),
+        cancellation: expectBoolean(manifest.cancellation, "manifest.cancellation"),
+        restartReattachment: expectBoolean(manifest.restartReattachment, "manifest.restartReattachment"),
+        restrictions: expectLiteral(manifest.restrictions, ["cooperative", "enforced"], "manifest.restrictions"),
+        limitations: expectStringArray(manifest.limitations, "manifest.limitations"),
+      },
+    };
+  }
+  const executionId = expectString(object.executionId, "adapter message.executionId");
+  if (type === "started") {
+    return { protocolVersion: 1, type, executionId };
+  }
+  if (type === "progress") {
+    return { protocolVersion: 1, type, executionId, cursor: expectString(object.cursor, "adapter message.cursor") };
+  }
+  return {
+    protocolVersion: 1,
+    type,
+    executionId,
+    status: expectLiteral(object.status, ["completed", "failed", "cancelled", "timed-out"], "adapter message.status"),
+    exitCode: expectInteger(object.exitCode, "adapter message.exitCode"),
+  };
+}
+
+export function parseCancelResult(value: unknown): CancelResult {
+  const object = expectRecord(value, "cancel result");
+  if (object.protocolVersion !== 1) {
+    throw new AutopilotError("ADAPTER_UNSUPPORTED", "cancel result protocol version is not supported");
+  }
+  return { protocolVersion: 1, accepted: expectBoolean(object.accepted, "cancel result.accepted") };
+}

@@ -34,7 +34,22 @@ To use `coding-harness/skills` in your projects, copy or symlink the `skills` fo
 
 ## Usage and workflow
 
-Activate a skill with the host’s command syntax (Pi uses `/skill:<name>`; other hosts may use `/<name>`) or a trigger phrase from its metadata.
+Ask your coding agent in natural language or use the skill command syntax supported by your host. The examples below show portable prompts rather than host-specific commands.
+
+### Run a bounded unattended implementation
+
+Use [`autopilot`](skills/autopilot) when the objective has explicit completion predicates and the user wants restart-resumable execution through a supported coding harness:
+
+```text
+Use the autopilot skill. I am going to sleep. Work overnight on migrating this multi-module Java backend
+from Spring Boot 3.x to Spring Boot 4.0.0. Done means the Maven verify build,
+integration tests, and application-context smoke tests pass; no Spring Boot 3.x
+artifacts remain; and the migration guide is updated. Open a PR or MR, but do not merge or deploy.
+```
+
+Autopilot requires Node.js 24+ and Git. Optional harness integrations can provide delegated workers and live activity; Autopilot falls back to direct harness execution when they are unavailable. Remote delivery also requires `gh` or `glab` and explicit per-run grants.
+
+Ask “What happened overnight?” to check progress, “Continue the interrupted run” to resume a nonterminal run, or “Stop this run and preserve its work” to end it safely. “Address the review comments” snapshots feedback from the exact open PR/MR, creates a sealed amendment successor, and resolves provider-resolvable threads only after the fix passes. After provider-confirmed merge, “Wrap up the merged run” performs guarded remote-branch, sibling-worktree, local-branch, and amendment-chain cleanup; ask for a handoff when project-local summaries should be preserved.
 
 ### Implement a user story
 
@@ -51,20 +66,20 @@ implement the plan YYYY-MM-DD-user-story-implementation-plan.md
 
 ### Architecture design
 
-The [`architect`](skills/architect) skill is manual-only. Use it after behavior and important constraints are understood to produce a caller-first, implementation-ready structural design. In Pi:
+The [`architect`](skills/architect) skill is manual-only. Use it after behavior and important constraints are understood to produce a caller-first, implementation-ready structural design.
 
 ```text
-/skill:architect Architect the types, signatures, and module boundaries for this approved design.
+Use the architect skill to define the types, signatures, and module boundaries for this approved design.
 ```
 
 It returns a design by default. Implementation requires an explicit request or later approval.
 
 ### Candidate arena
 
-The [`arena`](skills/arena) skill is manual-only for direct use. Invoke it when several independent attempts at the same bounded artifact would improve the decision. In Pi:
+The [`arena`](skills/arena) skill is manual-only for direct use. Invoke it when several independent attempts at the same bounded artifact would improve the decision.
 
 ```text
-/skill:arena Produce three independent designs for this parser contract and synthesize the strongest result.
+Use the arena skill to produce three independent designs for this parser contract and synthesize the strongest result.
 ```
 
 It returns one coherent synthesis and the applicable verification result rather than a collection of candidate fragments.
@@ -78,30 +93,30 @@ code review uncommitted changes
 
 ### Blast-radius analysis
 
-The [`blast-radius`](skills/blast-radius) skill is manual-only. In Pi, invoke it with a bounded local comparison:
+The [`blast-radius`](skills/blast-radius) skill is manual-only. Invoke it with a bounded local comparison:
 
 ```text
-/skill:blast-radius Analyze the blast radius of HEAD~1..HEAD.
+Use the blast-radius skill to analyze HEAD~1..HEAD.
 ```
 
 It traces credible effects beyond the obvious diff and seeks executable proof for decision-critical safety assumptions.
 
 ### Session reflection
 
-The [`reflect`](skills/reflect) skill is manual-only. In Pi, invoke it after a substantial session with:
+The [`reflect`](skills/reflect) skill is manual-only. Invoke it after a substantial session:
 
 ```text
-/skill:reflect
+Use the reflect skill to review this session and propose evidence-backed improvements.
 ```
 
 It proposes evidence-backed improvements to existing skills and waits for individual approval before editing.
 
 ### Learn a codebase
 
-The [`teach`](skills/teach) skill is manual-only. In Pi, invoke it with the learning request:
+The [`teach`](skills/teach) skill is manual-only. Invoke it with the learning request:
 
 ```text
-/skill:teach Teach me how request retries work in this service.
+Use the teach skill to explain how request retries work in this service.
 ```
 
 It explains repository-backed code progressively without modifying the project.
@@ -151,9 +166,9 @@ Choose the diagram skill based on the artifact you need:
 - Use [`diagram-design`](skills/diagram-design) for editorial standalone HTML/SVG diagrams, branded styling, or redraws of Mermaid and draw.io sources.
 
 ```text
-/skill:pretty-mermaid create an ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users
+Use the pretty-mermaid skill to create an ASCII terminal-friendly sequence diagram of the endpoint /api/v1/users.
 ```
 
 ```text
-/skill:diagram-design create an editorial architecture diagram of this service as standalone HTML
+Use the diagram-design skill to create an editorial architecture diagram of this service as standalone HTML.
 ```

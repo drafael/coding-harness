@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coding-harness.local/autopilot/adapter.schema.json",
+  "title": "Autopilot adapter JSONL message",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "type", "manifest"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "type": { "const": "capabilities" },
+        "manifest": { "$ref": "#/$defs/manifest" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "type", "executionId"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "type": { "const": "started" },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "type", "executionId", "cursor"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "type": { "const": "progress" },
+        "executionId": { "type": "string", "minLength": 1 },
+        "cursor": { "type": "string", "minLength": 1 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "type", "executionId", "status", "exitCode"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "type": { "const": "terminal" },
+        "executionId": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["completed", "failed", "cancelled", "timed-out"] },
+        "exitCode": { "type": "integer", "minimum": 0 }
+      }
+    }
+  ],
+  "$defs": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "adapterName",
+        "adapterVersion",
+        "harnessVersion",
+        "families",
+        "assurance",
+        "unattended",
+        "maxConcurrency",
+        "eventStreaming",
+        "cancellation",
+        "restartReattachment",
+        "restrictions",
+        "limitations"
+      ],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "adapterName": { "type": "string", "minLength": 1 },
+        "adapterVersion": { "type": "string", "minLength": 1 },
+        "harnessVersion": { "type": "string", "minLength": 1 },
+        "families": { "type": "array", "items": { "type": "string" } },
+        "assurance": { "enum": ["cooperative", "enforced"] },
+        "unattended": { "type": "boolean" },
+        "maxConcurrency": { "type": "integer", "minimum": 1 },
+        "eventStreaming": { "type": "boolean" },
+        "cancellation": { "type": "boolean" },
+        "restartReattachment": { "type": "boolean" },
+        "restrictions": { "enum": ["cooperative", "enforced"] },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
