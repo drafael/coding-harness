@@ -34,6 +34,10 @@ A review-feedback amendment also seals `reviewFeedback.observedHeadCommit` and a
 
 Set `repository.baseCommit` to the predecessor's confirmed remote commit. The runtime denies dirty worktrees, unmanaged commits, changed refs, missing evidence, closed or merged change requests, concurrent adopters, and non-fast-forward delivery. See [recovery](recovery.md) for the launch procedure.
 
+## Command gate environments
+
+Before sealing a command gate, resolve how the repository selects its required runtime or build toolchain. Prefer checked-in wrappers and toolchain configuration. If the command still depends on a named selector such as `JAVA_HOME`, include it in the gate's `environmentNames` and authorize the same name with a runtime `credentials.use` grant. Include it in `commitPolicy.environmentNames` only when the pre-commit hook also requires it. Runtime commands use a filtered environment and do not automatically inherit toolchain choices from the parent shell or worker process; forward only the required names rather than the ambient environment.
+
 ## Commit policy
 
 For `commitPolicy.preCommitHook: "run"`, Autopilot runs the configured executable pre-commit hook with the baseline runtime environment plus `commitPolicy.environmentNames`. Put predictable hook-only outputs in `commitPolicy.writableRoots` and grant those paths to the runtime without widening worker roots. Autopilot records the executable hook's path and content identity at attempt start, refuses changed content, verifies the candidate before the hook, rejects out-of-scope, ref, or Git configuration changes, and reruns gates if the tree changes. Every forwarded environment name also requires a matching runtime `credentials.use` grant. The runtime then creates the exact verified commit without invoking hooks again. `skip` is explicit; absence remains equivalent to `skip` only for older schema-version-1 charters.

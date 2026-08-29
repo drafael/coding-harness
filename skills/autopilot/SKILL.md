@@ -16,7 +16,8 @@ For a new implementation run:
 1. Read [references/charter.md](references/charter.md).
 2. Run `node runtime/dist/src/cli.js doctor` from this skill directory.
 3. Confirm Node.js 24+, Git, and the selected harness are available.
-4. Do not install tools, download runtimes, authenticate providers, or modify global configuration.
+4. Resolve how the repository selects each required build toolchain before sealing command gates. Prefer checked-in wrappers or toolchain configuration; when a gate or hook still requires a named environment selector, forward only that name and authorize it for the runtime.
+5. Do not install tools, download runtimes, authenticate providers, or modify global configuration.
 
 Treat “I am going to sleep,” “work overnight,” and “have this ready in the morning” as explicit unattended-run intent. Preserve that intent in `sourceText`, but do not turn it into a deadline, merge grant, deployment grant, or guarantee of completion time.
 
