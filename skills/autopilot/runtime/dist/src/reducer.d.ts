@@ -14,6 +14,7 @@ export interface AttemptProjection {
     readonly expectedHookPath?: string;
     readonly contextHash?: string;
     readonly contextJournalSequence?: number;
+    readonly executionSupervised?: boolean;
     readonly deadline: string;
     readonly idempotencyKey: string;
     readonly outcome?: "completed" | "failed" | "cancelled" | "timed-out" | "stale";

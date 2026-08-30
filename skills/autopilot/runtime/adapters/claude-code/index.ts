@@ -23,7 +23,7 @@ export function createClaudeCodeAdapter(): CliHarnessAdapter {
     limitations: [
       "Bash restrictions are cooperative.",
       "Safe mode excludes customizations; admin-managed policy may still apply.",
-      "Executions cannot be reattached.",
+      "Implementation executions use the attempt-scoped supervisor for restart reattachment; review executions remain session-scoped.",
       "The exact-tree review role is implemented but has no version-pinned live verification.",
     ],
     expectsJsonLines: true,

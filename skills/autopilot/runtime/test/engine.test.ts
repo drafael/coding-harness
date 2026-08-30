@@ -15,11 +15,12 @@ import { sealCharter } from "../src/charter.js";
 import { AutopilotEngine } from "../src/engine.js";
 import { newEventId } from "../src/events.js";
 import { appendEvent, readJournal, writeImmutableJson } from "../src/journal.js";
+import { acquireWriterLease } from "../src/leases.js";
 import { buildAttemptContext, attemptContextHash } from "../src/attempt-context.js";
 import { canonicalJson, isRecord, sha256 } from "../src/json.js";
 import { rebuildProjection } from "../src/projection.js";
 import { runChecked } from "../src/process.js";
-import { observeRepository } from "../src/repository.js";
+import { ensureWorktree, observeRepository } from "../src/repository.js";
 import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
 
 function event(reason: string) {
@@ -174,6 +175,42 @@ class TrackingAdapter extends FakeAdapter {
   override async launch(request: ExecutionRequest): Promise<ExecutionHandle> {
     this.launches += 1;
     return await super.launch(request);
+  }
+}
+
+class ReattachableAdapter extends TrackingAdapter {
+  reattachments = 0;
+  readonly #reattachedId = "reattached-execution";
+  readonly #reattachedStatus: ExecutionObservation["status"];
+
+  constructor(reattachedStatus: ExecutionObservation["status"] = "completed") {
+    super();
+    this.#reattachedStatus = reattachedStatus;
+  }
+
+  override async describe(): Promise<CapabilityManifest> {
+    return { ...await super.describe(), restartReattachment: true };
+  }
+
+  async reattach(_request: ExecutionRequest): Promise<ExecutionHandle> {
+    this.reattachments += 1;
+    return { protocolVersion: 1, adapterExecutionId: this.#reattachedId, startedAt: new Date().toISOString() };
+  }
+
+  override async observe(handle: ExecutionHandle): Promise<ExecutionObservation> {
+    if (handle.adapterExecutionId !== this.#reattachedId) {
+      return await super.observe(handle);
+    }
+    return {
+      protocolVersion: 1,
+      adapterExecutionId: handle.adapterExecutionId,
+      status: this.#reattachedStatus,
+      exitCode: this.#reattachedStatus === "completed" ? 0 : 124,
+      completedAt: new Date().toISOString(),
+      stdout: "{}\n",
+      stderr: "",
+      truncated: false,
+    };
   }
 }
 
@@ -496,6 +533,229 @@ test("engine does not launch a replacement when interrupted execution quiescence
   assert.equal(adapter.launches, 0);
   assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
     lifecycleEvent.type === "RUN_WAITING" && lifecycleEvent.waiting?.kind === "operator-pause"
+  ), false);
+});
+
+test("engine reattaches an interrupted supervised execution before launching a replacement", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit, "single", "run-supervised-execution"));
+  const item = charter.work[0];
+  assert.ok(item !== undefined);
+  const stateRoot = await mkdtemp(join(tmpdir(), "autopilot-engine-supervised-execution-"));
+  const runDirectory = join(stateRoot, "runs", charter.runId);
+  const attemptsDirectory = join(runDirectory, "reports", "attempts");
+  await mkdir(attemptsDirectory, { recursive: true });
+  const journalPath = join(runDirectory, "events.jsonl");
+  await appendEvent(journalPath, { ...event("compiled"), type: "CHARTER_COMPILED" });
+  await appendEvent(journalPath, { ...event("reconciling"), type: "RECONCILIATION_STARTED" });
+  await appendEvent(journalPath, { ...event("running"), type: "RECONCILIATION_COMPLETED" });
+  await appendEvent(journalPath, { ...event("ready"), type: "ITEM_READY", itemId: item.id });
+  const beforeAttempt = await readJournal(journalPath);
+  const worktreePath = await ensureWorktree(charter, item);
+  const observation = await observeRepository(worktreePath);
+  const attemptId = "attempt-supervised";
+  const context = buildAttemptContext({
+    charter,
+    item,
+    attemptId,
+    leaseEpoch: 1,
+    observation,
+    records: beforeAttempt.records,
+    projection: rebuildProjection(charter, beforeAttempt.records),
+    predicateEvidence: [],
+    reviewFindings: [],
+  });
+  const contextHash = attemptContextHash(context);
+  await writeImmutableJson(join(attemptsDirectory, `${attemptId}.context.json`), context);
+  await acquireWriterLease(runDirectory, item.id, item.branchName, worktreePath, attemptId, 30_000);
+  await appendEvent(journalPath, {
+    ...event("supervised attempt launched before coordinator loss"),
+    type: "ATTEMPT_STARTED",
+    itemId: item.id,
+    attemptId,
+    leaseEpoch: 1,
+    expectedBaseCommit: observation.headCommit,
+    expectedTreeIdentity: observation.treeIdentity,
+    expectedConfigurationIdentity: observation.configurationIdentity,
+    contextHash,
+    contextJournalSequence: context.sourceJournalSequence,
+    executionSupervised: true,
+    deadline: new Date(Date.now() + 30_000).toISOString(),
+    idempotencyKey: "attempt:supervised",
+  });
+  const journal = await readJournal(journalPath);
+  const adapter = new ReattachableAdapter();
+  const engine = new AutopilotEngine({
+    stateRoot,
+    runDirectory,
+    charter,
+    adapter,
+    records: journal.records,
+    projection: rebuildProjection(charter, journal.records),
+  });
+
+  const report = await engine.run();
+  const finalJournal = await readJournal(journalPath);
+
+  assert.equal(report.state, "SUCCEEDED");
+  assert.equal(report.items[0]?.attempts, 2);
+  assert.equal(adapter.reattachments, 1);
+  assert.equal(adapter.launches, 1);
+  assert.equal(finalJournal.records.filter(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_FINISHED" && lifecycleEvent.attemptId === attemptId
+  ).length, 1);
+  assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ITEM_BLOCKED" && lifecycleEvent.errorCode === "EXECUTION_STATE_UNKNOWN"
+  ), false);
+});
+
+test("engine preserves an uncharged pause when supervised cancellation is first observed after restart", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit, "single", "run-supervised-pause"));
+  const item = charter.work[0];
+  assert.ok(item !== undefined);
+  const stateRoot = await mkdtemp(join(tmpdir(), "autopilot-engine-supervised-pause-"));
+  const runDirectory = join(stateRoot, "runs", charter.runId);
+  const attemptsDirectory = join(runDirectory, "reports", "attempts");
+  await mkdir(attemptsDirectory, { recursive: true });
+  const journalPath = join(runDirectory, "events.jsonl");
+  await appendEvent(journalPath, { ...event("compiled"), type: "CHARTER_COMPILED" });
+  await appendEvent(journalPath, { ...event("reconciling"), type: "RECONCILIATION_STARTED" });
+  await appendEvent(journalPath, { ...event("running"), type: "RECONCILIATION_COMPLETED" });
+  await appendEvent(journalPath, { ...event("ready"), type: "ITEM_READY", itemId: item.id });
+  const beforeAttempt = await readJournal(journalPath);
+  const worktreePath = await ensureWorktree(charter, item);
+  const observation = await observeRepository(worktreePath);
+  const attemptId = "attempt-supervised-pause";
+  const context = buildAttemptContext({
+    charter,
+    item,
+    attemptId,
+    leaseEpoch: 1,
+    observation,
+    records: beforeAttempt.records,
+    projection: rebuildProjection(charter, beforeAttempt.records),
+    predicateEvidence: [],
+    reviewFindings: [],
+  });
+  const contextHash = attemptContextHash(context);
+  await writeImmutableJson(join(attemptsDirectory, `${attemptId}.context.json`), context);
+  await acquireWriterLease(runDirectory, item.id, item.branchName, worktreePath, attemptId, 30_000);
+  await appendEvent(journalPath, {
+    ...event("supervised attempt launched before pause and coordinator loss"),
+    type: "ATTEMPT_STARTED",
+    itemId: item.id,
+    attemptId,
+    leaseEpoch: 1,
+    expectedBaseCommit: observation.headCommit,
+    expectedTreeIdentity: observation.treeIdentity,
+    expectedConfigurationIdentity: observation.configurationIdentity,
+    contextHash,
+    contextJournalSequence: context.sourceJournalSequence,
+    executionSupervised: true,
+    deadline: new Date(Date.now() + 30_000).toISOString(),
+    idempotencyKey: "attempt:supervised-pause",
+  });
+  await appendEvent(journalPath, {
+    ...event("operator pause requested before restart"),
+    type: "RUN_PAUSE_REQUESTED",
+    requestId: "pause-after-restart",
+  });
+  const journal = await readJournal(journalPath);
+  const adapter = new ReattachableAdapter("cancelled");
+  const engine = new AutopilotEngine({
+    stateRoot,
+    runDirectory,
+    charter,
+    adapter,
+    records: journal.records,
+    projection: rebuildProjection(charter, journal.records),
+  });
+
+  const report = await engine.run();
+  const finalJournal = await readJournal(journalPath);
+
+  assert.equal(report.state, "WAITING");
+  assert.equal(report.waiting?.kind, "operator-pause");
+  assert.equal(report.items[0]?.attempts, 1);
+  assert.equal(report.items[0]?.chargedAttempts, 0);
+  assert.equal(adapter.reattachments, 1);
+  assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_PAUSED" && lifecycleEvent.attemptId === attemptId
+  ), true);
+});
+
+test("engine does not pause an expired supervised lease from a stale cancelled observation", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit, "single", "run-supervised-expired"));
+  const item = charter.work[0];
+  assert.ok(item !== undefined);
+  const stateRoot = await mkdtemp(join(tmpdir(), "autopilot-engine-supervised-expired-"));
+  const runDirectory = join(stateRoot, "runs", charter.runId);
+  const attemptsDirectory = join(runDirectory, "reports", "attempts");
+  await mkdir(attemptsDirectory, { recursive: true });
+  const journalPath = join(runDirectory, "events.jsonl");
+  await appendEvent(journalPath, { ...event("compiled"), type: "CHARTER_COMPILED" });
+  await appendEvent(journalPath, { ...event("reconciling"), type: "RECONCILIATION_STARTED" });
+  await appendEvent(journalPath, { ...event("running"), type: "RECONCILIATION_COMPLETED" });
+  await appendEvent(journalPath, { ...event("ready"), type: "ITEM_READY", itemId: item.id });
+  const beforeAttempt = await readJournal(journalPath);
+  const worktreePath = await ensureWorktree(charter, item);
+  const observation = await observeRepository(worktreePath);
+  const attemptId = "attempt-supervised-expired";
+  const context = buildAttemptContext({
+    charter,
+    item,
+    attemptId,
+    leaseEpoch: 1,
+    observation,
+    records: beforeAttempt.records,
+    projection: rebuildProjection(charter, beforeAttempt.records),
+    predicateEvidence: [],
+    reviewFindings: [],
+  });
+  const contextHash = attemptContextHash(context);
+  await writeImmutableJson(join(attemptsDirectory, `${attemptId}.context.json`), context);
+  await acquireWriterLease(runDirectory, item.id, item.branchName, worktreePath, attemptId, 1);
+  await appendEvent(journalPath, {
+    ...event("supervised attempt expired before restart"),
+    type: "ATTEMPT_STARTED",
+    itemId: item.id,
+    attemptId,
+    leaseEpoch: 1,
+    expectedBaseCommit: observation.headCommit,
+    expectedTreeIdentity: observation.treeIdentity,
+    expectedConfigurationIdentity: observation.configurationIdentity,
+    contextHash,
+    contextJournalSequence: context.sourceJournalSequence,
+    executionSupervised: true,
+    deadline: new Date(Date.now() + 30_000).toISOString(),
+    idempotencyKey: "attempt:supervised-expired",
+  });
+  await appendEvent(journalPath, {
+    ...event("operator pause requested before expired restart"),
+    type: "RUN_PAUSE_REQUESTED",
+    requestId: "pause-expired-restart",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const journal = await readJournal(journalPath);
+  const adapter = new ReattachableAdapter("cancelled");
+  const engine = new AutopilotEngine({
+    stateRoot,
+    runDirectory,
+    charter,
+    adapter,
+    records: journal.records,
+    projection: rebuildProjection(charter, journal.records),
+  });
+
+  const report = await engine.run();
+  const finalJournal = await readJournal(journalPath);
+
+  assert.equal(report.items[0]?.chargedAttempts, 1);
+  assert.equal(report.items[0]?.blocker, "INTERRUPTED_ATTEMPT");
+  assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_PAUSED" && lifecycleEvent.attemptId === attemptId
   ), false);
 });
 

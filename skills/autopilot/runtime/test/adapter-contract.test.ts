@@ -1,12 +1,38 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { parseAdapterMessage, type ExecutionRequest } from "../src/adapter-protocol.js";
 import { CliHarnessAdapter, parseReviewResult } from "../src/adapter-process.js";
-import { runProcess } from "../src/process.js";
-import { attemptContextFixture } from "./helpers.js";
+import { boundUtf8, runProcess, terminateProcessTree } from "../src/process.js";
+import { attemptContextFixture, writeNodeExecutable } from "./helpers.js";
+
+test("UTF-8 output bounds retain only complete code points", () => {
+  const bounded = boundUtf8("é", 1);
+
+  assert.equal(bounded.value, "");
+  assert.equal(Buffer.byteLength(bounded.value), 0);
+  assert.equal(bounded.truncated, true);
+});
+
+test("Windows CLI adapters do not advertise restart reattachment", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const adapter = new CliHarnessAdapter({
+    name: "fake",
+    executable: process.execPath,
+    versionArguments: ["--version"],
+    buildArguments: () => ["--version"],
+    assurance: "cooperative",
+    maxConcurrency: 1,
+    cancellation: true,
+    limitations: [],
+    expectsJsonLines: false,
+  });
+
+  assert.equal((await adapter.describe()).restartReattachment, false);
+});
 
 test("adapter protocol parses normalized lifecycle messages", () => {
   const message = parseAdapterMessage(JSON.stringify({
@@ -67,6 +93,65 @@ test("process deadlines terminate descendants before reporting completion", asyn
   await assert.rejects(readFile(marker), /ENOENT/);
 });
 
+test("process spawn callback failure terminates the new process tree before rejecting", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autopilot-process-bootstrap-failure-"));
+  const marker = join(directory, "process-survived");
+  const child = `setTimeout(() => require("node:fs").writeFileSync(process.argv[1], "survived"), 300); setTimeout(() => {}, 10000);`;
+
+  await assert.rejects(runProcess({
+    executable: process.execPath,
+    arguments: ["-e", child, marker],
+    cwd: process.cwd(),
+    timeoutMs: 10_000,
+    onSpawn: () => {
+      throw new Error("bootstrap publication failed");
+    },
+  }), /bootstrap publication failed/);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  await assert.rejects(readFile(marker), /ENOENT/);
+});
+
+test("process deadlines wait for signal-resistant descendants to be force-stopped", {
+  skip: process.platform === "win32",
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autopilot-process-tree-resistant-"));
+  const marker = join(directory, "descendant-survived");
+  const descendant = `process.on("SIGTERM", () => {}); setTimeout(() => require("node:fs").writeFileSync(process.argv[1], "survived"), 5500); setTimeout(() => {}, 10000);`;
+  const parent = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}, ${JSON.stringify(marker)}], { stdio: "ignore" }); setTimeout(() => {}, 10000);`;
+  const startedAt = Date.now();
+
+  await assert.rejects(runProcess({
+    executable: process.execPath,
+    arguments: ["-e", parent],
+    cwd: process.cwd(),
+    idleTimeoutMs: 100,
+    timeoutMs: 10_000,
+  }), /exceeded its deadline/);
+  assert.ok(Date.now() - startedAt >= 5_000);
+  await new Promise((resolve) => setTimeout(resolve, 750));
+
+  await assert.rejects(readFile(marker), /ENOENT/);
+});
+
+test("Windows process-tree termination failure remains execution-state-unknown", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autopilot-taskkill-failure-"));
+  const bin = join(directory, "bin");
+  await mkdir(bin, { recursive: true });
+  await writeNodeExecutable(bin, "taskkill", "#!/usr/bin/env node\nprocess.exit(1);\n");
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${priorPath ?? ""}`;
+  try {
+    await assert.rejects(terminateProcessTree(999_999, "fake"), (error: unknown) =>
+      error instanceof Error && "code" in error && error.code === "EXECUTION_STATE_UNKNOWN"
+    );
+  } finally {
+    process.env.PATH = priorPath;
+  }
+});
+
 test("adapter observation redacts credential-like environment values", async () => {
   process.env.AUTOPILOT_TEST_TOKEN = "test-secret-value";
   try {
@@ -107,6 +192,66 @@ test("adapter observation redacts credential-like environment values", async () 
     assert.match(observation.stdout, /\*\*\*\*/);
   } finally {
     delete process.env.AUTOPILOT_TEST_TOKEN;
+  }
+});
+
+test("supervised reattachment redacts and re-bounds an explicitly granted one-byte credential", {
+  skip: process.platform === "win32",
+}, async () => {
+  const supervisionDirectory = await mkdtemp(join(tmpdir(), "autopilot-adapter-credential-"));
+  process.env.S = "a";
+  process.env.DSN = "long-credential-value-".repeat(8);
+  const longCredentialPrefix = process.env.DSN.slice(0, 40);
+  const createAdapter = (): CliHarnessAdapter => new CliHarnessAdapter({
+    name: "fake",
+    executable: process.execPath,
+    versionArguments: ["--version"],
+    buildArguments: () => ["-e", "setTimeout(() => console.log(process.env.DSN + process.env.S.repeat(100)), 100)"],
+    assurance: "cooperative",
+    maxConcurrency: 1,
+    cancellation: true,
+    limitations: [],
+    expectsJsonLines: true,
+  });
+  const request: ExecutionRequest = {
+    protocolVersion: 1,
+    role: "implementation",
+    runId: "run",
+    itemId: "item",
+    attemptId: "supervised-credential-attempt",
+    worktreePath: process.cwd(),
+    objective: "test",
+    acceptanceSummary: "test",
+    context: attemptContextFixture("supervised-credential-attempt"),
+    contextHash: "context-hash",
+    writableRoots: ["."],
+    grants: [{ family: "credentials.use", actor: "adapter", environmentNames: ["DSN", "S"] }],
+    deadline: new Date(Date.now() + 10_000).toISOString(),
+    idleTimeoutMs: 5_000,
+    maximumLineBytes: 1024,
+    maximumOutputBytes: 64,
+    supervisionDirectory,
+  };
+
+  try {
+    await createAdapter().launch(request);
+    const reattachedAdapter = createAdapter();
+    const handle = await reattachedAdapter.reattach(request);
+    assert.ok(handle !== undefined);
+    const observation = await reattachedAdapter.observe(handle);
+    const retainedResult = JSON.parse(
+      await readFile(join(handle.supervisor?.directory ?? "", "result.json"), "utf8"),
+    ) as { stdout: string; truncated: boolean };
+
+    assert.doesNotMatch(observation.stdout, /a/);
+    assert.doesNotMatch(observation.stdout, new RegExp(longCredentialPrefix));
+    assert.match(observation.stdout, /\*\*\*\*/);
+    assert.ok(Buffer.byteLength(observation.stdout) <= 64);
+    assert.ok(Buffer.byteLength(retainedResult.stdout) <= 64);
+    assert.equal(retainedResult.truncated, true);
+  } finally {
+    delete process.env.S;
+    delete process.env.DSN;
   }
 });
 

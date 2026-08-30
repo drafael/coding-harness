@@ -106,12 +106,18 @@ export interface ExecutionRequest {
   readonly idleTimeoutMs: number;
   readonly maximumLineBytes: number;
   readonly maximumOutputBytes: number;
+  readonly supervisionDirectory?: string;
 }
 
 export interface ExecutionHandle {
   readonly protocolVersion: 1;
   readonly adapterExecutionId: string;
   readonly startedAt: string;
+  readonly supervisor?: {
+    readonly schemaVersion: 1;
+    readonly directory: string;
+    readonly requestHash: string;
+  };
 }
 
 export interface ExecutionObservation {
@@ -134,6 +140,7 @@ export interface CancelResult {
 export interface HarnessPort {
   describe(): Promise<CapabilityManifest>;
   launch(request: ExecutionRequest): Promise<ExecutionHandle>;
+  reattach?(request: ExecutionRequest): Promise<ExecutionHandle | undefined>;
   observe(handle: ExecutionHandle): Promise<ExecutionObservation>;
   cancel(handle: ExecutionHandle): Promise<CancelResult>;
 }

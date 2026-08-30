@@ -1,6 +1,132 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { TextDecoder } from "node:util";
 import { AutopilotError } from "./errors.js";
+async function waitForPosixProcessGroupExit(pid, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        try {
+            process.kill(-pid, 0);
+        }
+        catch (error) {
+            if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+                return true;
+            }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return false;
+}
+export async function terminateProcessTree(pid, executable) {
+    if (process.platform === "win32") {
+        await new Promise((resolveTermination, rejectTermination) => {
+            const terminator = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+                detached: false,
+                stdio: "ignore",
+                windowsHide: true,
+            });
+            const terminatorTimer = setTimeout(() => {
+                terminator.kill();
+                rejectTermination(new AutopilotError("EXECUTION_STATE_UNKNOWN", `${executable} process-tree termination was not confirmed within five seconds`, { pid }));
+            }, 5_000);
+            terminator.once("error", (error) => {
+                clearTimeout(terminatorTimer);
+                rejectTermination(new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot prove that ${executable} descendants stopped`, { cause: String(error), pid }));
+            });
+            terminator.once("close", (code) => {
+                clearTimeout(terminatorTimer);
+                if (code === 0) {
+                    resolveTermination();
+                }
+                else {
+                    rejectTermination(new AutopilotError("EXECUTION_STATE_UNKNOWN", `taskkill could not confirm that ${executable} descendants stopped`, { exitCode: code, pid }));
+                }
+            });
+        });
+        return;
+    }
+    try {
+        process.kill(-pid, "SIGTERM");
+    }
+    catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+            return;
+        }
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot signal ${executable} process group`, {
+            cause: String(error),
+            pid,
+        });
+    }
+    if (await waitForPosixProcessGroupExit(pid, 5_000)) {
+        return;
+    }
+    try {
+        process.kill(-pid, "SIGKILL");
+    }
+    catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot force-stop ${executable} process group`, {
+                cause: String(error),
+                pid,
+            });
+        }
+    }
+    if (!await waitForPosixProcessGroupExit(pid, 5_000)) {
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot prove that ${executable} descendants stopped`, { pid });
+    }
+}
+class StreamingRedactor {
+    #decoder = new StringDecoder("utf8");
+    #values;
+    #pending = "";
+    constructor(values) {
+        this.#values = [...new Set(values.filter((value) => value.length > 0))].sort((left, right) => right.length - left.length);
+    }
+    write(chunk) {
+        this.#pending += this.#decoder.write(chunk);
+        const maximumLength = this.#values.reduce((current, value) => Math.max(current, value.length), 1);
+        return this.#consume(Math.max(0, this.#pending.length - maximumLength + 1));
+    }
+    end() {
+        this.#pending += this.#decoder.end();
+        return this.#consume(this.#pending.length);
+    }
+    #consume(minimumSourceCharacters) {
+        let consumed = 0;
+        let output = "";
+        while (consumed < minimumSourceCharacters) {
+            const secret = this.#values.find((value) => this.#pending.startsWith(value, consumed));
+            if (secret === undefined) {
+                output += this.#pending[consumed] ?? "";
+                consumed += 1;
+            }
+            else {
+                output += "****";
+                consumed += secret.length;
+            }
+        }
+        this.#pending = this.#pending.slice(consumed);
+        return output;
+    }
+}
+function decodeUtf8Prefix(bytes, maximumBytes) {
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    for (let length = Math.min(bytes.length, maximumBytes); length >= 0; length -= 1) {
+        try {
+            return decoder.decode(bytes.subarray(0, length));
+        }
+        catch {
+            // Try the preceding complete UTF-8 boundary.
+        }
+    }
+    return "";
+}
+export function boundUtf8(text, maximumBytes) {
+    const bytes = Buffer.from(text);
+    return bytes.length <= maximumBytes
+        ? { value: text, truncated: false }
+        : { value: decodeUtf8Prefix(bytes, maximumBytes), truncated: true };
+}
 function appendBounded(current, chunk, maximum) {
     if (current.length >= maximum) {
         return { value: current, truncated: true };
@@ -16,77 +142,43 @@ export async function runProcess(request) {
         const child = spawn(request.executable, [...request.arguments], {
             cwd: request.cwd,
             env: request.environment === undefined ? process.env : { ...request.environment },
-            detached: process.platform !== "win32",
+            detached: request.detached ?? process.platform !== "win32",
             stdio: ["pipe", "pipe", "pipe"],
         });
         let stdout = Buffer.alloc(0);
         let stderr = Buffer.alloc(0);
+        const stdoutRedactor = new StreamingRedactor(request.redactValues ?? []);
+        const stderrRedactor = new StreamingRedactor(request.redactValues ?? []);
         const stderrDecoder = new StringDecoder("utf8");
         let stderrLineBuffer = "";
         let truncated = false;
         let timedOut = false;
-        let forceTimer;
-        let windowsTermination;
-        const signalProcess = (signal) => {
-            if (process.platform === "win32") {
-                if (windowsTermination !== undefined) {
-                    return;
-                }
-                const pid = child.pid;
-                if (pid === undefined) {
-                    child.kill(signal);
-                    rejectPromise(new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot prove that ${request.executable} descendants stopped because the process ID is unavailable`));
-                    return;
-                }
-                windowsTermination = new Promise((resolveTermination, rejectTermination) => {
-                    const terminator = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
-                        detached: false,
-                        stdio: "ignore",
-                        windowsHide: true,
-                    });
-                    const terminatorTimer = setTimeout(() => {
-                        terminator.kill();
-                        rejectTermination(new AutopilotError("EXECUTION_STATE_UNKNOWN", `taskkill did not confirm that ${request.executable} descendants stopped within five seconds`, { pid }));
-                    }, 5_000);
-                    terminator.once("error", (error) => {
-                        clearTimeout(terminatorTimer);
-                        child.kill(signal);
-                        rejectTermination(new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot prove that ${request.executable} descendants stopped`, { cause: String(error), pid }));
-                    });
-                    terminator.once("close", (code) => {
-                        clearTimeout(terminatorTimer);
-                        if (code === 0) {
-                            resolveTermination();
-                        }
-                        else {
-                            rejectTermination(new AutopilotError("EXECUTION_STATE_UNKNOWN", `taskkill could not confirm that ${request.executable} descendants stopped`, { exitCode: code, pid }));
-                        }
-                    });
-                });
-                void windowsTermination.catch(rejectPromise);
-                return;
-            }
-            const pid = child.pid;
-            if (pid === undefined) {
-                child.kill(signal);
-                return;
-            }
-            try {
-                process.kill(-pid, signal);
-            }
-            catch {
-                child.kill(signal);
-            }
-        };
+        let spawnCallbackError;
+        let termination;
         const terminate = () => {
             if (timedOut) {
                 return;
             }
             timedOut = true;
-            signalProcess("SIGTERM");
-            forceTimer = setTimeout(() => signalProcess("SIGKILL"), 5_000);
-            forceTimer.unref();
+            const pid = request.terminationProcessGroupId ?? child.pid;
+            if (pid === undefined) {
+                child.kill("SIGTERM");
+                termination = Promise.reject(new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot prove that ${request.executable} descendants stopped because the process ID is unavailable`));
+            }
+            else {
+                termination = terminateProcessTree(pid, request.executable);
+            }
+            void termination.catch(rejectPromise);
         };
+        if (child.pid !== undefined && request.onSpawn !== undefined) {
+            try {
+                request.onSpawn(child.pid);
+            }
+            catch (error) {
+                spawnCallbackError = error;
+                terminate();
+            }
+        }
         const timer = request.timeoutMs === undefined ? undefined : setTimeout(terminate, request.timeoutMs);
         timer?.unref();
         let idleTimer;
@@ -99,11 +191,15 @@ export async function runProcess(request) {
                 idleTimer.unref();
             }
         };
-        const appendStdout = (chunk) => {
-            resetIdleTimer();
-            const next = appendBounded(stdout, chunk, maximum);
+        const appendStdoutText = (text) => {
+            const next = appendBounded(stdout, Buffer.from(text), maximum);
             stdout = next.value;
             truncated ||= next.truncated;
+        };
+        const appendStdout = (chunk) => {
+            resetIdleTimer();
+            request.onActivity?.();
+            appendStdoutText(stdoutRedactor.write(chunk));
         };
         const emitStderrLines = (chunk) => {
             if (request.onStderrLine === undefined) {
@@ -118,12 +214,16 @@ export async function runProcess(request) {
                 newlineIndex = stderrLineBuffer.indexOf("\n");
             }
         };
-        const appendStderr = (chunk) => {
-            resetIdleTimer();
-            emitStderrLines(chunk);
-            const next = appendBounded(stderr, chunk, maximum);
+        const appendStderrText = (text) => {
+            const next = appendBounded(stderr, Buffer.from(text), maximum);
             stderr = next.value;
             truncated ||= next.truncated;
+        };
+        const appendStderr = (chunk) => {
+            resetIdleTimer();
+            request.onActivity?.();
+            emitStderrLines(chunk);
+            appendStderrText(stderrRedactor.write(chunk));
         };
         child.stdout.on("data", appendStdout);
         child.stderr.on("data", appendStderr);
@@ -139,9 +239,6 @@ export async function runProcess(request) {
                 if (idleTimer !== undefined) {
                     clearTimeout(idleTimer);
                 }
-                if (forceTimer !== undefined) {
-                    clearTimeout(forceTimer);
-                }
                 request.signal?.removeEventListener("abort", abort);
                 if (request.onStderrLine !== undefined) {
                     stderrLineBuffer += stderrDecoder.end();
@@ -149,11 +246,17 @@ export async function runProcess(request) {
                         request.onStderrLine(stderrLineBuffer.replace(/\r$/u, ""));
                     }
                 }
+                appendStdoutText(stdoutRedactor.end());
+                appendStderrText(stderrRedactor.end());
                 try {
-                    await windowsTermination;
+                    await termination;
                 }
                 catch (error) {
                     rejectPromise(error);
+                    return;
+                }
+                if (spawnCallbackError !== undefined) {
+                    rejectPromise(spawnCallbackError);
                     return;
                 }
                 if (timedOut) {
@@ -162,8 +265,8 @@ export async function runProcess(request) {
                 }
                 resolvePromise({
                     exitCode: code ?? 128,
-                    stdout: stdout.toString("utf8"),
-                    stderr: stderr.toString("utf8"),
+                    stdout: decodeUtf8Prefix(stdout, maximum),
+                    stderr: decodeUtf8Prefix(stderr, maximum),
                     truncated,
                 });
             })().catch(rejectPromise);

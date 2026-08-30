@@ -18,6 +18,7 @@ export declare class CliHarnessAdapter implements HarnessPort {
     constructor(configuration: CliHarnessConfiguration);
     describe(): Promise<CapabilityManifest>;
     launch(request: ExecutionRequest): Promise<ExecutionHandle>;
+    reattach(request: ExecutionRequest): Promise<ExecutionHandle | undefined>;
     observe(handle: ExecutionHandle): Promise<ExecutionObservation>;
     cancel(handle: ExecutionHandle): Promise<CancelResult>;
 }

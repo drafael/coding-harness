@@ -82,6 +82,7 @@ export type LifecycleEvent = (EventBase & {
     readonly expectedHookPath?: string;
     readonly contextHash?: string;
     readonly contextJournalSequence?: number;
+    readonly executionSupervised?: boolean;
     readonly deadline: string;
     readonly idempotencyKey: string;
 }) | (EventBase & {

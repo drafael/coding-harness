@@ -17,7 +17,7 @@ export function createOpenCodeAdapter() {
         cancellation: true,
         limitations: [
             "Auto-approved tool restrictions are cooperative.",
-            "Executions cannot be reattached after restart.",
+            "Implementation executions use the attempt-scoped supervisor for restart reattachment; review executions remain session-scoped.",
             "The exact-tree review role is cooperative and has no version-pinned live verification.",
         ],
         expectsJsonLines: true,

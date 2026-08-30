@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; provider notification wake, restart reattachment, and restack evidence remain incomplete
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation-process reattachment is packaged, while provider notification wake and restack evidence remain incomplete
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
@@ -277,6 +277,7 @@ The baseline adapter uses versioned JSON Lines over stdin and stdout. The follow
 interface HarnessPort {
   describe(): Promise<CapabilityManifest>;
   launch(request: ExecutionRequest): Promise<ExecutionHandle>;
+  reattach?(request: ExecutionRequest): Promise<ExecutionHandle | undefined>;
   observe(handle: ExecutionHandle): Promise<ExecutionObservation>;
   cancel(handle: ExecutionHandle): Promise<CancelResult>;
 }
@@ -284,7 +285,9 @@ interface HarnessPort {
 
 The capability manifest describes unattended execution, useful concurrency, event streaming, cancellation, restart reattachment, tool restrictions, and assurance level.
 
-Adapters return observations. They never write the journal or choose lifecycle transitions. The runtime inspects the real worktree after an agent exits. Unexpected commits, refs, or out-of-scope edits become reconciliation findings.
+Adapters return observations. They never write the journal or choose lifecycle transitions. On POSIX hosts, built-in CLI implementation executions run beneath a detached, attempt-scoped supervisor that owns the harness pipes and bounded output/activity capture. Before harness launch, a separately detached watchdog durably confirms readiness. The harness then joins the supervisor's known process group. All terminal publication is a watchdog-owned handshake: the supervisor publishes a bounded completion candidate, the watchdog terminates and confirms the group is quiescent, and only then publishes the durable result and terminal status. This also covers supervisor exit before child-identity publication. Windows built-in adapters retain direct process-tree cancellation but currently report restart reattachment as unsupported pending an OS job-object boundary. The supervisor writes only fenced operational artifacts under `runs/<run-id>/executions/<execution-id>/`; it cannot write `events.jsonl`, receipts, leases, snapshots, or Git state. A fresh coordinator reconstructs the exact request from the journaled attempt and immutable context, reattaches to running or terminal supervisor artifacts, and waits for terminal process-tree evidence before allowing a replacement attempt. Missing, mismatched, or incomplete bootstrap artifacts remain `EXECUTION_STATE_UNKNOWN`. Review executions remain session-scoped.
+
+The runtime inspects the real worktree after an agent exits. Unexpected commits, refs, or out-of-scope edits become reconciliation findings.
 
 Provider notification wake remains evidence-gated. The current runtime uses bounded heartbeat polling, records only waiting and meaningful terminal observations, and reobserves the exact PR/MR, head, base, state, and checks after restart. Notifications, when later proven, will be untrusted hints that trigger the same observation; the foreground coordinator does not run a daemon.
 
@@ -292,7 +295,7 @@ Capability degradation is explicit:
 
 - Missing parallelism makes a queue serial.
 - Missing notification wake uses bounded heartbeat polling.
-- Missing restart reattachment fails closed as `EXECUTION_STATE_UNKNOWN` when orphan quiescence cannot be proven; it never spends another attempt on a speculative replacement.
+- Missing or incomplete attempt-supervisor evidence fails closed as `EXECUTION_STATE_UNKNOWN`; the runtime never spends another attempt on a speculative replacement.
 - Missing a required delivery or enforcement capability stops before edits.
 
 The first adapters target Claude Code, Codex, Pi, and OpenCode. They share one conformance suite.
@@ -347,7 +350,7 @@ Retries are classified and bounded:
 
 - Transient network failures repeat the same idempotent operation.
 - Operator-paused executors receive fresh leases after cancellation and proven quiescence; the cancelled launch is not charged.
-- Executors orphaned by coordinator loss block as `EXECUTION_STATE_UNKNOWN` unless an approved supervisor can prove status or cancellation.
+- Supervised implementation executors are reattached after coordinator loss; unsupervised reviews and incomplete supervisor bootstraps block as `EXECUTION_STATE_UNKNOWN` unless quiescence is otherwise proven.
 - Resource exhaustion may reduce scope or concurrency without changing acceptance.
 - Verification failure returns to implementation or uses a bounded pending-only replan.
 - Unknown failures receive one unchanged retry before the run stops.

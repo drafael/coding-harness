@@ -19,7 +19,7 @@ export function createCodexAdapter(): CliHarnessAdapter {
     cancellation: true,
     limitations: [
       "Codex enforces a workspace sandbox, but Autopilot item-path and effect restrictions are checked after execution.",
-      "Executions are ephemeral and cannot be reattached.",
+      "Implementation executions use the attempt-scoped supervisor for restart reattachment; review executions remain session-scoped.",
       "The exact-tree review role is implemented but has no version-pinned live verification.",
     ],
     expectsJsonLines: true,

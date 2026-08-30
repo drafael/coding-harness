@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { CapabilityManifest, ExecutionHandle, ExecutionObservation, HarnessPort } from "./adapter-protocol.js";
+import type {
+  AttemptContext,
+  CapabilityManifest,
+  ExecutionHandle,
+  ExecutionObservation,
+  ExecutionRequest,
+  HarnessPort,
+} from "./adapter-protocol.js";
 import { loadAmendmentContext, type AmendmentContext } from "./amendment.js";
 import { attemptContextHash, buildAttemptContext } from "./attempt-context.js";
 import type { GrantFamily, ReviewGate, RunCharter, WorkItem } from "./charter.js";
@@ -330,6 +337,39 @@ export class AutopilotEngine {
     );
   }
 
+  #executionSupervisionEnabled(): boolean {
+    return this.#manifest?.restartReattachment === true && this.#adapter.reattach !== undefined;
+  }
+
+  #implementationRequest(
+    item: WorkItem,
+    attemptId: string,
+    worktreePath: string,
+    context: AttemptContext,
+    contextHash: string,
+    deadline: string,
+  ): ExecutionRequest {
+    return {
+      protocolVersion: 1,
+      role: "implementation",
+      runId: this.#charter.runId,
+      itemId: item.id,
+      attemptId,
+      worktreePath,
+      objective: item.objective,
+      acceptanceSummary: item.acceptance.map((predicate) => JSON.stringify(predicate)).join("; "),
+      context,
+      contextHash,
+      writableRoots: item.writableRoots,
+      grants: this.#charter.grants.filter(({ actor }) => actor === "worker" || actor === "adapter"),
+      deadline,
+      idleTimeoutMs: this.#charter.limits.idleTimeoutMs,
+      maximumLineBytes: this.#charter.limits.maxAdapterLineBytes,
+      maximumOutputBytes: this.#charter.limits.maxRetainedOutputBytes,
+      ...(this.#executionSupervisionEnabled() ? { supervisionDirectory: this.#runDirectory } : {}),
+    };
+  }
+
   #runtimeAuthorize(family: GrantFamily, details: Omit<Parameters<typeof authorizeEffect>[0], "family" | "actor"> = {}): void {
     authorizeEffect({ family, actor: "runtime", ...details }, this.#requested, this.#charter.grants, RUNTIME_CAPABILITIES);
   }
@@ -423,6 +463,10 @@ export class AutopilotEngine {
           if (lease.itemId !== item.id || lease.branchName !== item.branchName || lease.worktreePath !== expectedWorktreePath
             || lease.attemptId !== attempt.attemptId || lease.epoch !== attempt.leaseEpoch) {
             throw new AutopilotError("JOURNAL_CORRUPT", "interrupted attempt writer lease changed identity");
+          }
+          if (itemProjection.state === "ACTIVE" && attempt.outcome === undefined
+            && attempt.executionSupervised === true && this.#executionSupervisionEnabled()) {
+            continue;
           }
           const observed = await this.#observeRepository(lease.worktreePath);
           const confirmedCommit = this.#records.flatMap(({ event }) =>
@@ -663,6 +707,86 @@ export class AutopilotEngine {
     });
   }
 
+  async #reattachInterruptedExecution(
+    item: WorkItem,
+    attempt: RunProjection["items"][string]["attempts"][number],
+  ): Promise<ExecutionObservation["status"] | "stale" | false> {
+    if (attempt.outcome !== undefined || attempt.executionSupervised !== true || !this.#executionSupervisionEnabled()) {
+      return false;
+    }
+    const lease = await readLease(this.#runDirectory, item.id);
+    if (lease === undefined || lease.attemptId !== attempt.attemptId || lease.epoch !== attempt.leaseEpoch) {
+      throw new AutopilotError("JOURNAL_CORRUPT", "supervised interrupted attempt is missing its exact writer lease");
+    }
+    const contextPath = join(this.#runDirectory, "reports", "attempts", `${attempt.attemptId}.context.json`);
+    const storedContext = JSON.parse(await readFile(contextPath, "utf8")) as unknown;
+    if (!isRecord(storedContext) || attempt.contextHash === undefined
+      || sha256(canonicalJson(storedContext)) !== attempt.contextHash) {
+      throw new AutopilotError("JOURNAL_CORRUPT", "supervised interrupted attempt context changed");
+    }
+    const request = this.#implementationRequest(
+      item,
+      attempt.attemptId,
+      lease.worktreePath,
+      storedContext as unknown as AttemptContext,
+      attempt.contextHash,
+      attempt.deadline,
+    );
+    const reattach = this.#adapter.reattach;
+    if (reattach === undefined) {
+      return false;
+    }
+    const existingHandle = await reattach.call(this.#adapter, request);
+    const handle = existingHandle ?? await this.#adapter.launch(request);
+    this.#activeHandles.set(handle.adapterExecutionId, handle);
+    this.#implementationHandleIds.add(handle.adapterExecutionId);
+    let observation: ExecutionObservation;
+    try {
+      observation = await this.#adapter.observe(handle);
+    } finally {
+      this.#activeHandles.delete(handle.adapterExecutionId);
+      this.#implementationHandleIds.delete(handle.adapterExecutionId);
+    }
+    const attemptsDirectory = join(this.#runDirectory, "reports", "attempts");
+    const observationPath = join(attemptsDirectory, `${attempt.attemptId}.json`);
+    await writeJsonAtomic(observationPath, observation);
+    const currentLease = await readLease(this.#runDirectory, item.id);
+    const after = await this.#observeRepository(lease.worktreePath);
+    const leaseIdentityCurrent = currentLease !== undefined
+      && currentLease.attemptId === attempt.attemptId && currentLease.epoch === attempt.leaseEpoch;
+    const stale = !leaseIdentityCurrent || !leaseIsCurrent(currentLease, attempt.attemptId);
+    if (after.headCommit !== attempt.expectedBaseCommit) {
+      throw new AutopilotError("BRANCH_COLLISION", "reattached worker changed HEAD before reconciliation");
+    }
+    if (attempt.expectedExternalRefIdentity !== undefined
+      && after.externalRefIdentity !== attempt.expectedExternalRefIdentity) {
+      throw new AutopilotError("BRANCH_COLLISION", "reattached worker changed a Git ref");
+    }
+    if (attempt.expectedConfigurationIdentity !== undefined
+      && after.configurationIdentity !== attempt.expectedConfigurationIdentity) {
+      throw new AutopilotError("CAPABILITY_DENIED", "reattached worker changed Git configuration");
+    }
+    await assertWritablePaths(lease.worktreePath, after.changedPaths, item.writableRoots);
+    await this.#record({
+      ...eventBase(stale ? "Late supervised adapter result quarantined" : "Supervised adapter execution reattached and observed", "reconciler"),
+      type: "ATTEMPT_FINISHED",
+      itemId: item.id,
+      attemptId: attempt.attemptId,
+      observedHeadCommit: after.headCommit,
+      observedTreeIdentity: after.treeIdentity,
+      outcome: stale ? "stale" : observation.status,
+      evidence: [observationPath],
+    });
+    if (leaseIdentityCurrent) {
+      await retireWriterLease(this.#runDirectory, {
+        itemId: item.id,
+        attemptId: attempt.attemptId,
+        epoch: attempt.leaseEpoch,
+      });
+    }
+    return stale ? "stale" : observation.status;
+  }
+
   async #reconcileInterruptedItems(): Promise<void> {
     for (const item of this.#charter.work) {
       const itemProjection = this.#projection.items[item.id];
@@ -695,6 +819,28 @@ export class AutopilotEngine {
           subject: `tree:${reconciledCommit.treeIdentity}`,
         });
         continue;
+      }
+      if (itemProjection.state === "ACTIVE") {
+        const reattachedStatus = await this.#reattachInterruptedExecution(item, attempt);
+        if (reattachedStatus !== false) {
+          if (reattachedStatus === "cancelled" && this.#projection.pauseRequestId !== undefined) {
+            await this.#record({
+              ...eventBase("Pause-cancelled supervised execution was observed after coordinator restart", "reconciler"),
+              type: "ATTEMPT_PAUSED",
+              itemId: item.id,
+              attemptId: attempt.attemptId,
+            });
+          } else {
+            await this.#record({
+              ...eventBase("Supervised execution reached a durable terminal observation after coordinator restart", "reconciler"),
+              type: "ITEM_BLOCKED",
+              itemId: item.id,
+              attemptId: attempt.attemptId,
+              errorCode: "INTERRUPTED_ATTEMPT",
+            });
+          }
+          continue;
+        }
       }
       if (itemProjection.state === "ACTIVE" && attempt.outcome === "cancelled"
         && this.#projection.pauseRequestId !== undefined) {
@@ -1610,6 +1756,7 @@ export class AutopilotEngine {
       }),
       contextHash,
       contextJournalSequence: context.sourceJournalSequence,
+      executionSupervised: this.#executionSupervisionEnabled(),
       deadline,
       evidence: [contextPath],
       idempotencyKey: `attempt:${this.#charter.runId}:${item.id}:${lease.epoch}`,
@@ -1624,24 +1771,14 @@ export class AutopilotEngine {
     if (await this.#blockItemForStop(item, attemptId)) {
       return;
     }
-    const handle = await this.#adapter.launch({
-      protocolVersion: 1,
-      role: "implementation",
-      runId: this.#charter.runId,
-      itemId: item.id,
+    const handle = await this.#adapter.launch(this.#implementationRequest(
+      item,
       attemptId,
       worktreePath,
-      objective: item.objective,
-      acceptanceSummary: item.acceptance.map((predicate) => JSON.stringify(predicate)).join("; "),
       context,
       contextHash,
-      writableRoots: item.writableRoots,
-      grants: this.#charter.grants.filter(({ actor }) => actor === "worker" || actor === "adapter"),
       deadline,
-      idleTimeoutMs: this.#charter.limits.idleTimeoutMs,
-      maximumLineBytes: this.#charter.limits.maxAdapterLineBytes,
-      maximumOutputBytes: this.#charter.limits.maxRetainedOutputBytes,
-    });
+    ));
     this.#activeHandles.set(handle.adapterExecutionId, handle);
     this.#implementationHandleIds.add(handle.adapterExecutionId);
     if (this.#stopRequested || this.#pauseRequested) {

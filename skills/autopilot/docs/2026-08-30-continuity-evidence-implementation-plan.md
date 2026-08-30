@@ -1,6 +1,6 @@
 # Autopilot continuity, evidence, review, and supervision implementation plan
 
-- **Status:** Implemented through Phase 6A and packaged; Windows CI and exact-tree Codex/OpenCode review are validated; Phase 6B notification wake and automatic orphan supervision remain separately evidence-gated
+- **Status:** Implemented through Phase 6A and packaged; Windows CI, exact-tree Codex/OpenCode review, and POSIX attempt-scoped implementation supervision are covered; Phase 6B notification wake remains separately evidence-gated
 - **Date:** 2026-08-30
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Harness-agnostic Autopilot design](architecture.md)
@@ -65,7 +65,7 @@ The implementation began from this boundary:
 3. Reports listed receipt IDs but did not provide one evidence result for every acceptance predicate.
 4. The baseline package suite contained 111 passing Node tests.
 
-Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, an exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. The exact-tree review gate passed with Pi 0.84.4, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 lacked a usable noninteractive credential source, and production notification wake remains unverified.
+Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, an exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. The exact-tree review gate passed with Pi 0.84.4, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 now reaches its identity-linked API key but requires an `ANTHROPIC_WORKSPACE_ID` absent from the validation environment, and production notification wake remains unverified.
 
 ## Phase 0: Align documentation with executable support
 
@@ -357,7 +357,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 The runtime now prevalidates transitions before append, records one durable `ITEM_VERIFIED` checkpoint, reconciles confirmed lifecycle effects from fresh observations, and uses a token-fenced pause request. Active implementation is cancelled and observed before exact lease retirement; cancellation solely for pause remains auditable but is not charged to the attempt budget. Resume creates a fresh attempt only for unfinished implementation and continues verified items without rerunning workers.
 
-Current adapters remain non-reattachable after coordinator loss. An execution whose quiescence cannot be proven is blocked as `EXECUTION_STATE_UNKNOWN`; automatic cancellation or reattachment remains deferred pending a separately approved attempt-scoped supervisor.
+On POSIX hosts, built-in adapters now run implementation attempts beneath a detached, attempt-scoped supervisor that owns bounded process execution and cancellation without journal authority. A restarted coordinator reconstructs the exact request, reattaches to matching supervisor artifacts, and observes terminal quiescence before retrying. Legacy attempts, reviews, and incomplete or mismatched bootstrap artifacts remain `EXECUTION_STATE_UNKNOWN`.
 
 [![Autopilot lifecycle showing nonterminal waiting for operator pause, provider checks, or unknown execution state without reopening terminal success or stop.](diagrams/autopilot-lifecycle-waiting.png)](diagrams/autopilot-lifecycle-waiting.html)
 
@@ -481,7 +481,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 137 passing Node tests on Ubuntu and Windows and an 85-file package dry run.
+**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 155 Node tests locally and a 91-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
 
 ### Files
 
