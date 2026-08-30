@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, copyFile, link, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AttemptContext } from "../src/adapter-protocol.js";
@@ -6,13 +6,44 @@ import type { ProposedRunCharter, RunMode } from "../src/charter.js";
 import { runChecked } from "../src/process.js";
 
 export async function writeNodeExecutable(directory: string, name: string, script: string): Promise<string> {
-  const executable = join(directory, process.platform === "win32" ? `${name}.js` : name);
-  await writeFile(executable, script);
-  if (process.platform === "win32") {
-    await writeFile(join(directory, `${name}.cmd`), `@node "%~dp0${name}.js" %*\r\n`);
-  } else {
+  if (process.platform !== "win32") {
+    const executable = join(directory, name);
+    await writeFile(executable, script);
     await chmod(executable, 0o755);
+    return executable;
   }
+
+  const scriptPath = join(directory, `${name}.mjs`);
+  const executable = join(directory, `${name}.exe`);
+  const bootstrap = join(directory, "autopilot-node-launcher.cjs");
+  await writeFile(scriptPath, script);
+  try {
+    await link(process.execPath, executable);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      // Rewriting the adjacent script updates an existing launcher.
+    } else {
+      await copyFile(process.execPath, executable);
+    }
+  }
+  await writeFile(bootstrap, `
+const { spawnSync } = require("node:child_process");
+const { basename, dirname, join } = require("node:path");
+if (process.execPath !== process.env.AUTOPILOT_TEST_NODE_EXECUTABLE) {
+  const name = basename(process.execPath, ".exe");
+  const environment = { ...process.env };
+  const originalNodeOptions = environment.AUTOPILOT_TEST_ORIGINAL_NODE_OPTIONS;
+  if (originalNodeOptions) environment.NODE_OPTIONS = originalNodeOptions;
+  else delete environment.NODE_OPTIONS;
+  const result = spawnSync(environment.AUTOPILOT_TEST_NODE_EXECUTABLE, [join(dirname(process.execPath), name + ".mjs"), ...process.argv.slice(1)], {
+    cwd: process.cwd(), env: environment, stdio: "inherit"
+  });
+  process.exit(result.status ?? 1);
+}
+`);
+  process.env.AUTOPILOT_TEST_NODE_EXECUTABLE = process.execPath;
+  process.env.AUTOPILOT_TEST_ORIGINAL_NODE_OPTIONS ??= process.env.NODE_OPTIONS ?? "";
+  process.env.NODE_OPTIONS = `${process.env.AUTOPILOT_TEST_ORIGINAL_NODE_OPTIONS} --require ${JSON.stringify(bootstrap)}`.trim();
   return executable;
 }
 
