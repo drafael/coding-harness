@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot implementation plan
 
-- **Status:** Developer-preview implementation available; Windows runtime support and POSIX attempt-scoped implementation reattachment are packaged, while provider notification wake, restack, and broader cross-platform fault-injection acceptance remain pending
+- **Status:** Developer-preview implementation available; Windows runtime support and POSIX attempt-scoped implementation reattachment are packaged, while provider notification wake is explicitly not promoted under the current no-receiver constraint, and restack plus broader cross-platform fault-injection acceptance remain pending
 - **Date:** 2026-08-22
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Autopilot architecture](architecture.md)
