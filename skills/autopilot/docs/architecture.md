@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation-process reattachment is packaged, while provider notification wake and restack evidence remain incomplete
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation-process reattachment is packaged, while notification wake is explicitly not promoted under the current no-receiver constraint and restack evidence remains incomplete
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
@@ -289,7 +289,7 @@ Adapters return observations. They never write the journal or choose lifecycle t
 
 The runtime inspects the real worktree after an agent exits. Unexpected commits, refs, or out-of-scope edits become reconciliation findings.
 
-Provider notification wake remains evidence-gated. The current runtime uses bounded heartbeat polling, records only waiting and meaningful terminal observations, and reobserves the exact PR/MR, head, base, state, and checks after restart. Notifications, when later proven, will be untrusted hints that trigger the same observation; the foreground coordinator does not run a daemon.
+Provider notification wake is not promoted under the current no-receiver decision and remains evidence-gated for future reconsideration. The current runtime uses bounded heartbeat polling, records only waiting and meaningful terminal observations, and reobserves the exact PR/MR, head, base, state, and checks after restart. Notifications, when later proven, will be untrusted hints that trigger the same observation; the foreground coordinator does not run a daemon.
 
 Capability degradation is explicit:
 

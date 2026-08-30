@@ -1,6 +1,6 @@
 # Autopilot continuity, evidence, review, and supervision implementation plan
 
-- **Status:** Implemented through Phase 6A and packaged; Windows CI, exact-tree Codex/OpenCode review, and POSIX attempt-scoped implementation supervision are covered; Phase 6B notification wake remains separately evidence-gated
+- **Status:** Implemented through Phase 6A and packaged; Phase 6B notification wake is explicitly not promoted under the current no-receiver constraint
 - **Date:** 2026-08-30
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Harness-agnostic Autopilot design](architecture.md)
@@ -415,7 +415,13 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 6: Add optional provider wake with heartbeat fallback
 
-**Result:** Heartbeat-backed Phase 6A is implemented; production notification wake remains deferred. Do not create a daemon.
+**Result:** Heartbeat-backed Phase 6A is implemented. Production notification wake is not promoted under the current no-receiver constraint. Do not create a daemon.
+
+### Phase 6B non-promotion decision
+
+As of 2026-08-30, the owner accepted bounded Phase 6A heartbeat polling as the production behavior until an already-operated, authenticated provider event receiver and authorized disposable target are supplied. Installed GitHub and GitLab CLI watch surfaces poll; they are not notification evidence. Autopilot will not create a receiver, tunnel, webhook credential, signing boundary, or background service.
+
+This decision removes Phase 6B from the current release sequence without claiming it implemented. Reconsideration requires one provider-native event class, a version-pinned receiver invocation contract, and the promotion evidence below. Any future hint remains untrusted and must trigger fresh exact PR/MR, head, base, state, and check observation. Phase 6A heartbeat fallback remains mandatory.
 
 Pending checks enter structured `WAITING` for a bounded session. Heartbeats reobserve the exact recorded PR/MR, head, base, state, and checks without journal spam. Session expiry records `UNVERIFIED` and remains nonterminal; resume samples the exact subject again. Provider notifications remain disabled until one version-pinned surface is proven on an authorized disposable target.
 
@@ -481,7 +487,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 155 Node tests locally and a 91-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
+**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 155 Node tests locally and a 91-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
 
 ### Files
 
