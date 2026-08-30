@@ -1,0 +1,52 @@
+name: Autopilot runtime CI
+
+on:
+  push:
+    paths:
+      - ".github/workflows/autopilot-runtime-ci.yml"
+      - "skills/autopilot/runtime/**"
+  pull_request:
+    paths:
+      - ".github/workflows/autopilot-runtime-ci.yml"
+      - "skills/autopilot/runtime/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Node 24 on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    defaults:
+      run:
+        working-directory: skills/autopilot/runtime
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: skills/autopilot/runtime/package-lock.json
+      - name: Configure Git identity
+        shell: bash
+        run: |
+          git config --global user.name "Autopilot CI"
+          git config --global user.email "autopilot-ci@example.invalid"
+      - name: Install development dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Check formatting
+        run: npm run format:check
+      - name: Run test suite
+        run: npm test
