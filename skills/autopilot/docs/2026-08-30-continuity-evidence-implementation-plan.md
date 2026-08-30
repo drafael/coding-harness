@@ -481,7 +481,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 154 Node tests locally and a 91-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
+**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 155 Node tests locally and a 91-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
 
 ### Files
 

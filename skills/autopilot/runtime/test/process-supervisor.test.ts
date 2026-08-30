@@ -13,6 +13,8 @@ import {
   type SupervisedProcessRequest,
 } from "../src/process-supervisor.js";
 
+const supervisedTest = process.platform === "win32" ? test.skip : test;
+
 async function waitForFile(path: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -47,7 +49,7 @@ function requestFor(root: string, script: string, deadlineMs = 10_000): Supervis
   };
 }
 
-test("supervised process survives client replacement and returns its durable result", async () => {
+supervisedTest("supervised process survives client replacement and returns its durable result", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-"));
   const script = join(root, "child.mjs");
   const journal = join(root, "events.jsonl");
@@ -67,7 +69,7 @@ test("supervised process survives client replacement and returns its durable res
   assert.equal(await readFile(journal, "utf8"), "canonical-journal\n");
 });
 
-test("supervised process request identity is immutable", async () => {
+supervisedTest("supervised process request identity is immutable", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-identity-"));
   const script = join(root, "child.mjs");
   await writeFile(script, "console.log('done');\n");
@@ -86,7 +88,7 @@ test("supervised process request identity is immutable", async () => {
   await observeSupervisedProcess(handle);
 });
 
-test("watchdog terminates the supervisor process group without child identity", {
+supervisedTest("watchdog terminates the supervisor process group without child identity", {
   skip: process.platform === "win32",
 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-watchdog-"));
@@ -109,7 +111,7 @@ test("watchdog terminates the supervisor process group without child identity", 
   await assert.rejects(readFile(marker), /ENOENT/);
 });
 
-test("successful harness completion quiesces inherited-group descendants", {
+supervisedTest("successful harness completion quiesces inherited-group descendants", {
   skip: process.platform === "win32",
 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-completion-"));
@@ -127,7 +129,7 @@ test("successful harness completion quiesces inherited-group descendants", {
   await assert.rejects(readFile(marker), /ENOENT/);
 });
 
-test("watchdog prefers an earlier cancellation over later harness completion", async () => {
+supervisedTest("watchdog prefers an earlier cancellation over later harness completion", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-cancel-race-"));
   const script = join(root, "child.mjs");
   await writeFile(script, "setTimeout(() => {}, 200);\n");
@@ -143,7 +145,7 @@ test("watchdog prefers an earlier cancellation over later harness completion", a
   assert.equal(observed.state, "cancelled");
 });
 
-test("watchdog prefers an earlier deadline over later harness completion", async () => {
+supervisedTest("watchdog prefers an earlier deadline over later harness completion", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-deadline-race-"));
   const script = join(root, "child.mjs");
   await writeFile(script, "setTimeout(() => {}, 250);\n");
@@ -156,7 +158,7 @@ test("watchdog prefers an earlier deadline over later harness completion", async
   assert.equal(observed.state, "timed-out");
 });
 
-test("watchdog enforces the supervised harness idle deadline", async () => {
+supervisedTest("watchdog enforces the supervised harness idle deadline", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-idle-"));
   const script = join(root, "child.mjs");
   await writeFile(script, "setInterval(() => {}, 1000);\n");
@@ -170,7 +172,7 @@ test("watchdog enforces the supervised harness idle deadline", async () => {
   assert.equal(observed.state, "timed-out");
 });
 
-test("supervisor bounds retained stderr activity", async () => {
+supervisedTest("supervisor bounds retained stderr activity", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-activity-"));
   const script = join(root, "child.mjs");
   await writeFile(script, "for (let i = 0; i < 1000; i += 1) console.error('activity-' + i);\n");
@@ -184,7 +186,7 @@ test("supervisor bounds retained stderr activity", async () => {
   assert.ok((await stat(join(directory, "stderr-activity.log"))).size <= 512);
 });
 
-test("supervised cancellation waits for a terminal process-tree observation", async () => {
+supervisedTest("supervised cancellation waits for a terminal process-tree observation", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-cancel-"));
   const script = join(root, "child.mjs");
   await writeFile(script, "setInterval(() => {}, 1000);\n");

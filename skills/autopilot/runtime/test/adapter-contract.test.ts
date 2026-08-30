@@ -16,6 +16,24 @@ test("UTF-8 output bounds retain only complete code points", () => {
   assert.equal(bounded.truncated, true);
 });
 
+test("Windows CLI adapters do not advertise restart reattachment", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const adapter = new CliHarnessAdapter({
+    name: "fake",
+    executable: process.execPath,
+    versionArguments: ["--version"],
+    buildArguments: () => ["--version"],
+    assurance: "cooperative",
+    maxConcurrency: 1,
+    cancellation: true,
+    limitations: [],
+    expectsJsonLines: false,
+  });
+
+  assert.equal((await adapter.describe()).restartReattachment, false);
+});
+
 test("adapter protocol parses normalized lifecycle messages", () => {
   const message = parseAdapterMessage(JSON.stringify({
     protocolVersion: 1,
