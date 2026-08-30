@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -10,7 +10,7 @@ import { appendEvent, writeImmutableJson } from "../src/journal.js";
 import { runChecked, runProcess } from "../src/process.js";
 import { branchExists, ensureWorktree, remoteBranchCommit } from "../src/repository.js";
 import { discoverWrapUpRuns, wrapUpRun } from "../src/wrap-up.js";
-import { createRepository, proposedCharter } from "./helpers.js";
+import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
 
 type EventInput<T> = T extends LifecycleEvent
   ? Omit<T, "eventId" | "timestamp" | "source" | "reason">
@@ -52,10 +52,8 @@ if (args[0] === "mr" && args[1] === "view") {
   console.log("[]");
 }
 `;
-  await writeFile(join(bin, "gh"), gh);
-  await writeFile(join(bin, "glab"), glab);
-  await chmod(join(bin, "gh"), 0o755);
-  await chmod(join(bin, "glab"), 0o755);
+  await writeNodeExecutable(bin, "gh", gh);
+  await writeNodeExecutable(bin, "glab", glab);
   return bin;
 }
 

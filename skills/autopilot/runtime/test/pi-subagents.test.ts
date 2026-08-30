@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { createPiAdapter } from "../adapters/pi/index.js";
 import type { ExecutionRequest } from "../src/adapter-protocol.js";
 import { findPiSubagentsInstallation } from "../src/pi-subagents.js";
-import { attemptContextFixture } from "./helpers.js";
+import { attemptContextFixture, writeNodeExecutable } from "./helpers.js";
 
 async function fakeInstallation(root: string, version: string): Promise<string> {
   const packageRoot = join(root, "npm", "node_modules", "pi-subagents");
@@ -64,13 +64,12 @@ test("Pi adapter uses the direct worker fallback when pi-subagents is unavailabl
   const bin = join(root, "bin");
   const marker = join(root, "arguments.json");
   await mkdir(bin, { recursive: true });
-  await writeFile(join(bin, "pi"), `#!/usr/bin/env node
+  await writeNodeExecutable(bin, "pi", `#!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 writeFileSync(process.env.AUTOPILOT_PI_ARGUMENTS, JSON.stringify(args));
 console.log(JSON.stringify({type:"agent_settled"}));
 `);
-  await chmod(join(bin, "pi"), 0o755);
   const previousAgentDirectory = process.env.PI_CODING_AGENT_DIR;
   const previousPath = process.env.PATH;
   const previousMarker = process.env.AUTOPILOT_PI_ARGUMENTS;
@@ -121,8 +120,7 @@ if (args[0] === "--version") {
   console.log(JSON.stringify({type:"message_end", message}));
 }
 `;
-  await writeFile(join(bin, "pi"), script);
-  await chmod(join(bin, "pi"), 0o755);
+  await writeNodeExecutable(bin, "pi", script);
   const previousAgentDirectory = process.env.PI_CODING_AGENT_DIR;
   const previousPath = process.env.PATH;
   const previousMarker = process.env.AUTOPILOT_PI_ARGUMENTS;
@@ -145,15 +143,13 @@ if (args[0] === "--version") {
     const reviewScript = `#!/usr/bin/env node
 console.log(JSON.stringify({type:"message", message:{role:"assistant", content:[{type:"text", text:'AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[]}'}]}}));
 `;
-    await writeFile(join(bin, "pi"), reviewScript);
-    await chmod(join(bin, "pi"), 0o755);
+    await writeNodeExecutable(bin, "pi", reviewScript);
     const reviewHandle = await adapter.launch(request("review"));
     const reviewObservation = await adapter.observe(reviewHandle);
     assert.equal(reviewObservation.status, "completed");
     assert.deepEqual(reviewObservation.reviewResult, { verdict: "clean", findings: [] });
 
-    await writeFile(join(bin, "pi"), script);
-    await chmod(join(bin, "pi"), 0o755);
+    await writeNodeExecutable(bin, "pi", script);
     process.env.AUTOPILOT_PI_STATUS = "failed";
     const failedHandle = await adapter.launch(request());
     const failedObservation = await adapter.observe(failedHandle);

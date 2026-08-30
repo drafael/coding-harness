@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { GitLabDeliveryAdapter } from "../delivery/gitlab/index.js";
+import { writeNodeExecutable } from "./helpers.js";
 
 async function fakeGitLabCli(): Promise<{ readonly bin: string; readonly marker: string }> {
   const bin = await mkdtemp(join(tmpdir(), "autopilot-fake-glab-"));
@@ -41,8 +42,7 @@ if (args[0] === "mr" && args[1] === "view") {
   console.log("[]");
 }
 `;
-  await writeFile(join(bin, "glab"), script);
-  await chmod(join(bin, "glab"), 0o755);
+  await writeNodeExecutable(bin, "glab", script);
   return { bin, marker };
 }
 

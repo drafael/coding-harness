@@ -1,9 +1,20 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AttemptContext } from "../src/adapter-protocol.js";
 import type { ProposedRunCharter, RunMode } from "../src/charter.js";
 import { runChecked } from "../src/process.js";
+
+export async function writeNodeExecutable(directory: string, name: string, script: string): Promise<string> {
+  const executable = join(directory, process.platform === "win32" ? `${name}.js` : name);
+  await writeFile(executable, script);
+  if (process.platform === "win32") {
+    await writeFile(join(directory, `${name}.cmd`), `@node "%~dp0${name}.js" %*\r\n`);
+  } else {
+    await chmod(executable, 0o755);
+  }
+  return executable;
+}
 
 export function attemptContextFixture(attemptId = "attempt"): AttemptContext {
   return {
