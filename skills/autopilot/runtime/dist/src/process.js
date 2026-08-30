@@ -28,7 +28,18 @@ export async function runProcess(request) {
         let forceTimer;
         const signalProcess = (signal) => {
             if (process.platform === "win32") {
-                child.kill(signal);
+                const pid = child.pid;
+                if (pid === undefined) {
+                    child.kill(signal);
+                    return;
+                }
+                const terminator = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+                    detached: false,
+                    stdio: "ignore",
+                    windowsHide: true,
+                });
+                terminator.once("error", () => child.kill(signal));
+                terminator.unref();
                 return;
             }
             const pid = child.pid;

@@ -46,6 +46,22 @@ test("silent adapter process reaches the idle deadline", async () => {
   }), /exceeded its deadline/);
 });
 
+test("process deadlines terminate inherited descendant handles", async () => {
+  const startedAt = Date.now();
+  await assert.rejects(runProcess({
+    executable: process.execPath,
+    arguments: [
+      "-e",
+      `require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { stdio: "inherit" }); setTimeout(() => {}, 10000);`,
+    ],
+    cwd: process.cwd(),
+    idleTimeoutMs: 20,
+    timeoutMs: 5_000,
+  }), /exceeded its deadline/);
+
+  assert.ok(Date.now() - startedAt < 5_000);
+});
+
 test("adapter observation redacts credential-like environment values", async () => {
   process.env.AUTOPILOT_TEST_TOKEN = "test-secret-value";
   try {
