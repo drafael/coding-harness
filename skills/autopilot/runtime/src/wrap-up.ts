@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import type { RunCharter, WorkItem } from "./charter.js";
 import { createDeliveryAdapter } from "./delivery-adapters.js";
 import type { ChangeRequestRef } from "./delivery.js";
+import { projectPredicateEvidence } from "./evidence-map.js";
 import { AutopilotError } from "./errors.js";
 import { newEventId, type LifecycleEvent } from "./events.js";
 import { appendEvent, readJournal, type JournalRecord } from "./journal.js";
@@ -430,9 +431,10 @@ async function handoffObject(run: LoadedRun, chainRunIds: readonly string[], cle
     ? [{ decision: event.decision, basis: event.basis, timestamp: event.timestamp }]
     : []);
   const receipts = run.records.flatMap(({ event }) => event.type === "RECEIPT_RECORDED"
-    ? [{ itemId: event.itemId, receiptId: event.receiptId, status: event.status }]
+    ? [{ itemId: event.itemId, receiptId: event.receiptId, gateId: event.gateId, receiptKind: event.receiptKind, status: event.status }]
     : []);
   const projection = rebuildProjection(run.charter, run.records);
+  const evidenceMap = await projectPredicateEvidence(run.directory, run.charter, projection, run.records);
   let assurance = "unverified";
   let unverifiedBoundaries: readonly string[] = ["No prior adapter capability report is available."];
   try {
@@ -470,6 +472,7 @@ async function handoffObject(run: LoadedRun, chainRunIds: readonly string[], cle
     waivers: run.charter.waivers,
     commitPolicy: run.charter.commitPolicy,
     receipts,
+    evidenceMap,
     decisions,
     assurance,
     unverifiedBoundaries,

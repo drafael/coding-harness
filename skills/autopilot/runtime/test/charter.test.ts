@@ -17,6 +17,29 @@ test("sealCharter accepts each supported graph mode and produces a stable immuta
   }
 });
 
+test("sealCharter accepts bounded provider-check waiting only for merge-verified delivery", async () => {
+  const repository = await createRepository();
+  const proposed = proposedCharter(repository.root, repository.baseCommit);
+  const delivery = {
+    ...proposed,
+    delivery: "merge-verified" as const,
+    deliveryTarget: { provider: "github" as const, remote: "origin", baseBranch: "main" },
+    providerCheckWait: { heartbeatMs: 1_000, timeoutMs: 5_000 },
+    grants: [
+      ...proposed.grants,
+      { family: "remote.push" as const, actor: "runtime" as const, remotes: ["origin"] },
+      { family: "change-request.open" as const, actor: "delivery" as const },
+      { family: "merge.execute" as const, actor: "delivery" as const },
+    ],
+  };
+
+  assert.deepEqual(sealCharter(delivery).providerCheckWait, { heartbeatMs: 1_000, timeoutMs: 5_000 });
+  assert.throws(() => sealCharter({
+    ...proposed,
+    providerCheckWait: { heartbeatMs: 1_000, timeoutMs: 5_000 },
+  }), /providerCheckWait/);
+});
+
 test("sealCharter accepts a single change-request amendment with explicit hook policy", async () => {
   const repository = await createRepository();
   const proposed = proposedCharter(repository.root, repository.baseCommit);
@@ -106,4 +129,12 @@ test("sealCharter rejects duplicate branches, unknown grants, missing predicates
     ...queue,
     waivers: [{ gateId: "missing", failurePattern: "known", alternativeGateIds: [], reason: "test" }],
   }), /unknown or missing alternative gates/);
+  assert.throws(() => sealCharter({
+    ...queue,
+    gates: [
+      ...queue.gates,
+      { id: "review", type: "review", focus: "Correctness", appliesTo: ["item-1"] },
+    ],
+    waivers: [{ gateId: "review", failurePattern: "finding", alternativeGateIds: ["result-search"], reason: "test" }],
+  }), /review gate review cannot be waived/);
 });

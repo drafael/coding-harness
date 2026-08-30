@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { acquireBranchOwnershipLock, acquireRunLock, requestRunStop } from "../src/lock.js";
+import { acquireBranchOwnershipLock, acquireRunLock, requestRunPause, requestRunStop } from "../src/lock.js";
 
 test("run lock permits one coordinator and releases by owner token", async () => {
   const directory = await mkdtemp(join(tmpdir(), "autopilot-lock-"));
@@ -50,6 +50,25 @@ test("run lock accepts only the current owner's durable stop request", async () 
 
   const second = await acquireRunLock(path);
   assert.equal(await second.stopRequested("run-one"), false);
+  await second.release();
+});
+
+test("run lock fences pause requests and gives stop precedence", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autopilot-pause-request-"));
+  const path = join(directory, "run.lock");
+  const first = await acquireRunLock(path);
+
+  const pauseRequest = await requestRunPause(path, "run-one");
+  assert.equal(pauseRequest.status, "requested");
+  assert.equal(await first.controlRequested("run-one"), "pause");
+
+  const stopRequest = await requestRunStop(path, "run-one");
+  assert.equal(stopRequest.status, "requested");
+  assert.equal(await first.controlRequested("run-one"), "stop");
+  await first.release();
+
+  const second = await acquireRunLock(path);
+  assert.equal(await second.controlRequested("run-one"), undefined);
   await second.release();
 });
 

@@ -13,16 +13,21 @@ export interface LockOwner {
   readonly token: string;
 }
 
+export type ControlAction = "pause" | "stop";
+
 export interface RunLock {
   readonly owner: LockOwner;
   relocate(path: string): Promise<void>;
+  controlRequested(runId: string): Promise<ControlAction | undefined>;
   stopRequested(runId: string): Promise<boolean>;
   release(): Promise<void>;
 }
 
-export type StopRequestResult =
+export type ControlRequestResult =
   | { readonly status: "requested"; readonly owner: LockOwner }
   | { readonly status: "unowned" };
+
+export type StopRequestResult = ControlRequestResult;
 
 function processExists(pid: number): boolean {
   try {
@@ -33,8 +38,8 @@ function processExists(pid: number): boolean {
   }
 }
 
-function stopRequestPath(path: string, ownerToken: string): string {
-  return join(path, `stop-${sha256(ownerToken)}.json`);
+function controlRequestPath(path: string, ownerToken: string, action: ControlAction): string {
+  return join(path, `${action}-${sha256(ownerToken)}.json`);
 }
 
 export function lockOwnerIsActive(owner: LockOwner): boolean {
@@ -55,14 +60,15 @@ export async function readLockOwner(path: string): Promise<LockOwner | undefined
   }
 }
 
-export async function requestRunStop(path: string, runId: string): Promise<StopRequestResult> {
+export async function requestRunControl(path: string, runId: string, action: ControlAction): Promise<ControlRequestResult> {
   const owner = await readLockOwner(path);
   if (owner === undefined || !lockOwnerIsActive(owner)) {
     return { status: "unowned" };
   }
   try {
-    await writeJsonAtomic(stopRequestPath(path, owner.token), {
+    await writeJsonAtomic(controlRequestPath(path, owner.token, action), {
       schemaVersion: 1,
+      action,
       runId,
       ownerToken: owner.token,
       requestedAt: new Date().toISOString(),
@@ -75,6 +81,14 @@ export async function requestRunStop(path: string, runId: string): Promise<StopR
   }
   const current = await readLockOwner(path);
   return current?.token === owner.token ? { status: "requested", owner } : { status: "unowned" };
+}
+
+export async function requestRunStop(path: string, runId: string): Promise<StopRequestResult> {
+  return await requestRunControl(path, runId, "stop");
+}
+
+export async function requestRunPause(path: string, runId: string): Promise<ControlRequestResult> {
+  return await requestRunControl(path, runId, "pause");
 }
 
 async function createLock(path: string, owner: LockOwner): Promise<void> {
@@ -119,10 +133,33 @@ export async function acquireRunLock(path: string, resource = "run"): Promise<Ru
       }
       ownedPath = nextPath;
     },
+    async controlRequested(runId: string): Promise<ControlAction | undefined> {
+      const requested = async (action: ControlAction): Promise<boolean> => {
+        try {
+          const object = expectRecord(
+            JSON.parse(await readFile(controlRequestPath(ownedPath, owner.token, action), "utf8")) as unknown,
+            `${action} request`,
+          );
+          return object.schemaVersion === 1
+            && (object.action === undefined || expectString(object.action, `${action} request.action`) === action)
+            && expectString(object.runId, `${action} request.runId`) === runId
+            && expectString(object.ownerToken, `${action} request.ownerToken`) === owner.token;
+        } catch (error) {
+          if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+            return false;
+          }
+          throw error;
+        }
+      };
+      if (await requested("stop")) {
+        return "stop";
+      }
+      return await requested("pause") ? "pause" : undefined;
+    },
     async stopRequested(runId: string): Promise<boolean> {
       try {
         const object = expectRecord(
-          JSON.parse(await readFile(stopRequestPath(ownedPath, owner.token), "utf8")) as unknown,
+          JSON.parse(await readFile(controlRequestPath(ownedPath, owner.token, "stop"), "utf8")) as unknown,
           "stop request",
         );
         return object.schemaVersion === 1

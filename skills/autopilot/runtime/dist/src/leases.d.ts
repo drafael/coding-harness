@@ -5,7 +5,9 @@ export interface WriterLease {
     readonly epoch: number;
     readonly attemptId: string;
     readonly expiresAt: string;
+    readonly retiredAt?: string;
 }
 export declare function readLease(runDirectory: string, itemId: string): Promise<WriterLease | undefined>;
 export declare function acquireWriterLease(runDirectory: string, itemId: string, branchName: string, worktreePath: string, attemptId: string, timeoutMs: number): Promise<WriterLease>;
+export declare function retireWriterLease(runDirectory: string, expected: Pick<WriterLease, "itemId" | "attemptId" | "epoch">): Promise<WriterLease>;
 export declare function leaseIsCurrent(lease: WriterLease, attemptId: string, now?: number): boolean;

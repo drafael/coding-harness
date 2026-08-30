@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; remote provider mutation, Windows, clean-worktree retention, external wake/reattachment, and restack evidence remain incomplete
+- **Status:** Developer-preview implementation available; live independent review, GitHub review-thread mutation, GitLab mutation, Windows, provider notification wake, restart reattachment, and restack evidence remain incomplete
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
@@ -89,18 +89,19 @@ The harness proposes a charter from the request and repository evidence. The CLI
 
 Autopilot asks before unattended execution only when the objective, replacement behavior, ordering, delivery intent, or acceptance criteria require a genuine product decision. Missing tools or capabilities produce a preflight failure with setup instructions.
 
-Users manage lifecycle state through `/autopilot status`, `/autopilot resume`, `/autopilot stop`, and `/autopilot wrap up`, or natural wording supplied after explicit `/autopilot` invocation. The internal runtime commands are:
+Users manage lifecycle state through `/autopilot status`, `/autopilot pause`, `/autopilot resume`, `/autopilot stop`, and `/autopilot wrap up`, or natural wording supplied after explicit `/autopilot` invocation. The internal runtime commands are:
 
 ```bash
 autopilot [--state-dir <path>] start <charter-file>
 autopilot [--state-dir <path>] status [run-id]
 autopilot [--state-dir <path>] resume [run-id]
+autopilot [--state-dir <path>] pause [run-id]
 autopilot [--state-dir <path>] stop [run-id]
 autopilot [--state-dir <path>] [--handoff] wrap-up [run-id]
 autopilot doctor
 ```
 
-Omitted-ID lifecycle commands discover unsuperseded leaf runs by exact canonical repository identity. They mutate only one unambiguous eligible run; otherwise they return structured choices. `stop` writes a token-bound control request when another process owns the run, so the foreground coordinator cancels adapter work and remains the only journal writer.
+Omitted-ID lifecycle commands discover unsuperseded leaf runs by exact canonical repository identity. They mutate only one unambiguous eligible run; otherwise they return structured choices. `pause` and `stop` write token-bound control requests when another process owns the run, so the foreground coordinator remains the only journal writer. Pause cancels implementation work, proves quiescence, retires the exact lease, and records nonterminal operator waiting; stop remains terminal.
 
 `start` runs in the foreground by default. A harness may use its supported background-process mechanism. If a harness cannot preserve background processes, its integration must show the equivalent terminal command instead of claiming unattended continuity.
 
@@ -113,7 +114,11 @@ The system has four owners:
 3. **Harness adapter.** Starts a bounded fresh agent session and translates its observable events into the portable protocol.
 4. **Delivery adapter.** Observes and changes provider state for GitHub, GitLab, or another supported provider.
 
-The runtime does not embed an LLM SDK. Adapters call public harness CLI or SDK surfaces. A harness session receives only the work item, its exclusive worktree, relevant context, acceptance criteria, allowed paths, forbidden effects, timebox, and result format.
+[![Autopilot runtime ownership: the operator and harness skill feed one lock-owning coordinator, which alone writes lifecycle state and governs Git, evidence, adapters, and provider effects.](diagrams/autopilot-runtime-ownership.png)](diagrams/autopilot-runtime-ownership.html)
+
+*Runtime ownership. Select the image to open the standalone HTML figure.*
+
+The runtime does not embed an LLM SDK. Adapters call public harness CLI or SDK surfaces. A harness session receives a versioned attempt context derived from the sealed charter, journal prefix, Git identity, and receipts. The context contains only the current item, dependencies, predicates, bounded failure facts, remaining budgets, allowed paths, forbidden effects, and result format. It is stored as an immutable attempt artifact and hashed from `ATTEMPT_STARTED`; it is a rebuildable projection, not lifecycle state.
 
 ## Run charter
 
@@ -179,7 +184,11 @@ COMPILED -> RECONCILING -> RUNNING <-> WAITING
                     SUCCEEDED | STOPPED
 ```
 
-`SUCCEEDED` is reachable only after fresh evaluation of the original completion predicates. `STOPPED` is a durable terminal outcome with a reason, preserved artifacts, unmet predicates, and exact remediation or successor-run instructions. `resume` continues an interrupted nonterminal run; it does not reopen a terminal run with exhausted authority or budgets.
+[![Autopilot lifecycle: compiled work reconciles, runs, verifies, and either succeeds, stops terminally, or waits nonterminally for pause, provider checks, or unknown execution state.](diagrams/autopilot-lifecycle-waiting.png)](diagrams/autopilot-lifecycle-waiting.html)
+
+*Lifecycle waiting. Select the image to open the standalone HTML figure.*
+
+`SUCCEEDED` is reachable only after fresh evaluation of the original completion predicates. `STOPPED` is a durable terminal outcome with a reason, preserved artifacts, unmet predicates, and exact remediation or successor-run instructions. `WAITING` identifies operator pause, an exact-subject provider-check session, or an execution whose quiescence cannot be proven after coordinator loss. `resume` continues a waiting or interrupted nonterminal run, but it refuses a replacement attempt while execution remains unknown. It does not reopen a terminal run with exhausted authority or budgets.
 
 Selected actionable review feedback for a successful open change request creates a new single-item charter with an explicit `amends` reference and a head-bound, content-hashed `reviewFeedback` snapshot. The predecessor remains terminal and immutable. Under a shared branch-ownership lock, the successor may adopt the retained worktree only when the predecessor journal, accepted commit, clean worktree, local branch, remote branch, and exact open change request still agree. It uses fresh authority and receipts and may update the existing head only through an ordinary fast-forward push. After the successor passes its predicates and the exact PR/MR is observed at that commit, a separately granted delivery effect may resolve only the sealed provider-resolvable threads.
 
@@ -192,7 +201,7 @@ PENDING -> READY -> ACTIVE -> VERIFYING -> SATISFIED
 
 Only satisfied dependencies make an item ready. Workers cannot set item states. A replan may replace pending or blocked work within the charter limits, but it cannot alter satisfied evidence, authority, waivers, or completion predicates.
 
-Each execution attempt has an immutable attempt ID, expected base and head commits, deadline, lease epoch, adapter execution ID, and idempotency key. Results from an expired lease or unexpected commit are stale and cannot advance the run.
+Each execution attempt has an immutable attempt ID, expected base commit and tree, deadline, lease epoch, context hash, adapter execution ID, and idempotency key. Results from an expired lease or unexpected commit are stale and cannot advance the run. Retries receive normalized predicate and review facts rather than a prior worker transcript.
 
 ## Durable storage
 
@@ -219,7 +228,7 @@ charter.json            immutable sealed charter
 events.jsonl            canonical hash-linked lifecycle journal
 snapshot.json           atomically replaced, rebuildable projection
 receipts/               content-addressed verification artifacts
-reports/                generated status and final reports
+reports/                generated status, final, attempt-context, and observation reports
 run.lock                 single-coordinator lock
 ```
 
@@ -267,8 +276,7 @@ interface HarnessPort {
   describe(): Promise<CapabilityManifest>;
   launch(request: ExecutionRequest): Promise<ExecutionHandle>;
   observe(handle: ExecutionHandle): Promise<ExecutionObservation>;
-  cancel?(handle: ExecutionHandle): Promise<CancelResult>;
-  watch?(interest: WakeInterest, cursor?: string): AsyncIterable<WakeEvent>;
+  cancel(handle: ExecutionHandle): Promise<CancelResult>;
 }
 ```
 
@@ -276,11 +284,13 @@ The capability manifest describes unattended execution, useful concurrency, even
 
 Adapters return observations. They never write the journal or choose lifecycle transitions. The runtime inspects the real worktree after an agent exits. Unexpected commits, refs, or out-of-scope edits become reconciliation findings.
 
+Provider notification wake remains evidence-gated. The current runtime uses bounded heartbeat polling, records only waiting and meaningful terminal observations, and reobserves the exact PR/MR, head, base, state, and checks after restart. Notifications, when later proven, will be untrusted hints that trigger the same observation; the foreground coordinator does not run a daemon.
+
 Capability degradation is explicit:
 
 - Missing parallelism makes a queue serial.
-- Missing event wake uses one bounded heartbeat.
-- Missing restart reattachment starts a fresh attempt after reconciliation.
+- Missing notification wake uses bounded heartbeat polling.
+- Missing restart reattachment fails closed as `EXECUTION_STATE_UNKNOWN` when orphan quiescence cannot be proven; it never spends another attempt on a speculative replacement.
 - Missing a required delivery or enforcement capability stops before edits.
 
 The first adapters target Claude Code, Codex, Pi, and OpenCode. They share one conformance suite.
@@ -321,20 +331,21 @@ For each ready item, the runtime:
 1. Acquires a versioned worktree and branch lease.
 2. Records an attempt with preconditions, deadline, and idempotency key.
 3. Launches a fresh bounded harness session.
-4. Observes completion through adapter events or one heartbeat fallback.
+4. Observes completion through the adapter's bounded observation contract.
 5. Rejects stale results and inspects the actual diff and Git state.
 6. Runs narrow verification gates directly.
-7. Accepts and commits progress, retries, replans pending work, waits, or stops.
+7. Records `ITEM_VERIFIED`, then reconciles commit and delivery effects from exact observations; otherwise it retries, replans pending work, waits, or stops.
 8. Re-evaluates the original completion predicate.
 
-Before an external effect, the journal records an intent with its idempotency key and expected state. After a crash, reconciliation checks whether the commit, push, change request, or merge already happened before retrying. Non-idempotent effects are never retried blindly.
+Before an external effect, the journal records an intent with its idempotency key and expected state. After a crash, reconciliation checks whether the commit, push, change request, review-thread resolution, check observation, or merge already happened before retrying. A verified checkpoint binds the exact tree, repository identities, hook identity, and receipts, so continuation does not relaunch implementation. Non-idempotent or ambiguous effects are never retried blindly.
 
 Progress means a durable tree, commit, receipt, lifecycle transition, provider-state change, or resolved blocker. Agent messages and transcript timestamps do not count.
 
 Retries are classified and bounded:
 
 - Transient network failures repeat the same idempotent operation.
-- Lost executors lose their leases and receive fresh attempts.
+- Operator-paused executors receive fresh leases after cancellation and proven quiescence; the cancelled launch is not charged.
+- Executors orphaned by coordinator loss block as `EXECUTION_STATE_UNKNOWN` unless an approved supervisor can prove status or cancellation.
 - Resource exhaustion may reduce scope or concurrency without changing acceptance.
 - Verification failure returns to implementation or uses a bounded pending-only replan.
 - Unknown failures receive one unchanged retry before the run stops.
@@ -407,16 +418,15 @@ Provider credentials remain inside the adapter process and never enter the journ
 
 ## Verification and waivers
 
-The runtime executes completion gates. Supported gate families include:
+The runtime executes three charter gate families:
 
-- Commands expressed as executable and argument arrays.
-- Search and static-analysis predicates.
-- Diff and writable-path checks.
-- Runtime or UI probes supplied by an adapter.
-- Remote CI pipelines and jobs.
-- Independent review tied to an exact commit.
+- `command`: an executable and argument array in a repository-relative working directory;
+- `search`: an exact literal count over sealed repository-relative paths;
+- `review`: one bounded harness review tied to the exact tree, with structured `clean`, `findings`, or `inconclusive` output.
 
-Each receipt is keyed by repository, commit or tree identity, gate-definition hash, and relevant environment identity. It records the observed command or probe, working directory, timestamps, exit status, tool versions, available test counts, redacted output pointers, hashes, and executor identity.
+Writable-path, Git-ref, configuration, and tree checks are runtime invariants rather than charter gates. Provider checks are observed during `merge-verified` delivery and recorded as receipts; they are not reusable charter gates. Runtime/UI probes and general remote-CI gates are not implemented.
+
+Each gate receipt is keyed by the run and item, exact commit or tree identity, gate-definition hash, and relevant environment or reviewer identity. Predicate-evaluation receipts store one typed result for every acceptance predicate, including expected and observed values. Reports, handoffs, retries, and status use the same predicate-to-evidence projection.
 
 Receipt status is:
 
@@ -424,13 +434,13 @@ Receipt status is:
 PASSED | FAILED | WAIVED | UNVERIFIED
 ```
 
-Only direct observation can produce `PASSED`. Agent prose, generated instructions, edited checkboxes, and completion markers cannot.
+Only direct runtime observation can produce `PASSED`. For a review gate, `PASSED` means only that the named review process returned a structured `clean` verdict with no findings against the exact tree. It does not prove that the code has no defects. Agent prose, generated instructions, edited checkboxes, and ordinary completion markers cannot pass a gate.
 
 A waiver must be sealed at launch. It names one gate, an observable matching condition, required alternative evidence, and a reason. A known CI job may be waived only when its configured failure signature appears and required alternative evidence passes. A new failure cannot become a waiver during the run.
 
 `DoneEvaluator` is the sole completion authority. It reads current Git and delivery identities plus fresh receipts and returns `met`, `not-met`, or `blocked` with reasons. It cannot modify the predicates.
 
-The final report includes the charter hash, state, branches, commits, change requests, merges, predicate evaluation, gates, waivers, decisions, retries, assurance level, residual worktrees, blocked items, and exact continuation, successor-run, or operator actions.
+The final report includes the charter hash, journal identity, state, branches, commits, change requests, merges, one evidence-map entry per predicate, gates, waivers, decisions, retries, assurance level, residual worktrees, blocked items, and the next legal operator action.
 
 ## Configuration
 
@@ -483,6 +493,8 @@ skills/autopilot/
     │   ├── journal.ts
     │   ├── repository.ts
     │   ├── evidence.ts
+    │   ├── evidence-map.ts
+    │   ├── attempt-context.ts
     │   ├── delivery.ts
     │   ├── report.ts
     │   └── cli.ts
@@ -497,7 +509,7 @@ skills/autopilot/
     └── test/
 ```
 
-`reducer.ts` is the only lifecycle transition authority. `policy.ts` owns authorization intersection. `journal.ts` owns persistence and locking. `repository.ts` owns Git and verification subprocesses. `evidence.ts` owns receipts, waivers, and completion evaluation. Adapters cannot import reducer internals.
+`reducer.ts` is the only lifecycle transition authority. `policy.ts` owns authorization intersection. `journal.ts` owns persistence and locking. `repository.ts` owns Git and verification subprocesses. `evidence.ts` owns gate receipts and waivers; `done.ts` owns predicate evaluation; `evidence-map.ts` projects those observations; and `attempt-context.ts` builds the bounded worker input. Adapters cannot import reducer internals.
 
 The initial package includes compiled JavaScript and TypeScript declarations. Its release artifact must not contain unresolved production imports that are absent from the installed skill. Launching does not run dependency installation. Standalone executables may later be built from the same engine after they pass the same conformance and fault-injection suite.
 

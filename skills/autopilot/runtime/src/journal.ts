@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { open, readFile, rename, truncate, writeFile } from "node:fs/promises";
+import { open, readFile, rename, truncate } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AutopilotError } from "./errors.js";
 import { parseLifecycleEvent, type LifecycleEvent } from "./events.js";
@@ -130,5 +130,17 @@ export async function writeJsonAtomic(path: string, value: unknown): Promise<voi
 }
 
 export async function writeImmutableJson(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  const file = await open(path, "wx", 0o600);
+  try {
+    await file.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await file.sync();
+  } finally {
+    await file.close();
+  }
+  const directory = await open(dirname(path), "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
 }

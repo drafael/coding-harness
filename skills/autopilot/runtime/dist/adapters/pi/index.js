@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { CliHarnessAdapter } from "../../src/adapter-process.js";
 import { isRecord } from "../../src/json.js";
 import { findPiSubagentsInstallation } from "../../src/pi-subagents.js";
-function directArguments(prompt) {
+function directArguments(request, prompt) {
     return [
         "--mode", "json",
         "--print",
@@ -11,7 +11,7 @@ function directArguments(prompt) {
         "--no-skills",
         "--no-prompt-templates",
         "--no-context-files",
-        "--tools", "read,bash,edit,write",
+        "--tools", request.role === "review" ? "read" : "read,bash,edit,write",
         "--approve",
         prompt,
     ];
@@ -68,8 +68,8 @@ export function createPiAdapter() {
         name: "pi",
         executable: "pi",
         versionArguments: ["--version"],
-        buildArguments: (request, prompt) => installation === undefined
-            ? directArguments(prompt)
+        buildArguments: (request, prompt) => installation === undefined || request.role === "review"
+            ? directArguments(request, prompt)
             : subagentArguments(request, prompt, installation),
         assurance: "cooperative",
         maxConcurrency: 1,
@@ -77,6 +77,7 @@ export function createPiAdapter() {
         limitations: [
             "Tool restrictions do not constrain commands executed through bash.",
             "Executions cannot be reattached after coordinator restart.",
+            "The direct exact-tree review role is implemented but has no version-pinned live verification.",
             usingSubagents
                 ? `Pi workers use the pi-subagents ${installation.version} structured delegation API.`
                 : "pi-subagents 0.53.0 or newer was not found; Pi workers run directly without subagent activity integration.",

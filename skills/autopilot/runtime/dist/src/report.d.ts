@@ -1,6 +1,7 @@
 import type { RunCharter } from "./charter.js";
+import { type PredicateEvidenceEntry } from "./evidence-map.js";
 import type { JournalRecord } from "./journal.js";
-import type { RunProjection } from "./reducer.js";
+import { type RunProjection } from "./reducer.js";
 export interface RunReport {
     readonly schemaVersion: 1;
     readonly generatedAt: string;
@@ -14,6 +15,7 @@ export interface RunReport {
         readonly subject?: string;
         readonly blocker?: string;
         readonly attempts: number;
+        readonly chargedAttempts: number;
     }[];
     readonly lastReason: string;
     readonly predicateSummary?: string;
@@ -26,8 +28,32 @@ export interface RunReport {
     readonly receipts: readonly {
         readonly itemId?: string;
         readonly receiptId: string;
+        readonly gateId?: string;
+        readonly receiptKind?: string;
         readonly status: string;
     }[];
+    readonly evidenceMap: readonly PredicateEvidenceEntry[];
+    readonly waiting?: RunProjection["waiting"];
+    readonly continuity: {
+        readonly journalSequence: number;
+        readonly journalRecordHash: string | null;
+        readonly lastMilestone: string;
+        readonly lastMilestoneAt: string;
+        readonly nextLegalAction: string;
+        readonly items: readonly {
+            readonly itemId: string;
+            readonly state: string;
+            readonly lastAttemptOutcome?: string;
+            readonly lastFailure?: {
+                readonly errorCode: string;
+                readonly reason: string;
+            };
+            readonly remainingAttempts: number;
+            readonly remainingReplans: number;
+            readonly unmetPredicateIds: readonly string[];
+            readonly repeatedNoChangeAttempts: number;
+        }[];
+    };
     readonly waivers: readonly {
         readonly gateId: string;
         readonly reason: string;

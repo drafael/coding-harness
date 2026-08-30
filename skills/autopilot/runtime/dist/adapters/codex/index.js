@@ -9,14 +9,18 @@ export function createCodexAdapter() {
             "--json",
             "--ephemeral",
             "--strict-config",
-            "--sandbox", "workspace-write",
+            "--sandbox", request.role === "review" ? "read-only" : "workspace-write",
             "--cd", request.worktreePath,
             prompt,
         ],
         assurance: "cooperative",
         maxConcurrency: 1,
         cancellation: true,
-        limitations: ["Codex enforces a workspace sandbox, but Autopilot item-path and effect restrictions are checked after execution.", "Executions are ephemeral and cannot be reattached."],
+        limitations: [
+            "Codex enforces a workspace sandbox, but Autopilot item-path and effect restrictions are checked after execution.",
+            "Executions are ephemeral and cannot be reattached.",
+            "The exact-tree review role is implemented but has no version-pinned live verification.",
+        ],
         expectsJsonLines: true,
     });
 }

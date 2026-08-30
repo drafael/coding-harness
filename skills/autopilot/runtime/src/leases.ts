@@ -10,6 +10,7 @@ export interface WriterLease {
   readonly epoch: number;
   readonly attemptId: string;
   readonly expiresAt: string;
+  readonly retiredAt?: string;
 }
 
 export async function readLease(runDirectory: string, itemId: string): Promise<WriterLease | undefined> {
@@ -22,6 +23,7 @@ export async function readLease(runDirectory: string, itemId: string): Promise<W
       epoch: expectInteger(object.epoch, "lease.epoch", 1),
       attemptId: expectString(object.attemptId, "lease.attemptId"),
       expiresAt: expectString(object.expiresAt, "lease.expiresAt"),
+      ...(object.retiredAt === undefined ? {} : { retiredAt: expectString(object.retiredAt, "lease.retiredAt") }),
     };
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
@@ -53,6 +55,22 @@ export async function acquireWriterLease(
   return lease;
 }
 
+export async function retireWriterLease(
+  runDirectory: string,
+  expected: Pick<WriterLease, "itemId" | "attemptId" | "epoch">,
+): Promise<WriterLease> {
+  const current = await readLease(runDirectory, expected.itemId);
+  if (current === undefined || current.attemptId !== expected.attemptId || current.epoch !== expected.epoch) {
+    throw new Error(`writer lease identity changed before retirement for ${expected.itemId}`);
+  }
+  if (current.retiredAt !== undefined) {
+    return current;
+  }
+  const retired = { ...current, retiredAt: new Date().toISOString() };
+  await writeJsonAtomic(join(runDirectory, "leases", `${expected.itemId}.json`), retired);
+  return retired;
+}
+
 export function leaseIsCurrent(lease: WriterLease, attemptId: string, now = Date.now()): boolean {
-  return lease.attemptId === attemptId && Date.parse(lease.expiresAt) > now;
+  return lease.retiredAt === undefined && lease.attemptId === attemptId && Date.parse(lease.expiresAt) > now;
 }

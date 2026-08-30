@@ -32,7 +32,13 @@ export interface SearchGate {
     readonly expectedCount: number;
     readonly appliesTo: readonly string[];
 }
-export type VerificationGate = CommandGate | SearchGate;
+export interface ReviewGate {
+    readonly id: string;
+    readonly type: "review";
+    readonly focus: string;
+    readonly appliesTo: readonly string[];
+}
+export type VerificationGate = CommandGate | SearchGate | ReviewGate;
 export type Predicate = {
     readonly type: "gate-passed";
     readonly gateId: string;
@@ -78,6 +84,10 @@ export interface DeliveryTarget {
     readonly remote: string;
     readonly baseBranch: string;
 }
+export interface ProviderCheckWaitPolicy {
+    readonly heartbeatMs: number;
+    readonly timeoutMs: number;
+}
 export interface AmendmentReference {
     readonly runId: string;
     readonly itemId: string;
@@ -118,6 +128,7 @@ export interface ProposedRunCharter {
     readonly work: readonly WorkItem[];
     readonly delivery: DeliveryMode;
     readonly deliveryTarget?: DeliveryTarget;
+    readonly providerCheckWait?: ProviderCheckWaitPolicy;
     readonly grants: readonly CapabilityGrant[];
     readonly gates: readonly VerificationGate[];
     readonly waivers: readonly EvidenceWaiver[];

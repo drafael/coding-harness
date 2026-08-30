@@ -20,6 +20,12 @@ if (args[0] === "mr" && args[1] === "view") {
 } else if (args[0] === "api" && args.includes("PUT")) {
   const id = args[1].split("/").at(-1);
   console.log(JSON.stringify({id, notes: [{resolvable: true, resolved: true}]}));
+} else if (args[0] === "api" && args[1].endsWith("/statuses")) {
+  console.log(JSON.stringify([
+    {id: 1, name: "build", status: "failed", target_url: "https://example.invalid/jobs/1"},
+    {id: 3, name: "lint", status: "running", target_url: "https://example.invalid/jobs/3"},
+    {id: 2, name: "build", status: "success", target_url: "https://example.invalid/jobs/2"}
+  ]));
 } else if (args[0] === "api" && args[1].endsWith("/discussions")) {
   console.log(JSON.stringify([{id: "discussion-1", notes: [{
     id: 13, author: {username: "reviewer"}, body: "Handle null", created_at: "2026-08-23T00:00:00Z",
@@ -50,6 +56,29 @@ test("GitLab delivery observes and resolves exact review discussions", async () 
     assert.equal(threads[0]?.comments[0]?.body, "Handle null");
     assert.equal(threads[0]?.path, "src/a.ts");
     assert.deepEqual(resolved, ["discussion-1"]);
+  } finally {
+    process.env.PATH = priorPath;
+  }
+});
+
+test("GitLab delivery selects the latest status for duplicate check names", async () => {
+  const fake = await fakeGitLabCli();
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${fake.bin}${delimiter}${priorPath ?? ""}`;
+  try {
+    const checks = await new GitLabDeliveryAdapter().observeChecks(fake.bin, "expected-head");
+
+    assert.deepEqual(checks, [{
+      name: "build",
+      status: "passed",
+      subjectCommit: "expected-head",
+      detailsUrl: "https://example.invalid/jobs/2",
+    }, {
+      name: "lint",
+      status: "pending",
+      subjectCommit: "expected-head",
+      detailsUrl: "https://example.invalid/jobs/3",
+    }]);
   } finally {
     process.env.PATH = priorPath;
   }

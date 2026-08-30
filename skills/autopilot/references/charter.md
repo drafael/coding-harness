@@ -16,8 +16,9 @@ Runtime validation in `runtime/src/charter.ts` is authoritative. `runtime/schema
 - `work`: resolved items with concise change-request titles, full objectives, dependencies, predicates, writable roots, and branches
 - `delivery`: `local-commits`, `change-request-ready`, or `merge-verified`
 - `deliveryTarget`: required for remote delivery
+- `providerCheckWait`: optional `merge-verified` heartbeat and session-timeout bounds; defaults are runtime-owned when omitted
 - `grants`: explicit family, actor, and optional constraints
-- `gates`: runtime-owned command or literal-search checks
+- `gates`: runtime-owned command, literal-search, or exact-tree review checks
 - `waivers`: launch-only exact failure signatures with alternative gates
 - `limits`: attempt, concurrency, timeout, line, and output bounds
 - `assumptions`: material reversible decisions
@@ -33,6 +34,18 @@ Newly compiled charters also include `commitPolicy`, with an explicit `preCommit
 A review-feedback amendment also seals `reviewFeedback.observedHeadCommit` and a non-empty list of exact thread IDs, content hashes, URLs, and `resolve` flags. The observed head must equal the amendment base commit. `resolve: true` is valid only for provider-resolvable review threads and requires a delivery `review-thread.resolve` grant; non-resolvable PR comments may be addressed by the verified code change with `resolve: false`.
 
 Set `repository.baseCommit` to the predecessor's confirmed remote commit. The runtime denies dirty worktrees, unmanaged commits, changed refs, missing evidence, closed or merged change requests, concurrent adopters, and non-fast-forward delivery. See [recovery](recovery.md) for the launch procedure.
+
+## Gate families
+
+| Type | Runtime observation | Current status |
+|---|---|---|
+| `command` | Exit status and bounded redacted output from an executable/argument array | Implemented |
+| `search` | Exact literal count over sealed repository-relative paths | Implemented |
+| `review` | Structured reviewer verdict and findings against an exact tree | Implemented with fake-adapter coverage; live harness execution remains unverified |
+| Runtime/UI probe | None | Not implemented |
+| General remote CI gate | None; provider checks are delivery receipts only | Not implemented |
+
+A `review` gate contains `id`, `type: "review"`, a bounded `focus` string, and `appliesTo`. Any finding fails the first contract, and review gates cannot be waived. `inconclusive`, malformed, timed-out, truncated, or mutating review execution is unverified and blocks completion. Findings are untrusted data passed to a fresh remediation attempt; they cannot add grants, writable roots, predicates, commands, credentials, or provider effects. A clean review receipt proves only what that named review process reported for the exact tree.
 
 ## Command gate environments
 
@@ -137,11 +150,14 @@ Replace the repository values and branch before launch:
 }
 ```
 
+`maxRetainedOutputBytes` bounds retained adapter output and each generated implementation or review attempt context. Context overflow fails closed; the runtime does not truncate authority or acceptance criteria.
+
 ## Remote additions
 
 Remote delivery requires:
 
 - `deliveryTarget` with `provider`, `remote`, and `baseBranch`
+- for `merge-verified`, optional `providerCheckWait` with positive `heartbeatMs` and `timeoutMs`, where the heartbeat does not exceed the timeout
 - runtime `network.access`, `credentials.use`, and constrained `remote.push`
 - delivery `network.access`, `credentials.use`, and `change-request.open`
 - delivery `merge.execute` only for `merge-verified`

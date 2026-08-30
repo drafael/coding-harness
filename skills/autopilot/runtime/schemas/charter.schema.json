@@ -33,6 +33,7 @@
     "work": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/workItem" } },
     "delivery": { "enum": ["local-commits", "change-request-ready", "merge-verified"] },
     "deliveryTarget": { "$ref": "#/$defs/deliveryTarget" },
+    "providerCheckWait": { "$ref": "#/$defs/providerCheckWait" },
     "grants": { "type": "array", "items": { "$ref": "#/$defs/grant" } },
     "gates": { "type": "array", "items": { "$ref": "#/$defs/gate" } },
     "waivers": { "type": "array", "items": { "$ref": "#/$defs/waiver" } },
@@ -110,6 +111,15 @@
         "provider": { "enum": ["github", "gitlab"] },
         "remote": { "type": "string", "minLength": 1 },
         "baseBranch": { "type": "string", "minLength": 1 }
+      }
+    },
+    "providerCheckWait": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heartbeatMs", "timeoutMs"],
+      "properties": {
+        "heartbeatMs": { "type": "integer", "minimum": 1 },
+        "timeoutMs": { "type": "integer", "minimum": 1 }
       }
     },
     "grant": {
@@ -209,6 +219,17 @@
             "query": { "type": "string", "minLength": 1 },
             "paths": { "type": "array", "items": { "type": "string" } },
             "expectedCount": { "type": "integer", "minimum": 0 },
+            "appliesTo": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "type", "focus", "appliesTo"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "type": { "const": "review" },
+            "focus": { "type": "string", "minLength": 1 },
             "appliesTo": { "type": "array", "items": { "type": "string" } }
           }
         }

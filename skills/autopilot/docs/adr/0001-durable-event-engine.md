@@ -29,6 +29,20 @@ Workers receive isolated worktrees and may edit only their granted roots. The ru
 
 The CLI remains foreground and portable. It does not install a daemon, database, harness, browser, provider CLI, or authentication state.
 
+## Decision diagrams
+
+### Runtime ownership
+
+[![Autopilot runtime ownership: one foreground coordinator owns lifecycle decisions while adapters, Git, evidence, and providers remain bounded mechanisms or observations.](../diagrams/autopilot-runtime-ownership.png)](../diagrams/autopilot-runtime-ownership.html)
+
+The coordinator is the only lifecycle writer. Workers edit granted roots; the runtime verifies and governs effects; provider responses remain observations. Select the image to open the standalone HTML figure.
+
+### Durable nonterminal waiting
+
+[![Autopilot lifecycle: waiting for pause, provider checks, or unknown execution state remains distinct from immutable success and terminal stop.](../diagrams/autopilot-lifecycle-waiting.png)](../diagrams/autopilot-lifecycle-waiting.html)
+
+Later pause and provider-wait behavior extends this decision without creating another lifecycle owner. Unknown executor state fails closed instead of launching a speculative replacement. Select the image to open the standalone HTML figure.
+
 ## Alternatives considered
 
 ### Markdown-only playbooks

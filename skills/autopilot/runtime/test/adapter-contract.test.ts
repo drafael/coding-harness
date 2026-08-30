@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseAdapterMessage, type ExecutionRequest } from "../src/adapter-protocol.js";
-import { CliHarnessAdapter } from "../src/adapter-process.js";
+import { CliHarnessAdapter, parseReviewResult } from "../src/adapter-process.js";
 import { runProcess } from "../src/process.js";
+import { attemptContextFixture } from "./helpers.js";
 
 test("adapter protocol parses normalized lifecycle messages", () => {
   const message = parseAdapterMessage(JSON.stringify({
@@ -61,12 +62,15 @@ test("adapter observation redacts credential-like environment values", async () 
     });
     const request: ExecutionRequest = {
       protocolVersion: 1,
+      role: "implementation",
       runId: "run",
       itemId: "item",
       attemptId: "attempt",
       worktreePath: process.cwd(),
       objective: "test",
       acceptanceSummary: "test",
+      context: attemptContextFixture("attempt"),
+      contextHash: "context-hash",
       writableRoots: ["."],
       grants: [{ family: "credentials.use", actor: "adapter", environmentNames: ["AUTOPILOT_TEST_TOKEN"] }],
       deadline: new Date(Date.now() + 10_000).toISOString(),
@@ -99,12 +103,15 @@ test("adapter cancellation is reported as cancelled rather than timed out", asyn
   });
   const request: ExecutionRequest = {
     protocolVersion: 1,
+    role: "implementation",
     runId: "run",
     itemId: "item",
     attemptId: "cancelled-attempt",
     worktreePath: process.cwd(),
     objective: "test cancellation",
     acceptanceSummary: "cancelled",
+    context: attemptContextFixture("cancelled-attempt"),
+    contextHash: "context-hash",
     writableRoots: ["."],
     grants: [],
     deadline: new Date(Date.now() + 10_000).toISOString(),
@@ -119,6 +126,35 @@ test("adapter cancellation is reported as cancelled rather than timed out", asyn
 
   assert.equal(cancellation.accepted, true);
   assert.equal(observation.status, "cancelled");
+});
+
+test("review result parser accepts one structured marker and rejects contradictory output", () => {
+  const clean = parseReviewResult(JSON.stringify({
+    type: "message",
+    text: 'AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[]}',
+  }));
+  const findings = parseReviewResult(JSON.stringify({
+    type: "message",
+    text: 'AUTOPILOT_REVIEW_RESULT:{"verdict":"findings","findings":[{"path":"src/a.ts","line":4,"message":"Wrong branch"}]}',
+  }));
+  const contradictory = parseReviewResult(JSON.stringify({
+    type: "message",
+    text: 'AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[{"message":"still broken"}]}',
+  }));
+  const inconclusive = parseReviewResult(JSON.stringify({
+    type: "message",
+    text: 'AUTOPILOT_REVIEW_RESULT:{"verdict":"inconclusive","findings":[]}',
+  }));
+  const withPromptEcho = parseReviewResult([
+    JSON.stringify({ type: "request", text: "Return AUTOPILOT_REVIEW_RESULT:{template}" }),
+    JSON.stringify({ type: "message", text: 'AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[]}' }),
+  ].join("\n"));
+
+  assert.deepEqual(clean, { verdict: "clean", findings: [] });
+  assert.equal(findings?.findings[0]?.path, "src/a.ts");
+  assert.deepEqual(inconclusive, { verdict: "inconclusive", findings: [] });
+  assert.deepEqual(withPromptEcho, { verdict: "clean", findings: [] });
+  assert.equal(contradictory, undefined);
 });
 
 test("adapter protocol parses a complete capability manifest", () => {

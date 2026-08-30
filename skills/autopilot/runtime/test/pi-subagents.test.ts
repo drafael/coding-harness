@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { createPiAdapter } from "../adapters/pi/index.js";
 import type { ExecutionRequest } from "../src/adapter-protocol.js";
 import { findPiSubagentsInstallation } from "../src/pi-subagents.js";
+import { attemptContextFixture } from "./helpers.js";
 
 async function fakeInstallation(root: string, version: string): Promise<string> {
   const packageRoot = join(root, "npm", "node_modules", "pi-subagents");
@@ -19,12 +20,15 @@ async function fakeInstallation(root: string, version: string): Promise<string> 
 function request(): ExecutionRequest {
   return {
     protocolVersion: 1,
+    role: "implementation",
     runId: "run-12345678",
     itemId: "item-1",
     attemptId: "attempt-1",
     worktreePath: process.cwd(),
     objective: "Create result.txt",
     acceptanceSummary: "result.txt exists",
+    context: attemptContextFixture("attempt-1"),
+    contextHash: "context-hash",
     writableRoots: ["result.txt"],
     grants: [],
     deadline: new Date(Date.now() + 30_000).toISOString(),

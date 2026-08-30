@@ -1,4 +1,4 @@
-import { type CancelResult, type CapabilityManifest, type ExecutionHandle, type ExecutionObservation, type ExecutionRequest, type HarnessPort } from "./adapter-protocol.js";
+import { type CancelResult, type CapabilityManifest, type ExecutionHandle, type ExecutionObservation, type ExecutionRequest, type HarnessPort, type ReviewResult } from "./adapter-protocol.js";
 export interface CliHarnessConfiguration {
     readonly name: string;
     readonly executable: string;
@@ -12,6 +12,7 @@ export interface CliHarnessConfiguration {
     readonly validateResult?: (stdout: string) => string | undefined;
     readonly displayStderrActivity?: boolean;
 }
+export declare function parseReviewResult(stdout: string): ReviewResult | undefined;
 export declare class CliHarnessAdapter implements HarnessPort {
     #private;
     constructor(configuration: CliHarnessConfiguration);

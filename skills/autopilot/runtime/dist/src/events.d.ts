@@ -1,4 +1,22 @@
 export type EventSource = "runtime" | "operator" | "reconciler";
+export type WaitingDetails = {
+    readonly kind: "operator-pause";
+    readonly requestId: string;
+} | {
+    readonly kind: "execution-unknown";
+    readonly itemId: string;
+    readonly attemptId: string;
+} | {
+    readonly kind: "provider-checks";
+    readonly provider: "github" | "gitlab";
+    readonly itemId: string;
+    readonly changeRequestId: string;
+    readonly changeRequestUrl: string;
+    readonly subjectCommit: string;
+    readonly baseBranch: string;
+    readonly heartbeatMs: number;
+    readonly deadline: string;
+};
 interface EventBase {
     readonly eventId: string;
     readonly timestamp: string;
@@ -15,7 +33,14 @@ export type LifecycleEvent = (EventBase & {
 }) | (EventBase & {
     readonly type: "RECONCILIATION_COMPLETED";
 }) | (EventBase & {
+    readonly type: "RUN_PAUSE_REQUESTED";
+    readonly requestId: string;
+}) | (EventBase & {
     readonly type: "RUN_WAITING";
+    readonly waiting?: WaitingDetails;
+}) | (EventBase & {
+    readonly type: "RUN_WOKEN";
+    readonly observationId: string;
 }) | (EventBase & {
     readonly type: "RUN_RESUMED";
 }) | (EventBase & {
@@ -49,10 +74,13 @@ export type LifecycleEvent = (EventBase & {
     readonly attemptId: string;
     readonly leaseEpoch: number;
     readonly expectedBaseCommit: string;
+    readonly expectedTreeIdentity?: string;
     readonly expectedRefIdentity?: string;
     readonly expectedConfigurationIdentity?: string;
     readonly expectedHookIdentity?: string;
     readonly expectedHookPath?: string;
+    readonly contextHash?: string;
+    readonly contextJournalSequence?: number;
     readonly deadline: string;
     readonly idempotencyKey: string;
 }) | (EventBase & {
@@ -60,11 +88,30 @@ export type LifecycleEvent = (EventBase & {
     readonly itemId: string;
     readonly attemptId: string;
     readonly observedHeadCommit: string;
+    readonly observedTreeIdentity?: string;
     readonly outcome: "completed" | "failed" | "cancelled" | "timed-out" | "stale";
 }) | (EventBase & {
     readonly type: "ITEM_VERIFYING";
     readonly itemId: string;
     readonly attemptId: string;
+}) | (EventBase & {
+    readonly type: "ATTEMPT_PAUSED";
+    readonly itemId: string;
+    readonly attemptId: string;
+    readonly budgetConsumed?: boolean;
+}) | (EventBase & {
+    readonly type: "ITEM_VERIFIED";
+    readonly itemId: string;
+    readonly attemptId: string;
+    readonly subject: string;
+    readonly headCommit: string;
+    readonly treeIdentity: string;
+    readonly auxiliaryRefIdentity: string;
+    readonly configurationIdentity: string;
+    readonly hookIdentity?: string;
+    readonly hookPath?: string;
+    readonly commitRequired: boolean;
+    readonly receiptIds: readonly string[];
 }) | (EventBase & {
     readonly type: "ITEM_SATISFIED";
     readonly itemId: string;
@@ -87,9 +134,12 @@ export type LifecycleEvent = (EventBase & {
     readonly effect: string;
     readonly idempotencyKey: string;
     readonly observedState: string;
+    readonly repositoryAuxiliaryRefIdentity?: string;
 }) | (EventBase & {
     readonly type: "RECEIPT_RECORDED";
     readonly receiptId: string;
+    readonly gateId?: string;
+    readonly receiptKind?: "gate" | "predicate" | "review" | "remote-checks";
     readonly status: "PASSED" | "FAILED" | "WAIVED" | "UNVERIFIED";
 }) | (EventBase & {
     readonly type: "PRE_COMMIT_HOOK_FINISHED";

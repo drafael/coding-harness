@@ -2,12 +2,38 @@ import { randomUUID } from "node:crypto";
 import { AutopilotError } from "./errors.js";
 import { expectBoolean, expectInteger, expectLiteral, expectRecord, expectString, expectStringArray } from "./json.js";
 const EVENT_TYPES = [
-    "CHARTER_COMPILED", "RECONCILIATION_STARTED", "RECONCILIATION_COMPLETED", "RUN_WAITING", "RUN_RESUMED", "RUN_VERIFYING",
-    "RUN_SUCCEEDED", "RUN_STOPPED", "WRAP_UP_STARTED", "WORKTREE_ADOPTED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ITEM_SATISFIED",
+    "CHARTER_COMPILED", "RECONCILIATION_STARTED", "RECONCILIATION_COMPLETED", "RUN_PAUSE_REQUESTED", "RUN_WAITING", "RUN_WOKEN",
+    "RUN_RESUMED", "RUN_VERIFYING", "RUN_SUCCEEDED", "RUN_STOPPED", "WRAP_UP_STARTED", "WORKTREE_ADOPTED", "ITEM_READY",
+    "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED", "ITEM_VERIFIED", "ITEM_SATISFIED",
     "ITEM_BLOCKED", "ITEM_ABANDONED", "EFFECT_INTENDED", "EFFECT_CONFIRMED", "RECEIPT_RECORDED", "PRE_COMMIT_HOOK_FINISHED", "DECISION_RECORDED",
 ];
 export function newEventId() {
     return randomUUID();
+}
+function parseWaitingDetails(value) {
+    const object = expectRecord(value, "event.waiting");
+    const kind = expectLiteral(object.kind, ["operator-pause", "execution-unknown", "provider-checks"], "event.waiting.kind");
+    if (kind === "operator-pause") {
+        return { kind, requestId: expectString(object.requestId, "event.waiting.requestId") };
+    }
+    if (kind === "execution-unknown") {
+        return {
+            kind,
+            itemId: expectString(object.itemId, "event.waiting.itemId"),
+            attemptId: expectString(object.attemptId, "event.waiting.attemptId"),
+        };
+    }
+    return {
+        kind,
+        provider: expectLiteral(object.provider, ["github", "gitlab"], "event.waiting.provider"),
+        itemId: expectString(object.itemId, "event.waiting.itemId"),
+        changeRequestId: expectString(object.changeRequestId, "event.waiting.changeRequestId"),
+        changeRequestUrl: expectString(object.changeRequestUrl, "event.waiting.changeRequestUrl"),
+        subjectCommit: expectString(object.subjectCommit, "event.waiting.subjectCommit"),
+        baseBranch: expectString(object.baseBranch, "event.waiting.baseBranch"),
+        heartbeatMs: expectInteger(object.heartbeatMs, "event.waiting.heartbeatMs", 1),
+        deadline: expectString(object.deadline, "event.waiting.deadline"),
+    };
 }
 export function parseLifecycleEvent(value) {
     const object = expectRecord(value, "event");
@@ -22,6 +48,12 @@ export function parseLifecycleEvent(value) {
     };
     const type = expectLiteral(object.type, EVENT_TYPES, "event.type");
     switch (type) {
+        case "RUN_PAUSE_REQUESTED":
+            return { ...base, type, requestId: expectString(object.requestId, "event.requestId") };
+        case "RUN_WAITING":
+            return { ...base, type, ...(object.waiting === undefined ? {} : { waiting: parseWaitingDetails(object.waiting) }) };
+        case "RUN_WOKEN":
+            return { ...base, type, observationId: expectString(object.observationId, "event.observationId") };
         case "RUN_SUCCEEDED":
             return { ...base, type, predicateSummary: expectString(object.predicateSummary, "event.predicateSummary") };
         case "RUN_STOPPED":
@@ -61,6 +93,9 @@ export function parseLifecycleEvent(value) {
                 attemptId: expectString(object.attemptId, "event.attemptId"),
                 leaseEpoch: expectInteger(object.leaseEpoch, "event.leaseEpoch", 1),
                 expectedBaseCommit: expectString(object.expectedBaseCommit, "event.expectedBaseCommit"),
+                ...(object.expectedTreeIdentity === undefined ? {} : {
+                    expectedTreeIdentity: expectString(object.expectedTreeIdentity, "event.expectedTreeIdentity"),
+                }),
                 ...(object.expectedRefIdentity === undefined ? {} : {
                     expectedRefIdentity: expectString(object.expectedRefIdentity, "event.expectedRefIdentity"),
                 }),
@@ -73,6 +108,12 @@ export function parseLifecycleEvent(value) {
                 ...(object.expectedHookPath === undefined ? {} : {
                     expectedHookPath: expectString(object.expectedHookPath, "event.expectedHookPath"),
                 }),
+                ...(object.contextHash === undefined ? {} : {
+                    contextHash: expectString(object.contextHash, "event.contextHash"),
+                }),
+                ...(object.contextJournalSequence === undefined ? {} : {
+                    contextJournalSequence: expectInteger(object.contextJournalSequence, "event.contextJournalSequence"),
+                }),
                 deadline: expectString(object.deadline, "event.deadline"),
                 idempotencyKey: expectString(object.idempotencyKey, "event.idempotencyKey"),
             };
@@ -83,10 +124,38 @@ export function parseLifecycleEvent(value) {
                 itemId: expectString(object.itemId, "event.itemId"),
                 attemptId: expectString(object.attemptId, "event.attemptId"),
                 observedHeadCommit: expectString(object.observedHeadCommit, "event.observedHeadCommit"),
+                ...(object.observedTreeIdentity === undefined ? {} : {
+                    observedTreeIdentity: expectString(object.observedTreeIdentity, "event.observedTreeIdentity"),
+                }),
                 outcome: expectLiteral(object.outcome, ["completed", "failed", "cancelled", "timed-out", "stale"], "event.outcome"),
             };
         case "ITEM_VERIFYING":
-            return { ...base, type, itemId: expectString(object.itemId, "event.itemId"), attemptId: expectString(object.attemptId, "event.attemptId") };
+        case "ATTEMPT_PAUSED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                attemptId: expectString(object.attemptId, "event.attemptId"),
+                ...(object.budgetConsumed === undefined ? {} : {
+                    budgetConsumed: expectBoolean(object.budgetConsumed, "event.budgetConsumed"),
+                }),
+            };
+        case "ITEM_VERIFIED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                attemptId: expectString(object.attemptId, "event.attemptId"),
+                subject: expectString(object.subject, "event.subject"),
+                headCommit: expectString(object.headCommit, "event.headCommit"),
+                treeIdentity: expectString(object.treeIdentity, "event.treeIdentity"),
+                auxiliaryRefIdentity: expectString(object.auxiliaryRefIdentity, "event.auxiliaryRefIdentity"),
+                configurationIdentity: expectString(object.configurationIdentity, "event.configurationIdentity"),
+                ...(object.hookIdentity === undefined ? {} : { hookIdentity: expectString(object.hookIdentity, "event.hookIdentity") }),
+                ...(object.hookPath === undefined ? {} : { hookPath: expectString(object.hookPath, "event.hookPath") }),
+                commitRequired: expectBoolean(object.commitRequired, "event.commitRequired"),
+                receiptIds: expectStringArray(object.receiptIds, "event.receiptIds"),
+            };
         case "ITEM_SATISFIED":
             return {
                 ...base,
@@ -112,12 +181,19 @@ export function parseLifecycleEvent(value) {
                 effect: expectString(object.effect, "event.effect"),
                 idempotencyKey: expectString(object.idempotencyKey, "event.idempotencyKey"),
                 observedState: expectString(object.observedState, "event.observedState"),
+                ...(object.repositoryAuxiliaryRefIdentity === undefined ? {} : {
+                    repositoryAuxiliaryRefIdentity: expectString(object.repositoryAuxiliaryRefIdentity, "event.repositoryAuxiliaryRefIdentity"),
+                }),
             };
         case "RECEIPT_RECORDED":
             return {
                 ...base,
                 type,
                 receiptId: expectString(object.receiptId, "event.receiptId"),
+                ...(object.gateId === undefined ? {} : { gateId: expectString(object.gateId, "event.gateId") }),
+                ...(object.receiptKind === undefined ? {} : {
+                    receiptKind: expectLiteral(object.receiptKind, ["gate", "predicate", "review", "remote-checks"], "event.receiptKind"),
+                }),
                 status: expectLiteral(object.status, ["PASSED", "FAILED", "WAIVED", "UNVERIFIED"], "event.status"),
             };
         case "PRE_COMMIT_HOOK_FINISHED":
@@ -141,7 +217,6 @@ export function parseLifecycleEvent(value) {
         case "CHARTER_COMPILED":
         case "RECONCILIATION_STARTED":
         case "RECONCILIATION_COMPLETED":
-        case "RUN_WAITING":
         case "RUN_RESUMED":
         case "RUN_VERIFYING":
             return { ...base, type };

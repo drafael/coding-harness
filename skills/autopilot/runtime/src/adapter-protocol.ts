@@ -1,4 +1,11 @@
-import { GRANT_FAMILIES, type AssuranceLevel, type CapabilityGrant, type GrantFamily } from "./charter.js";
+import {
+  GRANT_FAMILIES,
+  type AssuranceLevel,
+  type CapabilityGrant,
+  type GrantFamily,
+  type Predicate,
+  type VerificationGate,
+} from "./charter.js";
 import { AutopilotError } from "./errors.js";
 import { expectBoolean, expectInteger, expectLiteral, expectRecord, expectString, expectStringArray } from "./json.js";
 
@@ -18,14 +25,81 @@ export interface CapabilityManifest {
   readonly limitations: readonly string[];
 }
 
+export interface AttemptContextEvidence {
+  readonly predicateId: string;
+  readonly outcome: "met" | "not-met" | "blocked";
+  readonly subject: string;
+  readonly reason: string;
+  readonly receiptIds: readonly string[];
+  readonly observed: string | number | boolean | null;
+  readonly expected: string | number | boolean;
+}
+
+export interface AttemptContextFailure {
+  readonly attemptId?: string;
+  readonly errorCode: string;
+  readonly reason: string;
+}
+
+export interface AttemptContext {
+  readonly schemaVersion: 1;
+  readonly charterHash: string;
+  readonly sourceJournalSequence: number;
+  readonly sourceJournalRecordHash: string | null;
+  readonly runId: string;
+  readonly itemId: string;
+  readonly attemptId: string;
+  readonly leaseEpoch: number;
+  readonly expectedBaseCommit: string;
+  readonly currentTreeIdentity: string;
+  readonly title?: string;
+  readonly objective: string;
+  readonly predicates: readonly Predicate[];
+  readonly gates: readonly VerificationGate[];
+  readonly dependencyCommits: readonly { readonly itemId: string; readonly commit: string }[];
+  readonly evidence: readonly AttemptContextEvidence[];
+  readonly priorFailures: readonly AttemptContextFailure[];
+  readonly reviewFindings: readonly {
+    readonly gateId: string;
+    readonly path?: string;
+    readonly line?: number;
+    readonly message: string;
+  }[];
+  readonly remainingAttempts: number;
+  readonly remainingReplans: number;
+  readonly attemptTimeoutMs: number;
+  readonly idleTimeoutMs: number;
+  readonly assumptions: readonly { readonly statement: string; readonly source: string }[];
+  readonly writableRoots: readonly string[];
+  readonly grants: readonly CapabilityGrant[];
+  readonly forbiddenEffects: readonly string[];
+  readonly requiredResult: readonly string[];
+}
+
+export interface ReviewFinding {
+  readonly path?: string;
+  readonly line?: number;
+  readonly severity?: string;
+  readonly message: string;
+}
+
+export interface ReviewResult {
+  readonly verdict: "clean" | "findings" | "inconclusive";
+  readonly findings: readonly ReviewFinding[];
+}
+
 export interface ExecutionRequest {
   readonly protocolVersion: 1;
+  readonly role: "implementation" | "review";
   readonly runId: string;
   readonly itemId: string;
   readonly attemptId: string;
   readonly worktreePath: string;
   readonly objective: string;
   readonly acceptanceSummary: string;
+  readonly context: AttemptContext;
+  readonly contextHash: string;
+  readonly reviewFocus?: string;
   readonly writableRoots: readonly string[];
   readonly grants: readonly CapabilityGrant[];
   readonly deadline: string;
@@ -49,6 +123,7 @@ export interface ExecutionObservation {
   readonly stdout: string;
   readonly stderr: string;
   readonly truncated: boolean;
+  readonly reviewResult?: ReviewResult;
 }
 
 export interface CancelResult {

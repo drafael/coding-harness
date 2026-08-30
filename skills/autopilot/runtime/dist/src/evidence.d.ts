@@ -1,4 +1,6 @@
-import type { RunCharter, VerificationGate, WorkItem } from "./charter.js";
+import type { ReviewFinding } from "./adapter-protocol.js";
+import type { ReviewGate, RunCharter, VerificationGate, WorkItem } from "./charter.js";
+import type { PredicateEvaluationReceipt } from "./done.js";
 export type ReceiptStatus = "PASSED" | "FAILED" | "WAIVED" | "UNVERIFIED";
 export interface VerificationReceipt {
     readonly schemaVersion: 1;
@@ -19,10 +21,13 @@ export interface VerificationReceipt {
     readonly executor: string;
     readonly truncated: boolean;
     readonly waiverReason?: string;
+    readonly reviewVerdict?: "clean" | "findings" | "inconclusive";
+    readonly reviewFindings?: readonly ReviewFinding[];
 }
 export declare function redactEnvironmentSecrets(text: string, environmentNames: readonly string[]): string;
 export declare function countLiteral(worktreePath: string, paths: readonly string[], query: string): Promise<number>;
 export declare function executeGate(charter: RunCharter, item: WorkItem, gate: VerificationGate, worktreePath: string, subject: string): Promise<VerificationReceipt>;
 export declare function executeItemGates(charter: RunCharter, item: WorkItem, worktreePath: string, subject: string): Promise<readonly VerificationReceipt[]>;
-export declare function storeReceipt(runDirectory: string, receipt: VerificationReceipt): Promise<string>;
+export declare function storeReceipt(runDirectory: string, receipt: VerificationReceipt | PredicateEvaluationReceipt): Promise<string>;
+export declare function createReviewReceipt(charter: RunCharter, item: WorkItem, gate: ReviewGate, subject: string, reviewer: string, startedAt: string, completedAt: string, verdict: "clean" | "findings" | "inconclusive", findings: readonly ReviewFinding[], truncated: boolean): VerificationReceipt;
 export declare function receiptIsFresh(receipt: VerificationReceipt, subject: string, gate: VerificationGate): boolean;

@@ -119,9 +119,19 @@ test("compiled CLI status does not overwrite a coordinator-owned report", async 
     arguments: [cliPath, "--json", "--state-dir", stateRoot, "status"],
     cwd: root,
   });
+  const plain = await runProcess({
+    executable: process.execPath,
+    arguments: [cliPath, "--state-dir", stateRoot, "status"],
+    cwd: root,
+  });
 
   assert.equal(result.exitCode, 0);
+  assert.equal(plain.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).runId, charter.runId);
+  assert.match(plain.stdout, /Autopilot status-cli-r: COMPILED/);
+  assert.match(plain.stdout, /Next: \/autopilot resume/);
+  assert.doesNotMatch(plain.stdout, new RegExp(root));
+  assert.doesNotMatch(plain.stdout, new RegExp(stateRoot));
   assert.equal(await readFile(reportPath, "utf8"), "{\"sentinel\":true}\n");
 });
 
@@ -197,6 +207,36 @@ test("compiled CLI stops one discovered inactive run without a run ID", async ()
   assert.equal(result.exitCode, 0);
   assert.equal(JSON.parse(result.stdout).state, "STOPPED");
   assert.equal(journal.records.filter(({ event }) => event.type === "RUN_STOPPED").length, 1);
+});
+
+test("compiled CLI pauses one discovered inactive run without making it terminal", async () => {
+  const repository = await createRepository();
+  const root = await realpath(repository.root);
+  const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "autopilot-cli-inactive-pause-")));
+  const charter = sealCharter(proposedCharter(root, repository.baseCommit, "single", "inactive-pause-run"));
+  const runDirectory = join(stateRoot, "runs", charter.runId);
+  await mkdir(runDirectory, { recursive: true });
+  await writeImmutableJson(join(runDirectory, "charter.json"), charter);
+  await appendEvent(join(runDirectory, "events.jsonl"), {
+    eventId: newEventId(),
+    timestamp: new Date().toISOString(),
+    source: "runtime",
+    reason: "compiled",
+    type: "CHARTER_COMPILED",
+  });
+
+  const result = await runProcess({
+    executable: process.execPath,
+    arguments: [cliPath, "--json", "--state-dir", stateRoot, "pause"],
+    cwd: root,
+  });
+  const journal = await readJournal(join(runDirectory, "events.jsonl"));
+
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).state, "WAITING");
+  assert.equal(journal.records.filter(({ event }) => event.type === "RUN_PAUSE_REQUESTED").length, 1);
+  assert.equal(journal.records.filter(({ event }) => event.type === "RUN_WAITING").length, 1);
+  assert.equal(journal.records.some(({ event }) => event.type === "RUN_STOPPED"), false);
 });
 
 test("compiled CLI sends a fenced stop request to the active coordinator", async () => {

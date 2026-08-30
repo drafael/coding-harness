@@ -33,7 +33,7 @@ export interface AvailableRuns {
 }
 
 export type CoordinatorState = "active" | "inactive" | "unknown";
-export type LifecycleOperation = "status" | "resume" | "stop";
+export type LifecycleOperation = "status" | "resume" | "pause" | "stop";
 
 export interface LifecycleCandidate {
   readonly runId: string;

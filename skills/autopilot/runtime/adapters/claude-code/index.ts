@@ -5,13 +5,13 @@ export function createClaudeCodeAdapter(): CliHarnessAdapter {
     name: "claude-code",
     executable: "claude",
     versionArguments: ["--version"],
-    buildArguments: (_request, prompt) => [
+    buildArguments: (request, prompt) => [
       "--print",
       "--output-format", "stream-json",
       "--verbose",
       "--no-session-persistence",
       "--permission-mode", "dontAsk",
-      "--allowed-tools", "Read,Edit,Write,Glob,Grep,Bash",
+      "--allowed-tools", request.role === "review" ? "Read,Glob,Grep" : "Read,Edit,Write,Glob,Grep,Bash",
       "--disallowed-tools", "WebFetch,WebSearch",
       "--safe-mode",
       "--",
@@ -20,7 +20,12 @@ export function createClaudeCodeAdapter(): CliHarnessAdapter {
     assurance: "cooperative",
     maxConcurrency: 1,
     cancellation: true,
-    limitations: ["Bash restrictions are cooperative.", "Safe mode excludes customizations; admin-managed policy may still apply.", "Executions cannot be reattached."],
+    limitations: [
+      "Bash restrictions are cooperative.",
+      "Safe mode excludes customizations; admin-managed policy may still apply.",
+      "Executions cannot be reattached.",
+      "The exact-tree review role is implemented but has no version-pinned live verification.",
+    ],
     expectsJsonLines: true,
   });
 }

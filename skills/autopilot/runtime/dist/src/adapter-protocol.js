@@ -1,4 +1,4 @@
-import { GRANT_FAMILIES } from "./charter.js";
+import { GRANT_FAMILIES, } from "./charter.js";
 import { AutopilotError } from "./errors.js";
 import { expectBoolean, expectInteger, expectLiteral, expectRecord, expectString, expectStringArray } from "./json.js";
 export function parseAdapterMessage(line, maximumBytes) {

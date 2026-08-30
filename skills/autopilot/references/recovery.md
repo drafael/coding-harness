@@ -24,7 +24,7 @@ Each new worktree is a direct sibling of the canonical project repository:
 
 Names longer than 200 bytes retain a readable prefix and receive a deterministic identity hash suffix. Autopilot rejects symlinks, unmanaged non-empty destinations, and incompatible Git worktree registrations. It never searches for or silently adopts a similarly named sibling.
 
-Normal lifecycle requests use `/autopilot status`, `/autopilot resume`, `/autopilot stop`, and `/autopilot wrap up`; repository-scoped discovery supplies the run identity. For direct recovery with `--state-dir`, pass the same path to every command. The option moves only durable state; sibling worktree placement does not change.
+Normal lifecycle requests use `/autopilot status`, `/autopilot resume`, `/autopilot pause`, `/autopilot stop`, and `/autopilot wrap up`; repository-scoped discovery supplies the run identity. For direct recovery with `--state-dir`, pass the same path to every command. The option moves only durable state; sibling worktree placement does not change.
 
 ## Resume
 
@@ -32,7 +32,9 @@ Normal lifecycle requests use `/autopilot status`, `/autopilot resume`, `/autopi
 node runtime/dist/src/cli.js --state-dir <same-path> resume <run-id>
 ```
 
-Resume acquires the coordinator lock, validates the sealed charter and journal, rebuilds projection state, marks interrupted active attempts as blocked, assigns fresh leases, inspects existing worktrees and refs, and continues within the original limits. It does not re-open `SUCCEEDED` or `STOPPED` runs.
+Resume acquires the coordinator lock, validates the sealed charter and journal, rebuilds projection state, verifies context artifacts, inspects existing worktrees and refs, and continues within the original limits. A paused unfinished item receives a fresh lease and newly hashed context; its pause-cancelled physical launch is not charged to the attempt budget. An item with a durable `ITEM_VERIFIED` checkpoint continues commit, push, change-request, check, thread, or merge reconciliation from fresh exact observations without launching another worker. Resume does not re-open `SUCCEEDED` or `STOPPED` runs.
+
+Current harness adapters do not provide restart reattachment. If the journal contains a launched execution whose quiescence was never observed, resume records `EXECUTION_STATE_UNKNOWN` and refuses a replacement launch. Automatic cancellation or reattachment after coordinator loss requires a separately approved, attempt-scoped process-supervisor boundary.
 
 ## Address review comments with an amendment successor
 
@@ -81,13 +83,23 @@ node runtime/dist/src/cli.js --repair-journal --state-dir <same-path> resume <ru
 
 The repair option never changes a complete record or bypasses a hash mismatch. A changed complete record is corruption and requires operator investigation, not automatic repair.
 
-## Stop
+## Pause and stop
 
 ```bash
+node runtime/dist/src/cli.js --state-dir <same-path> pause <run-id>
+node runtime/dist/src/cli.js --state-dir <same-path> resume <run-id>
 node runtime/dist/src/cli.js --state-dir <same-path> stop <run-id>
 ```
 
+Pause is nonterminal. A live owner receives a request fenced by its current run-lock token, cancels active implementation work, waits for an observation proving quiescence, retires the exact writer lease, and records operator `WAITING`. A pause-cancelled attempt remains auditable but is not charged. If the coordinator is absent, the pause command acquires the lock and reconciles canonical state before recording the wait. Verified items retain their checkpoint and resume lifecycle effects without another implementation launch.
+
+A provider-check wait is also nonterminal. Autopilot samples the exact recorded PR/MR, head, base, state, and checks on a bounded heartbeat. Session expiry records one `UNVERIFIED` check receipt and remains `WAITING`; it does not block the item or consume an attempt. Resume samples the exact subject again. Heartbeats are not journaled. Provider notifications remain disabled until a version-pinned event surface is proven on an authorized disposable target.
+
+Pause fails closed when an orphaned execution cannot be proven quiescent. It does not launch or charge a replacement attempt.
+
 Without a live owner, stop acquires the run lock, appends a terminal operator event, and writes a final report. With a live foreground coordinator, it writes an atomic request bound to the current lock token. The owner cancels active adapter work and remains the only process that can append `RUN_STOPPED`. If success is recorded before the owner observes the request, success wins. Stop preserves canonical state, branches, receipts, and worktrees. Continuing requires a successor charter with a new run ID and an optional `predecessorRunId`.
+
+Use `stop` only when terminal semantics are intended. Stop remains distinct from pause and preserves canonical state, branches, receipts, and worktrees.
 
 ## Commit hooks
 
@@ -101,8 +113,9 @@ A missing or non-executable pre-commit hook is recorded as `NOT_CONFIGURED`. A f
 
 ## Reports
 
-- `reports/status.json`: current projection and the next skill command
-- `reports/final.json`: terminal state, blockers, and successor instructions
+- `reports/status.json`: current projection, journal identity, evidence map, remaining budgets, and next legal action
+- `reports/final.json`: terminal state, evidence map, blockers, and successor instructions
+- `reports/attempts/<attempt-id>.context.json`: immutable generated worker context referenced by its journaled hash
 - `reports/decisions.tsv`: generated projection of durable decision events
 
 A report is a projection. It cannot replace the charter, journal, Git objects, or receipts.

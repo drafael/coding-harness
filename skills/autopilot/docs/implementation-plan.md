@@ -40,7 +40,7 @@ The completed first release must:
 
 ## Developer-preview evidence
 
-The implementation currently has 111 passing Node test cases and a clean-copy package smoke test. Disposable local single-objective runs completed through Pi 0.84.2 with pi-subagents 0.53.0, Codex 0.149.0, and OpenCode 1.18.21. Claude Code 2.1.210 reached its adapter and produced normalized diagnostics, but its local OAuth token was expired, so the edit flow remains unverified. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Live GitHub amendment and review-thread resolution remain unverified; GitLab mutation also remains unverified because `glab` was unavailable.
+The implementation currently has 132 passing Node test cases and a clean-copy package smoke test. Generated attempt context, predicate-to-evidence reports, exact-tree independent review, intentional pause, and exact-subject provider waiting have controlled coverage; live harness review remains unverified. Disposable local single-objective runs completed through Pi 0.84.2 with pi-subagents 0.53.0, Codex 0.149.0, and OpenCode 1.18.21. Claude Code 2.1.210 reached its adapter and produced normalized diagnostics, but its local OAuth token was expired, so the edit flow remains unverified. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Live GitHub amendment and review-thread resolution remain unverified; GitLab mutation also remains unverified because `glab` was unavailable.
 
 ## Planned package boundary
 

@@ -146,16 +146,30 @@ export class GitLabDeliveryAdapter {
         if (!Array.isArray(statuses)) {
             throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "GitLab commit statuses response is malformed");
         }
-        return statuses.map((entry, index) => {
+        const latestByName = new Map();
+        statuses.forEach((entry, index) => {
             const status = expectRecord(entry, `GitLab statuses[${index}]`);
             const value = expectString(status.status, `GitLab statuses[${index}].status`);
-            return {
-                name: expectString(status.name, `GitLab statuses[${index}].name`),
-                status: value === "success" ? "passed" : ["pending", "running", "created"].includes(value) ? "pending" : "failed",
-                subjectCommit,
-                ...(typeof status.target_url === "string" && status.target_url.length > 0 ? { detailsUrl: status.target_url } : {}),
-            };
+            const name = expectString(status.name, `GitLab statuses[${index}].name`);
+            const rank = typeof status.id === "number" && Number.isInteger(status.id)
+                ? status.id
+                : typeof status.created_at === "string" && Number.isFinite(Date.parse(status.created_at))
+                    ? Date.parse(status.created_at)
+                    : -index;
+            const current = latestByName.get(name);
+            if (current === undefined || rank > current.rank) {
+                latestByName.set(name, {
+                    rank,
+                    observation: {
+                        name,
+                        status: value === "success" ? "passed" : ["pending", "running", "created"].includes(value) ? "pending" : "failed",
+                        subjectCommit,
+                        ...(typeof status.target_url === "string" && status.target_url.length > 0 ? { detailsUrl: status.target_url } : {}),
+                    },
+                });
+            }
         });
+        return [...latestByName.values()].map(({ observation }) => observation);
     }
     async merge(request) {
         const current = await this.observeChangeRequest(request.repositoryRoot, request.ref);

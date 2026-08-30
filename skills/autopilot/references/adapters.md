@@ -13,6 +13,8 @@ Adapters start fresh noninteractive sessions and normalize observations. They ca
 
 The adapter parser bounds output and rejects malformed JSON-mode output. The runtime ignores model completion claims and inspects the worktree directly.
 
+For a `review` gate, the runtime sends a separate role-scoped request with no writable roots or worker write/process grants. Claude Code receives only read/search tools, Codex uses its read-only sandbox, and direct Pi receives only its read tool. OpenCode and any ambient operating-system access remain cooperative. The adapter extracts exactly one structured review marker; missing, contradictory, malformed, truncated, timed-out, or inconclusive output is `UNVERIFIED`. The runtime compares the complete tree, HEAD, refs, and Git configuration before and after review and rejects any mutation. These paths have controlled fake-adapter coverage, but no bundled harness review path has completed a version-pinned disposable live run yet.
+
 For Pi, Autopilot checks the standard Pi package directory for `pi-subagents` 0.53.0 or newer. When present, it loads only that extension and Autopilot's bridge, delegates the item to the resolved `worker` role through the public structured delegation API, and keeps the worker in Autopilot's existing worktree. It does not install or update the extension. An older or absent installation uses the direct Pi process and reports that fallback through `doctor` and adapter limitations.
 
 Delegated Pi activity is written to stderr while the CLI runs, leaving JSON stdout machine-readable. The stream reports worker start, current tool, tool and token counts, elapsed time, and terminal status without copying child output or tool arguments. This is an Autopilot CLI projection, not the originating Pi session's FleetView: Pi's event bus and FleetView are process-local, while Autopilot owns a separate subprocess. The integration follows pi-subagents' public [structured delegation API](https://github.com/nicobailon/pi-subagents/blob/main/docs/extension-api.md) and [observability contract](https://github.com/nicobailon/pi-subagents/blob/main/docs/observability.md), rather than importing internal runners or scraping rendered terminal output.
@@ -37,5 +39,7 @@ Unit tests use controlled fake CLIs for command construction, changed-head denia
 - Lost processes become interrupted attempts and receive new leases on resume.
 - Late results from expired leases are quarantined.
 - Provider head changes block merge.
+- Review findings block the current attempt and enter the next deterministic attempt context as untrusted data.
+- Independent-review support remains unverified for every live harness version until a disposable exact-tree run passes.
 
 No adapter may silently downgrade a completion predicate or create a waiver.
