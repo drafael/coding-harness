@@ -56,20 +56,21 @@ export async function validateBranchName(repositoryRoot, branchName) {
     }
 }
 const MAX_WORKTREE_DIRECTORY_BYTES = 200;
+const MAX_CANDIDATE_WORKTREE_DIRECTORY_BYTES = 120;
 function safeRepositoryName(repositoryRoot) {
     const original = basename(repositoryRoot);
     const normalized = original.replaceAll(/[^A-Za-z0-9._-]+/gu, "-").replaceAll(/^[.-]+|[.-]+$/gu, "") || "repository";
     return normalized === original ? normalized : `${normalized}-${sha256(repositoryRoot).slice(0, 8)}`;
 }
-function boundedSiblingWorktreePath(repositoryRoot, readableName, identity) {
+function boundedSiblingWorktreePath(repositoryRoot, readableName, identity, maximumDirectoryBytes = MAX_WORKTREE_DIRECTORY_BYTES) {
     const suffix = sha256(identity).slice(0, 16);
     const windowsSafeName = readableName.endsWith(".")
         ? `${readableName.replaceAll(/\.+$/gu, "")}-${suffix}`
         : readableName;
-    if (Buffer.byteLength(windowsSafeName) <= MAX_WORKTREE_DIRECTORY_BYTES) {
+    if (Buffer.byteLength(windowsSafeName) <= maximumDirectoryBytes) {
         return join(dirname(repositoryRoot), windowsSafeName);
     }
-    const maximumPrefixLength = MAX_WORKTREE_DIRECTORY_BYTES - suffix.length - 1;
+    const maximumPrefixLength = maximumDirectoryBytes - suffix.length - 1;
     const prefix = readableName.slice(0, maximumPrefixLength).replaceAll(/[._-]+$/gu, "");
     return join(dirname(repositoryRoot), `${prefix}-${suffix}`);
 }
@@ -429,7 +430,7 @@ export async function prepareRestackCandidate(repositoryRoot, runId, itemId, old
             GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
         },
     })).stdout.trim();
-    const temporaryWorktreePath = boundedSiblingWorktreePath(repositoryRoot, `${basename(retainedWorktreePath)}-restack-${runId}-${itemId}-candidate`, `${repositoryRoot}\0${runId}\0${itemId}\0restack-candidate`);
+    const temporaryWorktreePath = boundedSiblingWorktreePath(repositoryRoot, `${basename(retainedWorktreePath)}-restack-${runId}-${itemId}-candidate`, `${repositoryRoot}\0${runId}\0${itemId}\0restack-candidate`, MAX_CANDIDATE_WORKTREE_DIRECTORY_BYTES);
     try {
         await lstat(temporaryWorktreePath);
         await assertRegisteredWorktree(repositoryRoot, temporaryWorktreePath);

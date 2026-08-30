@@ -51,7 +51,7 @@ test("restack candidate merge-forwards and recreates an interrupted retained wor
     retainedWorktree,
   );
   const commit = await inspectCommit(repository.root, candidate.commit);
-  assert.ok(Buffer.byteLength(basename(candidate.temporaryWorktreePath)) <= 200);
+  assert.ok(Buffer.byteLength(basename(candidate.temporaryWorktreePath)) <= 120);
   assert.doesNotMatch(basename(candidate.temporaryWorktreePath), /[. ]$/u);
   const maximumIdCandidate = await prepareRestackCandidate(
     repository.root,
@@ -61,7 +61,7 @@ test("restack candidate merge-forwards and recreates an interrupted retained wor
     freshParent,
     retainedWorktree,
   );
-  assert.ok(Buffer.byteLength(basename(maximumIdCandidate.temporaryWorktreePath)) <= 200);
+  assert.ok(Buffer.byteLength(basename(maximumIdCandidate.temporaryWorktreePath)) <= 120);
   assert.doesNotMatch(basename(maximumIdCandidate.temporaryWorktreePath), /[. ]$/u);
   await runChecked({
     executable: "git",

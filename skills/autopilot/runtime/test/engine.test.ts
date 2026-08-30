@@ -985,7 +985,7 @@ if (args[0] === "--version") {
         && lifecycleEvent.headCommit === installedCommit
     ), true);
     assert.deepEqual(installed.parents, [oldCommit, amendedCommit]);
-    assert.equal(await readFile(join(retainedWorktree, "parent.txt"), "utf8"), "amended\n");
+    assert.match(await readFile(join(retainedWorktree, "parent.txt"), "utf8"), /^amended\r?\n$/u);
   } finally {
     process.env.PATH = previousPath;
   }

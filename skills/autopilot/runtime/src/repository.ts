@@ -86,6 +86,7 @@ export async function validateBranchName(repositoryRoot: string, branchName: str
 }
 
 const MAX_WORKTREE_DIRECTORY_BYTES = 200;
+const MAX_CANDIDATE_WORKTREE_DIRECTORY_BYTES = 120;
 
 function safeRepositoryName(repositoryRoot: string): string {
   const original = basename(repositoryRoot);
@@ -93,15 +94,20 @@ function safeRepositoryName(repositoryRoot: string): string {
   return normalized === original ? normalized : `${normalized}-${sha256(repositoryRoot).slice(0, 8)}`;
 }
 
-function boundedSiblingWorktreePath(repositoryRoot: string, readableName: string, identity: string): string {
+function boundedSiblingWorktreePath(
+  repositoryRoot: string,
+  readableName: string,
+  identity: string,
+  maximumDirectoryBytes = MAX_WORKTREE_DIRECTORY_BYTES,
+): string {
   const suffix = sha256(identity).slice(0, 16);
   const windowsSafeName = readableName.endsWith(".")
     ? `${readableName.replaceAll(/\.+$/gu, "")}-${suffix}`
     : readableName;
-  if (Buffer.byteLength(windowsSafeName) <= MAX_WORKTREE_DIRECTORY_BYTES) {
+  if (Buffer.byteLength(windowsSafeName) <= maximumDirectoryBytes) {
     return join(dirname(repositoryRoot), windowsSafeName);
   }
-  const maximumPrefixLength = MAX_WORKTREE_DIRECTORY_BYTES - suffix.length - 1;
+  const maximumPrefixLength = maximumDirectoryBytes - suffix.length - 1;
   const prefix = readableName.slice(0, maximumPrefixLength).replaceAll(/[._-]+$/gu, "");
   return join(dirname(repositoryRoot), `${prefix}-${suffix}`);
 }
@@ -538,6 +544,7 @@ export async function prepareRestackCandidate(
     repositoryRoot,
     `${basename(retainedWorktreePath)}-restack-${runId}-${itemId}-candidate`,
     `${repositoryRoot}\0${runId}\0${itemId}\0restack-candidate`,
+    MAX_CANDIDATE_WORKTREE_DIRECTORY_BYTES,
   );
   try {
     await lstat(temporaryWorktreePath);

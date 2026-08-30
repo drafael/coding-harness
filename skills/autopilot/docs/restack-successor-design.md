@@ -141,7 +141,7 @@ parent 2 = freshParentCommit
 
 The commit message records successor run, descendant item, old commit, and fresh parent. Commit-object creation alone does not move a ref.
 
-Create a temporary detached managed worktree at the candidate commit. Its deterministic Windows-safe sibling name uses the same 200-byte bound as canonical worktrees. It must be inside the runtime's managed sibling boundary, registered to the same repository, and removed on success or preserved with a diagnostic on uncertain cleanup. Never reset or clean the retained descendant worktree.
+Create a temporary detached managed worktree at the candidate commit. Its deterministic Windows-safe sibling name uses a conservative 120-byte bound so Git's repository-internal worktree administration path also remains usable on Windows; canonical worktree names retain their 200-byte bound. It must be inside the runtime's managed sibling boundary, registered to the same repository, and removed on success or preserved with a diagnostic on uncertain cleanup. Never reset or clean the retained descendant worktree.
 
 ### 3. Reverify exact candidate tree
 
