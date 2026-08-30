@@ -14,9 +14,26 @@ The [main README](../README.md) is the short path for starting an unattended run
 
 - [Architecture](architecture.md): goals, contracts, event model, scheduling, adapters, Git ownership, verification, recovery, and remaining boundaries.
 - [ADR 0001: Use a durable event engine with explicit authority](adr/0001-durable-event-engine.md): the central architectural decision and its consequences.
-- [Implementation plan](implementation-plan.md): phased implementation, acceptance evidence, test matrix, rollout sequence, and unverified integrations.
+- [Implementation plan](implementation-plan.md): original phased implementation, acceptance evidence, and unverified integrations.
+- [Continuity and evidence plan](2026-08-30-continuity-evidence-implementation-plan.md): attempt context, predicate evidence, independent review, and blocked/deferred supervision work.
 - [Runtime CLI reference](runtime-cli.md): maintainer automation, state overrides, journal repair, and build commands.
+
+## Visual overviews
+
+### Runtime ownership
+
+[![Autopilot runtime ownership overview.](diagrams/autopilot-runtime-ownership.png)](diagrams/autopilot-runtime-ownership.html)
+
+How the skill, sole coordinator, adapters, Git, journal, evidence, and providers divide responsibility. Select the image to open the standalone HTML figure.
+
+### Lifecycle waiting
+
+[![Autopilot lifecycle waiting overview.](diagrams/autopilot-lifecycle-waiting.png)](diagrams/autopilot-lifecycle-waiting.html)
+
+How pause, provider checks, and unknown executor state remain nonterminal without weakening terminal outcomes. Select the image to open the standalone HTML figure.
+
+Both figures use the vendored Diagram Design default profile. The PNG exports are 2560×1440; the linked HTML remains the editable source.
 
 ## Verification status
 
-The runtime has 111 passing Node tests covering local Git lifecycle behavior, crash reconciliation, hooks, queues, stacks, sealed review-feedback amendments, GitHub and GitLab provider contracts, sibling worktrees, and wrap-up. Live GitHub and GitLab review-thread resolution remains unverified until an explicitly authorized disposable target is available.
+The runtime has 132 passing Node tests covering deterministic attempt context, predicate evidence maps, exact-tree review fixtures, local Git lifecycle behavior, crash reconciliation, intentional pause, exact-subject provider waiting, hooks, queues, stacks, sealed review-feedback amendments, GitHub and GitLab provider contracts, sibling worktrees, and wrap-up. Live harness review, GitHub review-thread mutation, and GitLab mutation remain unverified until an explicitly authorized disposable target is available.

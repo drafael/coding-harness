@@ -15,6 +15,7 @@ node "$AUTOPILOT_CLI" --help
 autopilot [--state-dir <path>] [--json] start <charter-file>
 autopilot [--state-dir <path>] [--json] status [run-id]
 autopilot [--state-dir <path>] [--json] [--repair-journal] resume [run-id]
+autopilot [--state-dir <path>] [--json] pause [run-id]
 autopilot [--state-dir <path>] [--json] stop [run-id]
 autopilot [--state-dir <path>] [--json] review-feedback [run-id]
 autopilot [--state-dir <path>] [--json] [--handoff] wrap-up [run-id]
@@ -27,7 +28,7 @@ The copied-skill entry point is:
 node "$AUTOPILOT_CLI" COMMAND
 ```
 
-`status`, `resume`, and `stop` discover unsuperseded runs for the current repository when the run ID is omitted. `review-feedback` discovers successful `change-request-ready` leaf runs and returns an immutable-input snapshot of unresolved provider feedback for skill-driven amendment compilation. `wrap-up` separately discovers successful provider-delivered leaf runs. Mutating commands proceed only for one unambiguous candidate. A unique short run-ID prefix is accepted; an ambiguous prefix returns choices without mutation.
+`status` returns the journal identity, last durable milestone, per-predicate evidence map, remaining budgets, and next legal action without rewriting coordinator-owned reports. Plain output is concise and omits state/worktree paths and full run IDs; `--json` returns the complete machine-readable report. `status`, `resume`, `pause`, and `stop` discover unsuperseded runs for the current repository when the run ID is omitted. `review-feedback` discovers successful `change-request-ready` leaf runs and returns an immutable-input snapshot of unresolved provider feedback for skill-driven amendment compilation. `wrap-up` separately discovers successful provider-delivered leaf runs. Mutating commands proceed only for one unambiguous candidate. A unique short run-ID prefix is accepted; an ambiguous prefix returns choices without mutation.
 
 `--json` keeps stdout machine-readable. Diagnostics and live adapter activity remain on stderr.
 
@@ -37,11 +38,13 @@ Without `--state-dir`, state lives under `<git-common-dir>/autopilot`. The skill
 
 An explicit `--state-dir` relocates durable state only. It does not relocate sibling worktrees. Supply the same override for every direct command that addresses the run. Shared override directories may contain several repositories; omitted-ID discovery still filters by exact canonical repository root.
 
-## Stop behavior
+## Pause and stop behavior
 
-If no coordinator owns the run, `stop` acquires the run lock and records the terminal stop. If a foreground coordinator is active, `stop` writes a token-bound request inside that exact lock. The owner cancels active adapter work and records `RUN_STOPPED`; the requesting process never appends concurrently. A success recorded before the owner observes the request remains successful.
+If no coordinator owns the run, `pause` acquires the run lock and reconciles the request. If a foreground coordinator is active, it writes a token-bound request inside that exact lock. The owner cancels active implementation work, waits for adapter observation to prove quiescence, retires only the matching writer lease, records `ATTEMPT_PAUSED`, and enters `WAITING` with `kind: operator-pause`. The requesting process never appends concurrently. An attempt cancelled solely by pause remains in the physical launch history but is excluded from the consumed-attempt budget. `resume` leaves the waiting state and creates a fresh attempt only when implementation was not already verified.
 
-`stop` is terminal. Use `resume` only after an interrupted process left a nonterminal run. A stopped or successful run requires a sealed successor for changed work.
+If no coordinator owns the run, `stop` acquires the run lock and records the terminal stop. If a foreground coordinator is active, `stop` uses the same fenced request path. The owner cancels active adapter work and records `RUN_STOPPED`. A success recorded before either request wins remains successful.
+
+`stop` is terminal. A stopped or successful run requires a sealed successor for changed work. Pause cannot recover an executor whose process state became unknown after coordinator loss: with the current non-reattachable adapters, Autopilot records `EXECUTION_STATE_UNKNOWN` and refuses a replacement launch.
 
 ## Journal repair
 

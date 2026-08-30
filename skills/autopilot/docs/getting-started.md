@@ -46,14 +46,15 @@ A run uses one of three graph modes:
 - `independent-queue`: unrelated items that may run concurrently;
 - `ordered-stack`: a linear sequence whose accepted commits become descendant bases.
 
-Workers edit only their granted roots. The runtime verifies trees, runs the configured pre-commit policy, creates commits, pushes branches, updates change requests, and decides lifecycle transitions. New worktrees are direct siblings of the project repository. Canonical state lives under the repository’s Git common directory, so later skill invocations can find it without copied paths or run IDs.
+Each fresh worker receives a bounded generated context containing only its sealed objective, predicates, relevant evidence and failures, remaining budgets, writable roots, grants, and forbidden effects. Workers edit only their granted roots. The runtime verifies trees, records one typed evidence result per predicate, runs the configured pre-commit policy, creates commits, pushes branches, updates change requests, and decides lifecycle transitions. New worktrees are direct siblings of the project repository. Canonical state lives under the repository’s Git common directory, so later skill invocations can find it without copied paths or run IDs.
 
-## Check, resume, or stop
+## Check, pause, resume, or stop
 
 Return to the same repository and use a short skill command:
 
 ```text
 /autopilot status
+/autopilot pause
 /autopilot resume
 /autopilot stop
 ```
@@ -62,13 +63,14 @@ Natural requests work too:
 
 ```text
 /autopilot What happened overnight?
+/autopilot Pause after active work is quiescent.
 /autopilot Continue the interrupted work.
 /autopilot Stop this run and preserve its work.
 ```
 
-`status` rebuilds progress from the sealed charter and hash-linked journal. `resume` continues only an interrupted nonterminal run within its original limits. It does not restart a run that still has a live coordinator. `stop` asks a live coordinator to cancel active adapter work and record a durable terminal stop; if the coordinator is gone, Autopilot records the stop under the run lock. Branches, worktrees, receipts, and evidence remain intact.
+`status` rebuilds progress from the sealed charter, hash-linked journal, Git identities, and receipts. It reports the last durable milestone, unmet predicate identities, normalized failure, remaining budgets, repeated no-change attempts, and next legal action. `pause` asks the live coordinator to cancel active implementation work, prove quiescence, retire the exact lease, and enter nonterminal waiting. A cancellation caused solely by pause remains auditable but does not consume an attempt. `resume` continues a paused or interrupted nonterminal run within its original limits. Verified items reconcile their checkpoint and effects without rerunning implementation. It does not restart a run that still has a live coordinator. `stop` asks a live coordinator to cancel active adapter work and record a durable terminal stop; if the coordinator is gone, Autopilot records the stop under the run lock. Branches, worktrees, receipts, and evidence remain intact.
 
-A stopped run cannot be resumed. Changed authority, budgets, or objectives require a sealed successor.
+A stopped run cannot be resumed. Changed authority, budgets, or objectives require a sealed successor. If coordinator loss leaves a non-reattachable execution with unknown process state, Autopilot records `EXECUTION_STATE_UNKNOWN` and refuses a replacement launch until quiescence can be proven.
 
 If several runs match, Autopilot lists their title, short ID, state, progress, and last update. It changes nothing until you choose one, for example `resume 1` or `status spring-boot-4`.
 
