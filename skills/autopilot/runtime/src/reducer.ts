@@ -4,6 +4,7 @@ import type { LifecycleEvent, WaitingDetails } from "./events.js";
 
 export type RunState = "COMPILED" | "RECONCILING" | "RUNNING" | "WAITING" | "VERIFYING" | "SUCCEEDED" | "STOPPED";
 export type ItemState = "PENDING" | "READY" | "ACTIVE" | "VERIFYING" | "SATISFIED" | "BLOCKED" | "ABANDONED";
+export type RestackState = "PENDING" | "PREPARING" | "VERIFYING" | "VERIFIED" | "COMMITTING" | "PUSHING" | "SATISFIED" | "BLOCKED";
 
 export interface AttemptProjection {
   readonly attemptId: string;
@@ -50,11 +51,38 @@ export interface ItemProjection {
   readonly blocker?: string;
 }
 
+export interface RestackProjection {
+  readonly itemId: string;
+  readonly state: RestackState;
+  readonly oldCommit?: string;
+  readonly freshParentCommit?: string;
+  readonly candidateCommit?: string;
+  readonly treeIdentity?: string;
+  readonly messageIdentity?: string;
+  readonly temporaryWorktreePath?: string;
+  readonly subject?: string;
+  readonly receiptIds: readonly string[];
+  readonly requiredGateIds: readonly string[];
+  readonly requiredReviewGateIds: readonly string[];
+  readonly sealedWaiverGateIds: readonly string[];
+  readonly passingGateIds: readonly string[];
+  readonly predicateReceiptPassed: boolean;
+  readonly expectedProvider: "github" | "gitlab";
+  readonly expectedChangeRequestId: string;
+  readonly expectedChangeRequestUrl: string;
+  readonly expectedBaseBranch: string;
+  readonly localRefConfirmed?: boolean;
+  readonly remotePushConfirmed?: boolean;
+  readonly providerHeadConfirmed?: boolean;
+  readonly blocker?: string;
+}
+
 export interface RunProjection {
   readonly runId: string;
   readonly charterHash: string;
   readonly state: RunState;
   readonly items: Readonly<Record<string, ItemProjection>>;
+  readonly restacks: Readonly<Record<string, RestackProjection>>;
   readonly appliedEventIds: ReadonlySet<string>;
   readonly lastReason: string;
   readonly pauseRequestId?: string;
@@ -74,6 +102,23 @@ export function initialProjection(charter: RunCharter): RunProjection {
     items: Object.fromEntries(charter.work.map(({ id }) => [
       id,
       { itemId: id, state: "PENDING", attempts: [], replansUsed: 0 },
+    ])),
+    restacks: Object.fromEntries((charter.restack?.descendants ?? []).map(({ itemId, gateIds, changeRequest }) => [
+      itemId,
+      {
+        itemId,
+        state: "PENDING",
+        receiptIds: [],
+        requiredGateIds: gateIds,
+        requiredReviewGateIds: gateIds.filter((gateId) => charter.gates.find(({ id }) => id === gateId)?.type === "review"),
+        sealedWaiverGateIds: charter.waivers.filter(({ gateId }) => gateIds.includes(gateId)).map(({ gateId }) => gateId),
+        passingGateIds: [],
+        predicateReceiptPassed: false,
+        expectedProvider: changeRequest.provider,
+        expectedChangeRequestId: changeRequest.id,
+        expectedChangeRequestUrl: changeRequest.url,
+        expectedBaseBranch: changeRequest.baseBranch,
+      },
     ])),
     appliedEventIds: new Set(),
     lastReason: "Charter sealed",
@@ -260,6 +305,135 @@ function transitionItem(item: ItemProjection, event: LifecycleEvent): ItemProjec
   }
 }
 
+function transitionRestack(
+  projection: RunProjection,
+  restack: RestackProjection,
+  event: LifecycleEvent,
+): RestackProjection {
+  if (restack.state === "SATISFIED" || restack.state === "BLOCKED") {
+    throw new AutopilotError("ILLEGAL_TRANSITION", `terminal restack state ${restack.state} cannot accept ${event.type}`);
+  }
+  switch (event.type) {
+    case "RESTACK_DESCENDANT_STARTED": {
+      if (restack.state !== "PENDING") {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `RESTACK_DESCENDANT_STARTED cannot follow ${restack.state}`);
+      }
+      const order = Object.keys(projection.restacks);
+      const index = order.indexOf(restack.itemId);
+      const previousId = index > 0 ? order[index - 1] : undefined;
+      if (index < 0 || (previousId !== undefined && projection.restacks[previousId]?.state !== "SATISFIED")) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `restack descendant ${restack.itemId} started out of order`);
+      }
+      return {
+        ...restack,
+        state: "PREPARING",
+        oldCommit: event.oldCommit,
+        freshParentCommit: event.freshParentCommit,
+      };
+    }
+    case "RESTACK_DESCENDANT_TREE_PREPARED":
+      if (restack.state !== "PREPARING" || event.oldCommit !== restack.oldCommit
+        || event.freshParentCommit !== restack.freshParentCommit) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `RESTACK_DESCENDANT_TREE_PREPARED cannot follow ${restack.state}`);
+      }
+      return {
+        ...restack,
+        state: "VERIFYING",
+        candidateCommit: event.candidateCommit,
+        treeIdentity: event.treeIdentity,
+        messageIdentity: event.messageIdentity,
+        temporaryWorktreePath: event.temporaryWorktreePath,
+      };
+    case "RECEIPT_RECORDED": {
+      if (restack.state !== "VERIFYING" || restack.treeIdentity === undefined
+        || event.subject !== `tree:${restack.treeIdentity}`) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", "restack receipt is not a current-tree receipt");
+      }
+      if (event.receiptKind === "predicate") {
+        if (event.status !== "PASSED") {
+          throw new AutopilotError("ILLEGAL_TRANSITION", "restack predicate receipt did not pass");
+        }
+        return {
+          ...restack,
+          predicateReceiptPassed: true,
+          receiptIds: restack.receiptIds.includes(event.receiptId) ? restack.receiptIds : [...restack.receiptIds, event.receiptId],
+        };
+      }
+      if ((event.receiptKind !== "gate" && event.receiptKind !== "review") || event.gateId === undefined
+        || !restack.requiredGateIds.includes(event.gateId)
+        || (event.receiptKind === "review") !== restack.requiredReviewGateIds.includes(event.gateId)
+        || (event.status !== "PASSED"
+          && !(event.status === "WAIVED" && event.receiptKind === "gate"
+            && restack.sealedWaiverGateIds.includes(event.gateId) && (event.evidence?.length ?? 0) > 0))) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", "restack receipt does not match a passing sealed gate or validated waiver");
+      }
+      return {
+        ...restack,
+        passingGateIds: restack.passingGateIds.includes(event.gateId)
+          ? restack.passingGateIds
+          : [...restack.passingGateIds, event.gateId],
+        receiptIds: restack.receiptIds.includes(event.receiptId) ? restack.receiptIds : [...restack.receiptIds, event.receiptId],
+      };
+    }
+    case "RESTACK_DESCENDANT_VERIFIED":
+      if (restack.state !== "VERIFYING" || restack.treeIdentity === undefined
+        || event.subject !== `tree:${restack.treeIdentity}`
+        || restack.predicateReceiptPassed !== true
+        || restack.requiredGateIds.some((gateId) => !restack.passingGateIds.includes(gateId))
+        || event.receiptIds.length !== restack.receiptIds.length
+        || event.receiptIds.some((receiptId) => !restack.receiptIds.includes(receiptId))) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `RESTACK_DESCENDANT_VERIFIED has no matching prepared tree for ${restack.itemId}`);
+      }
+      return { ...restack, state: "VERIFIED", subject: event.subject, receiptIds: event.receiptIds };
+    case "EFFECT_INTENDED":
+      if (event.effect === "restack.local-ref") {
+        if (restack.state !== "VERIFIED") {
+          throw new AutopilotError("ILLEGAL_TRANSITION", `restack.local-ref intent cannot follow ${restack.state}`);
+        }
+        return { ...restack, state: "COMMITTING" };
+      }
+      if (event.effect === "restack.remote-push") {
+        if (restack.state !== "COMMITTING" || restack.localRefConfirmed !== true) {
+          throw new AutopilotError("ILLEGAL_TRANSITION", `restack.remote-push intent cannot follow unconfirmed ${restack.state}`);
+        }
+        return { ...restack, state: "PUSHING" };
+      }
+      return restack;
+    case "EFFECT_CONFIRMED":
+      if (event.effect === "restack.local-ref") {
+        if (restack.state !== "COMMITTING" || event.observedState !== restack.candidateCommit) {
+          throw new AutopilotError("ILLEGAL_TRANSITION", "restack.local-ref confirmation does not match the candidate");
+        }
+        return { ...restack, localRefConfirmed: true };
+      }
+      if (event.effect === "restack.remote-push") {
+        if (restack.state !== "PUSHING" || event.observedState !== restack.candidateCommit) {
+          throw new AutopilotError("ILLEGAL_TRANSITION", "restack.remote-push confirmation does not match the candidate");
+        }
+        return { ...restack, remotePushConfirmed: true };
+      }
+      return restack;
+    case "RESTACK_PROVIDER_HEAD_CONFIRMED":
+      if (restack.state !== "PUSHING" || restack.remotePushConfirmed !== true
+        || event.provider !== restack.expectedProvider || event.changeRequestId !== restack.expectedChangeRequestId
+        || event.changeRequestUrl !== restack.expectedChangeRequestUrl || event.headCommit !== restack.candidateCommit
+        || event.baseBranch !== restack.expectedBaseBranch || event.state !== "open") {
+        throw new AutopilotError("ILLEGAL_TRANSITION", "restack provider-head confirmation does not match the sealed candidate");
+      }
+      return { ...restack, providerHeadConfirmed: true };
+    case "RESTACK_DESCENDANT_SATISFIED":
+      if (restack.state !== "PUSHING" || restack.remotePushConfirmed !== true
+        || restack.providerHeadConfirmed !== true || restack.subject !== event.subject) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `RESTACK_DESCENDANT_SATISFIED cannot follow ${restack.state}`);
+      }
+      return { ...restack, state: "SATISFIED" };
+    case "RESTACK_DESCENDANT_BLOCKED":
+      return { ...restack, state: "BLOCKED", blocker: event.errorCode };
+    default:
+      return restack;
+  }
+}
+
 export function reduce(projection: RunProjection, event: LifecycleEvent): RunProjection {
   if (projection.appliedEventIds.has(event.eventId)) {
     return projection;
@@ -267,17 +441,40 @@ export function reduce(projection: RunProjection, event: LifecycleEvent): RunPro
   if (event.type === "RUN_SUCCEEDED" && projection.pauseRequestId !== undefined) {
     throw new AutopilotError("ILLEGAL_TRANSITION", "RUN_SUCCEEDED cannot overtake an accepted pause request");
   }
+  if ((event.type === "RUN_VERIFYING" || event.type === "RUN_SUCCEEDED")
+    && Object.keys(projection.restacks).length > 0
+    && Object.values(projection.restacks).some(({ state }) => state !== "SATISFIED")) {
+    throw new AutopilotError("ILLEGAL_TRANSITION", `${event.type} requires every restack descendant to be SATISFIED`);
+  }
   const nextState = assertRunTransition(projection.state, event);
   let items = projection.items;
-  if (event.itemId !== undefined && [
+  const ordinaryItemLifecycle = [
     "DECISION_RECORDED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED",
     "ITEM_VERIFIED", "ITEM_SATISFIED", "ITEM_BLOCKED", "ITEM_ABANDONED",
-  ].includes(event.type)) {
+  ];
+  if (event.itemId !== undefined && projection.restacks[event.itemId] !== undefined
+    && ordinaryItemLifecycle.includes(event.type)) {
+    throw new AutopilotError("ILLEGAL_TRANSITION", `ordinary ${event.type} cannot target restack definition ${event.itemId}`);
+  }
+  if (event.itemId !== undefined && ordinaryItemLifecycle.includes(event.type)) {
     const item = projection.items[event.itemId];
     if (item === undefined) {
       throw new AutopilotError("ILLEGAL_TRANSITION", `event references unknown item ${event.itemId}`);
     }
     items = { ...projection.items, [event.itemId]: transitionItem(item, event) };
+  }
+  let restacks = projection.restacks;
+  const restackLifecycle = event.type.startsWith("RESTACK_DESCENDANT_") || event.type === "RESTACK_PROVIDER_HEAD_CONFIRMED";
+  const restackEffect = (event.type === "EFFECT_INTENDED" || event.type === "EFFECT_CONFIRMED")
+    && event.effect.startsWith("restack.");
+  const restackReceipt = event.type === "RECEIPT_RECORDED" && event.itemId !== undefined
+    && projection.restacks[event.itemId] !== undefined;
+  if ((restackLifecycle || restackEffect || restackReceipt) && event.itemId !== undefined) {
+    const restack = projection.restacks[event.itemId];
+    if (restack === undefined) {
+      throw new AutopilotError("ILLEGAL_TRANSITION", `event references unknown restack descendant ${event.itemId}`);
+    }
+    restacks = { ...projection.restacks, [event.itemId]: transitionRestack(projection, restack, event) };
   }
   const appliedEventIds = new Set(projection.appliedEventIds);
   appliedEventIds.add(event.eventId);
@@ -293,6 +490,7 @@ export function reduce(projection: RunProjection, event: LifecycleEvent): RunPro
     ...projectionWithoutWaiting,
     state: nextState,
     items,
+    restacks,
     appliedEventIds,
     lastReason: event.reason,
     ...(pauseRequestId === undefined ? {} : { pauseRequestId }),

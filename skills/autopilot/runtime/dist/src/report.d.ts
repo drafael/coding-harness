@@ -17,6 +17,14 @@ export interface RunReport {
         readonly attempts: number;
         readonly chargedAttempts: number;
     }[];
+    readonly restacks: readonly {
+        readonly itemId: string;
+        readonly state: string;
+        readonly subject?: string;
+        readonly blocker?: string;
+        readonly candidateCommit?: string;
+        readonly treeIdentity?: string;
+    }[];
     readonly lastReason: string;
     readonly predicateSummary?: string;
     readonly effects: readonly {
@@ -30,6 +38,7 @@ export interface RunReport {
         readonly receiptId: string;
         readonly gateId?: string;
         readonly receiptKind?: string;
+        readonly subject?: string;
         readonly status: string;
     }[];
     readonly evidenceMap: readonly PredicateEvidenceEntry[];

@@ -36,7 +36,7 @@ export declare function assertWritablePaths(worktreePath: string, changed: reado
 export declare function observeRepository(worktreePath: string, managedBranches?: readonly ManagedBranchExpectation[]): Promise<RepositoryObservation>;
 export declare function remoteBranchCommit(repositoryRoot: string, remote: string, branchName: string): Promise<string | undefined>;
 export declare function pushBranch(worktreePath: string, remote: string, branchName: string, expectedCommit: string): Promise<string>;
-export declare function pushAmendmentBranch(worktreePath: string, remote: string, branchName: string, previousCommit: string, expectedCommit: string): Promise<string>;
+export declare function pushAmendmentBranch(worktreePath: string, remote: string, branchName: string, previousCommit: string, expectedCommit: string, beforePush?: () => void): Promise<string>;
 export interface PreCommitHookSnapshot {
     readonly identity: string;
     readonly path?: string;
@@ -49,4 +49,12 @@ export interface PreCommitHookResult {
 export declare function inspectPreCommitHook(worktreePath: string): Promise<PreCommitHookSnapshot>;
 export declare function runPreCommitHook(worktreePath: string, expectedHook: PreCommitHookSnapshot, environmentNames: readonly string[], timeoutMs: number, maximumOutputBytes: number): Promise<PreCommitHookResult>;
 export declare function commitAcceptedWork(worktreePath: string, charter: RunCharter, item: WorkItem, attemptId: string, expectedTree: string, expectedParent: string): Promise<string>;
+export interface RestackCandidate {
+    readonly commit: string;
+    readonly treeIdentity: string;
+    readonly messageIdentity: string;
+    readonly temporaryWorktreePath: string;
+}
+export declare function prepareRestackCandidate(repositoryRoot: string, runId: string, itemId: string, oldCommit: string, freshParentCommit: string, retainedWorktreePath: string): Promise<RestackCandidate>;
+export declare function installRestackCandidate(repositoryRoot: string, branchName: string, retainedWorktreePath: string, temporaryWorktreePath: string, oldCommit: string, candidateCommit: string, candidateTreeIdentity: string, beforeMutation?: () => void): Promise<void>;
 export declare function runVerificationCommand(executable: string, arguments_: readonly string[], cwd: string, environmentNames: readonly string[], timeoutMs: number, maximumOutputBytes: number): Promise<ProcessResult>;

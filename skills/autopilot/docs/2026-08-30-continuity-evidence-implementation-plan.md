@@ -487,7 +487,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 155 Node tests locally and a 91-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
+**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 162 Node tests locally and a 93-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
 
 ### Files
 

@@ -46,6 +46,7 @@
     },
     "predecessorRunId": { "type": "string", "minLength": 1 },
     "amends": { "$ref": "#/$defs/amendment" },
+    "restack": { "$ref": "#/$defs/restack" },
     "reviewFeedback": { "$ref": "#/$defs/reviewFeedback" },
     "commitPolicy": { "$ref": "#/$defs/commitPolicy" }
   },
@@ -57,6 +58,47 @@
       "properties": {
         "runId": { "type": "string", "minLength": 1 },
         "itemId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "restack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "predecessorRunId", "predecessorCharterHash", "amendedItemId", "amendedCommit", "descendants"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "predecessorRunId": { "type": "string", "minLength": 1 },
+        "predecessorCharterHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "amendedItemId": { "type": "string", "minLength": 1 },
+        "amendedCommit": { "type": "string", "minLength": 1 },
+        "descendants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["itemId", "oldCommit", "oldTreeIdentity", "remote", "remoteCommit", "changeRequest", "worktreePath", "gateIds"],
+            "properties": {
+              "itemId": { "type": "string", "minLength": 1 },
+              "oldCommit": { "type": "string", "minLength": 1 },
+              "oldTreeIdentity": { "type": "string", "minLength": 1 },
+              "remote": { "type": "string", "minLength": 1 },
+              "remoteCommit": { "type": "string", "minLength": 1 },
+              "worktreePath": { "type": "string", "minLength": 1 },
+              "gateIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+              "changeRequest": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["provider", "id", "url", "baseBranch"],
+                "properties": {
+                  "provider": { "enum": ["github", "gitlab"] },
+                  "id": { "type": "string", "minLength": 1 },
+                  "url": { "type": "string", "minLength": 1 },
+                  "baseBranch": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "reviewFeedback": {
@@ -136,6 +178,7 @@
             "credentials.use",
             "git.commit",
             "remote.push",
+            "change-request.observe",
             "change-request.open",
             "change-request.update",
             "review-thread.resolve",

@@ -2,6 +2,7 @@ import type { RunCharter } from "./charter.js";
 import type { LifecycleEvent, WaitingDetails } from "./events.js";
 export type RunState = "COMPILED" | "RECONCILING" | "RUNNING" | "WAITING" | "VERIFYING" | "SUCCEEDED" | "STOPPED";
 export type ItemState = "PENDING" | "READY" | "ACTIVE" | "VERIFYING" | "SATISFIED" | "BLOCKED" | "ABANDONED";
+export type RestackState = "PENDING" | "PREPARING" | "VERIFYING" | "VERIFIED" | "COMMITTING" | "PUSHING" | "SATISFIED" | "BLOCKED";
 export interface AttemptProjection {
     readonly attemptId: string;
     readonly leaseEpoch: number;
@@ -44,11 +45,37 @@ export interface ItemProjection {
     readonly subject?: string;
     readonly blocker?: string;
 }
+export interface RestackProjection {
+    readonly itemId: string;
+    readonly state: RestackState;
+    readonly oldCommit?: string;
+    readonly freshParentCommit?: string;
+    readonly candidateCommit?: string;
+    readonly treeIdentity?: string;
+    readonly messageIdentity?: string;
+    readonly temporaryWorktreePath?: string;
+    readonly subject?: string;
+    readonly receiptIds: readonly string[];
+    readonly requiredGateIds: readonly string[];
+    readonly requiredReviewGateIds: readonly string[];
+    readonly sealedWaiverGateIds: readonly string[];
+    readonly passingGateIds: readonly string[];
+    readonly predicateReceiptPassed: boolean;
+    readonly expectedProvider: "github" | "gitlab";
+    readonly expectedChangeRequestId: string;
+    readonly expectedChangeRequestUrl: string;
+    readonly expectedBaseBranch: string;
+    readonly localRefConfirmed?: boolean;
+    readonly remotePushConfirmed?: boolean;
+    readonly providerHeadConfirmed?: boolean;
+    readonly blocker?: string;
+}
 export interface RunProjection {
     readonly runId: string;
     readonly charterHash: string;
     readonly state: RunState;
     readonly items: Readonly<Record<string, ItemProjection>>;
+    readonly restacks: Readonly<Record<string, RestackProjection>>;
     readonly appliedEventIds: ReadonlySet<string>;
     readonly lastReason: string;
     readonly pauseRequestId?: string;

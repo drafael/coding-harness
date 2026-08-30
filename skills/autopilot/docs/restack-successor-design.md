@@ -1,6 +1,6 @@
 # Sealed restack-successor design package
 
-- **Status:** Required design boundary; implementation blocked until this contract is accepted and represented in the sealed charter, journal, and reducer
+- **Status:** Implemented for sealed controlled-fixture execution; live provider mutation remains unclaimed pending renewed disposable-target authority
 - **Scope:** Successful `change-request-ready` ordered stacks after a non-leaf item is fast-forward amended
 - **Non-goals:** Rebase, reset, cherry-pick replacement, force-push, implicit authority inheritance, worker remediation, or provider base retargeting
 
@@ -41,8 +41,6 @@ interface RestackSuccessor {
 
 interface RestackDescendant {
   readonly itemId: string;
-  readonly branchName: string;
-  readonly dependsOnItemId: string;
   readonly oldCommit: string;
   readonly oldTreeIdentity: string;
   readonly remote: string;
@@ -54,13 +52,11 @@ interface RestackDescendant {
     readonly baseBranch: string;
   };
   readonly worktreePath: string;
-  readonly writableRoots: readonly string[];
-  readonly acceptance: readonly Predicate[];
   readonly gateIds: readonly string[];
 }
 ```
 
-The successor's existing top-level `gates`, `grants`, `limits`, and `commitPolicy` are authoritative. `gateIds` may reference only gates sealed in that successor. The successor does not load gate definitions or grants from the predecessor at execution time.
+The successor's top-level `work` entries are definition-only copies that seal each descendant's branch, dependency order, writable roots, and acceptance predicates; they never enter ordinary item or attempt lifecycle. Existing top-level `gates`, `grants`, `limits`, and `commitPolicy` remain authoritative. `gateIds` may reference only gates sealed in that successor. The successor does not load gate definitions or grants from the predecessor at execution time.
 
 ### Seal-time validation
 
@@ -72,8 +68,10 @@ Sealing must load the predecessor's immutable charter and successful journal pro
 - descendants are exactly the contiguous suffix after that item, without omission, insertion, or reordering;
 - every snapshot field equals durable successful predecessor evidence;
 - every copied predicate, writable root, and gate definition is byte-for-byte equal to its predecessor definition;
-- successor grants are a subset of predecessor grants and contain the required existing families only;
-- `git.commit` belongs to `runtime`, `remote.push` belongs to `runtime`, and provider observation/update authority is unchanged;
+- successor grants are inside both the source and immediate amendment authority and match the explicit restack family/actor/scope allowlist;
+- seal-time validation requires every grant that engine preflight will exercise: scoped runtime reads, scoped worker reads for review gates, and command/environment execution when applicable, adapter network and credentials, remote-delivery runtime/delivery network and credentials plus delivery-owned provider observation, runtime commit, and scoped ordinary push;
+- worker write, `merge.execute`, `review-thread.resolve`, change-request open/update, and every family not needed by sealed verification or delivery are prohibited;
+- applicable waivers are byte-for-byte copies of source waivers; only sealed non-review gates may become `WAIVED`, and only with a matching receipt, reason, failure evidence, and passing alternative-gate evidence;
 - no force, rewrite, reset, merge-execution, deployment, credential, path, remote, or branch authority is added.
 
 A changed or unavailable predecessor artifact prevents sealing. Runtime must never reconstruct omitted authority.
@@ -143,7 +141,7 @@ parent 2 = freshParentCommit
 
 The commit message records successor run, descendant item, old commit, and fresh parent. Commit-object creation alone does not move a ref.
 
-Create a temporary detached managed worktree at the candidate commit. It must be inside the runtime's managed sibling boundary, registered to the same repository, and removed on success or preserved with a diagnostic on uncertain cleanup. Never reset or clean the retained descendant worktree.
+Create a temporary detached managed worktree at the candidate commit. Its deterministic Windows-safe sibling name uses a conservative 120-byte bound so Git's repository-internal worktree administration path also remains usable on Windows; canonical worktree names retain their 200-byte bound. It must be inside the runtime's managed sibling boundary, registered to the same repository, and removed on success or preserved with a diagnostic on uncertain cleanup. Never reset or clean the retained descendant worktree.
 
 ### 3. Reverify exact candidate tree
 

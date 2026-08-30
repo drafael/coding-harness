@@ -18,6 +18,7 @@ import { acquireBranchOwnershipLock, acquireRunLock, requestRunPause, requestRun
 import { loadProjection, rebuildProjection, writeSnapshot } from "./projection.js";
 import { reduce } from "./reducer.js";
 import { branchExists, resolveCommit, validateBaseCommit, validateBranchName } from "./repository.js";
+import { validateRestackSuccessor } from "./restack.js";
 import { writeReports, type RunReport } from "./report.js";
 import { observeReviewFeedback, type ReviewFeedbackSelection } from "./review-feedback.js";
 import {
@@ -179,19 +180,20 @@ async function start(charterFile: string, options: CliOptions): Promise<unknown>
   if (canonicalRoot !== charter.repository.root) {
     throw new AutopilotError("CHARTER_INVALID", `repository.root must be its canonical real path: ${canonicalRoot}`);
   }
-  if (charter.amends === undefined) {
+  if (charter.amends === undefined && charter.restack === undefined) {
     await validateBaseCommit(charter);
   } else if (await resolveCommit(charter.repository.root, charter.repository.baseCommit) !== charter.repository.baseCommit) {
-    throw new AutopilotError("CHARTER_INVALID", "amendment baseCommit must be a complete commit identity");
+    throw new AutopilotError("CHARTER_INVALID", "successor baseCommit must be a complete commit identity");
   }
   const stateRoot = await resolveStateRoot(charter.repository.root, options.stateDir);
+  await validateRestackSuccessor(stateRoot, charter);
   const ownershipLock = charter.amends === undefined
     ? undefined
     : await acquireBranchOwnershipLock(stateRoot, charter.work[0]?.branchName ?? "");
   try {
     for (const item of charter.work) {
       await validateBranchName(charter.repository.root, item.branchName);
-      if (charter.amends === undefined && await branchExists(charter.repository.root, item.branchName)) {
+      if (charter.amends === undefined && charter.restack === undefined && await branchExists(charter.repository.root, item.branchName)) {
         throw new AutopilotError("BRANCH_COLLISION", `branch already exists before launch: ${item.branchName}`);
       }
     }

@@ -558,6 +558,21 @@ test("pushAmendmentBranch updates an existing remote branch only by fast-forward
   await runChecked({ executable: "git", arguments: ["commit", "--no-verify", "-m", "amend"], cwd: fixture.worktreePath });
   const amendedCommit = (await runChecked({ executable: "git", arguments: ["rev-parse", "HEAD"], cwd: fixture.worktreePath })).stdout.trim();
 
+  await assert.rejects(
+    pushAmendmentBranch(
+      fixture.worktreePath,
+      "origin",
+      fixture.branchName,
+      fixture.acceptedCommit,
+      amendedCommit,
+      () => {
+        throw new Error("push fenced");
+      },
+    ),
+    /push fenced/,
+  );
+  assert.equal(await remoteBranchCommit(fixture.repository.root, "origin", fixture.branchName), fixture.acceptedCommit);
+
   const observed = await pushAmendmentBranch(
     fixture.worktreePath,
     "origin",

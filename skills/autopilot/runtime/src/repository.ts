@@ -86,6 +86,7 @@ export async function validateBranchName(repositoryRoot: string, branchName: str
 }
 
 const MAX_WORKTREE_DIRECTORY_BYTES = 200;
+const MAX_CANDIDATE_WORKTREE_DIRECTORY_BYTES = 120;
 
 function safeRepositoryName(repositoryRoot: string): string {
   const original = basename(repositoryRoot);
@@ -93,19 +94,31 @@ function safeRepositoryName(repositoryRoot: string): string {
   return normalized === original ? normalized : `${normalized}-${sha256(repositoryRoot).slice(0, 8)}`;
 }
 
-export async function resolveWorktreePath(charter: RunCharter, item: WorkItem): Promise<string> {
-  const repositoryRoot = await realpath(charter.repository.root);
-  const readableName = `${safeRepositoryName(repositoryRoot)}-autopilot-${charter.runId}-${item.id}`;
-  const suffix = sha256(`${repositoryRoot}\0${charter.runId}\0${item.id}`).slice(0, 16);
+function boundedSiblingWorktreePath(
+  repositoryRoot: string,
+  readableName: string,
+  identity: string,
+  maximumDirectoryBytes = MAX_WORKTREE_DIRECTORY_BYTES,
+): string {
+  const suffix = sha256(identity).slice(0, 16);
   const windowsSafeName = readableName.endsWith(".")
     ? `${readableName.replaceAll(/\.+$/gu, "")}-${suffix}`
     : readableName;
-  if (Buffer.byteLength(windowsSafeName) <= MAX_WORKTREE_DIRECTORY_BYTES) {
+  if (Buffer.byteLength(windowsSafeName) <= maximumDirectoryBytes) {
     return join(dirname(repositoryRoot), windowsSafeName);
   }
-  const maximumPrefixLength = MAX_WORKTREE_DIRECTORY_BYTES - suffix.length - 1;
+  const maximumPrefixLength = maximumDirectoryBytes - suffix.length - 1;
   const prefix = readableName.slice(0, maximumPrefixLength).replaceAll(/[._-]+$/gu, "");
   return join(dirname(repositoryRoot), `${prefix}-${suffix}`);
+}
+
+export async function resolveWorktreePath(charter: RunCharter, item: WorkItem): Promise<string> {
+  const repositoryRoot = await realpath(charter.repository.root);
+  return boundedSiblingWorktreePath(
+    repositoryRoot,
+    `${safeRepositoryName(repositoryRoot)}-autopilot-${charter.runId}-${item.id}`,
+    `${repositoryRoot}\0${charter.runId}\0${item.id}`,
+  );
 }
 
 async function canonicalGitCommonDirectory(repositoryRoot: string): Promise<string> {
@@ -317,6 +330,7 @@ export async function pushAmendmentBranch(
   branchName: string,
   previousCommit: string,
   expectedCommit: string,
+  beforePush?: () => void,
 ): Promise<string> {
   const ancestor = await runProcess({
     executable: "git",
@@ -333,6 +347,7 @@ export async function pushAmendmentBranch(
   if (observed !== previousCommit) {
     throw new AutopilotError("BRANCH_COLLISION", `remote amendment branch changed from ${previousCommit} to ${String(observed)}`);
   }
+  beforePush?.();
   await runChecked({
     executable: "git",
     arguments: ["push", "--porcelain", remote, `${expectedCommit}:refs/heads/${branchName}`],
@@ -459,6 +474,190 @@ export async function commitAcceptedWork(
     cwd: worktreePath,
   });
   return commit;
+}
+
+export interface RestackCandidate {
+  readonly commit: string;
+  readonly treeIdentity: string;
+  readonly messageIdentity: string;
+  readonly temporaryWorktreePath: string;
+}
+
+function comparableWorktreePath(path: string): string {
+  const normalized = resolve(path).replaceAll("\\", "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+async function registeredWorktreeHead(repositoryRoot: string, worktreePath: string): Promise<string | undefined> {
+  const fields = (await git(repositoryRoot, ["worktree", "list", "--porcelain", "-z"])).split(/[\0\n]/u);
+  const canonicalWorktreePath = comparableWorktreePath(join(await realpath(dirname(worktreePath)), basename(worktreePath)));
+  const index = fields.findIndex((field) =>
+    field.startsWith("worktree ") && comparableWorktreePath(field.slice("worktree ".length)) === canonicalWorktreePath
+  );
+  const head = index < 0 ? undefined : fields[index + 1];
+  return head?.startsWith("HEAD ") === true ? head.slice("HEAD ".length) : undefined;
+}
+
+export async function prepareRestackCandidate(
+  repositoryRoot: string,
+  runId: string,
+  itemId: string,
+  oldCommit: string,
+  freshParentCommit: string,
+  retainedWorktreePath: string,
+): Promise<RestackCandidate> {
+  const ancestor = await runProcess({
+    executable: "git",
+    arguments: ["merge-base", "--is-ancestor", freshParentCommit, oldCommit],
+    cwd: repositoryRoot,
+  });
+  if (ancestor.exitCode === 0) {
+    throw new AutopilotError("RESTACK_REWRITE_REQUIRED", "restack predecessor is already contained by the descendant");
+  }
+  const merged = await runProcess({
+    executable: "git",
+    arguments: ["merge-tree", "--write-tree", oldCommit, freshParentCommit],
+    cwd: repositoryRoot,
+    maxOutputBytes: 65_536,
+  });
+  if (merged.exitCode !== 0) {
+    throw new AutopilotError("RESTACK_CONFLICT", `restack merge tree conflicts for ${itemId}`, { stderr: merged.stderr });
+  }
+  const treeIdentity = merged.stdout.trim().split("\n")[0] ?? "";
+  if (!/^[a-f0-9]{40,64}$/u.test(treeIdentity)) {
+    throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "git merge-tree did not return an exact tree identity");
+  }
+  const message = [
+    `autopilot(${itemId}): merge-forward amended predecessor`,
+    "",
+    `Autopilot-Run: ${runId}`,
+    `Autopilot-Item: ${itemId}`,
+    `Autopilot-Restack-Old: ${oldCommit}`,
+    `Autopilot-Restack-Parent: ${freshParentCommit}`,
+  ].join("\n");
+  const messageIdentity = sha256(message);
+  const commit = (await runChecked({
+    executable: "git",
+    arguments: ["commit-tree", treeIdentity, "-p", oldCommit, "-p", freshParentCommit],
+    cwd: repositoryRoot,
+    stdin: `${message}\n`,
+    environment: {
+      ...process.env,
+      GIT_AUTHOR_DATE: "2000-01-01T00:00:00Z",
+      GIT_COMMITTER_DATE: "2000-01-01T00:00:00Z",
+    },
+  })).stdout.trim();
+  const temporaryWorktreePath = boundedSiblingWorktreePath(
+    repositoryRoot,
+    `${basename(retainedWorktreePath)}-restack-${runId}-${itemId}-candidate`,
+    `${repositoryRoot}\0${runId}\0${itemId}\0restack-candidate`,
+    MAX_CANDIDATE_WORKTREE_DIRECTORY_BYTES,
+  );
+  try {
+    await lstat(temporaryWorktreePath);
+    await assertRegisteredWorktree(repositoryRoot, temporaryWorktreePath);
+    const existing = await inspectRepository(temporaryWorktreePath);
+    if (existing.headCommit !== commit || !existing.clean) {
+      throw new AutopilotError("BRANCH_COLLISION", `restack candidate worktree changed for ${itemId}`);
+    }
+    return { commit, treeIdentity, messageIdentity, temporaryWorktreePath };
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+  const registeredHead = await registeredWorktreeHead(repositoryRoot, temporaryWorktreePath);
+  if (registeredHead !== undefined) {
+    if (registeredHead !== commit) {
+      throw new AutopilotError("BRANCH_COLLISION", `missing restack candidate path is registered at another commit for ${itemId}`);
+    }
+    await runChecked({
+      executable: "git",
+      arguments: ["worktree", "remove", temporaryWorktreePath],
+      cwd: repositoryRoot,
+    });
+  }
+  await runChecked({
+    executable: "git",
+    arguments: ["worktree", "add", "--detach", temporaryWorktreePath, commit],
+    cwd: repositoryRoot,
+  });
+  return { commit, treeIdentity, messageIdentity, temporaryWorktreePath };
+}
+
+export async function installRestackCandidate(
+  repositoryRoot: string,
+  branchName: string,
+  retainedWorktreePath: string,
+  temporaryWorktreePath: string,
+  oldCommit: string,
+  candidateCommit: string,
+  candidateTreeIdentity: string,
+  beforeMutation?: () => void,
+): Promise<void> {
+  await assertRegisteredWorktree(repositoryRoot, temporaryWorktreePath);
+  const candidate = await inspectRepository(temporaryWorktreePath);
+  const candidateIdentity = await inspectCommit(temporaryWorktreePath, candidate.headCommit);
+  if (!candidate.clean || candidate.headCommit !== candidateCommit
+    || candidateIdentity.treeIdentity !== candidateTreeIdentity) {
+    throw new AutopilotError("BRANCH_COLLISION", "temporary restack candidate changed before installation");
+  }
+  const branchCommit = await resolveCommit(repositoryRoot, branchName);
+  if (branchCommit !== oldCommit && branchCommit !== candidateCommit) {
+    throw new AutopilotError("BRANCH_COLLISION", "retained restack branch changed before installation");
+  }
+  let retainedExists = true;
+  try {
+    await lstat(retainedWorktreePath);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      retainedExists = false;
+    } else {
+      throw error;
+    }
+  }
+  if (retainedExists) {
+    await assertRegisteredWorktree(repositoryRoot, retainedWorktreePath);
+    const retained = await inspectRepository(retainedWorktreePath);
+    const branch = await currentBranch(retainedWorktreePath);
+    if (!retained.clean || retained.headCommit !== branchCommit || branch !== branchName) {
+      throw new AutopilotError("BRANCH_COLLISION", "retained restack worktree changed before installation");
+    }
+    if (branchCommit === oldCommit) {
+      beforeMutation?.();
+      await runChecked({ executable: "git", arguments: ["worktree", "remove", retainedWorktreePath], cwd: repositoryRoot });
+      retainedExists = false;
+    }
+  }
+  try {
+    if (branchCommit === oldCommit) {
+      if (retainedExists) {
+        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "retained worktree remained registered before restack CAS");
+      }
+      beforeMutation?.();
+      await runChecked({
+        executable: "git",
+        arguments: ["update-ref", "-m", "autopilot restack", `refs/heads/${branchName}`, candidateCommit, oldCommit],
+        cwd: repositoryRoot,
+      });
+    }
+    if (!retainedExists) {
+      beforeMutation?.();
+      await runChecked({ executable: "git", arguments: ["worktree", "add", retainedWorktreePath, branchName], cwd: repositoryRoot });
+    }
+    const confirmed = await inspectRepository(retainedWorktreePath);
+    const confirmedTree = await git(retainedWorktreePath, ["show", "-s", "--format=%T", "HEAD"]);
+    if (!confirmed.clean || confirmed.headCommit !== candidateCommit || confirmedTree !== candidateTreeIdentity) {
+      throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "restack retained worktree did not reach the candidate");
+    }
+    await runChecked({ executable: "git", arguments: ["worktree", "remove", temporaryWorktreePath], cwd: repositoryRoot });
+  } catch (error) {
+    throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "restack worktree installation did not complete exactly", {
+      cause: String(error),
+      retainedWorktreePath,
+      temporaryWorktreePath,
+    });
+  }
 }
 
 export async function runVerificationCommand(

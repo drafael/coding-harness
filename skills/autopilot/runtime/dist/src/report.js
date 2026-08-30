@@ -6,6 +6,7 @@ import { consumedAttempts } from "./reducer.js";
 import { resolveWorktreePath } from "./repository.js";
 export async function writeReports(runDirectory, charter, projection, records, assurance, unverifiedBoundaries, persist = true) {
     const terminal = projection.state === "SUCCEEDED" || projection.state === "STOPPED";
+    const ordinaryWork = charter.restack === undefined ? charter.work : [];
     const predicateSummary = records.findLast(({ event }) => event.type === "RUN_SUCCEEDED")?.event;
     const effects = records.flatMap(({ event }) => event.type === "EFFECT_CONFIRMED" ? [{
             effect: event.effect,
@@ -18,24 +19,28 @@ export async function writeReports(runDirectory, charter, projection, records, a
             receiptId: event.receiptId,
             ...(event.gateId === undefined ? {} : { gateId: event.gateId }),
             ...(event.receiptKind === undefined ? {} : { receiptKind: event.receiptKind }),
+            ...(event.subject === undefined ? {} : { subject: event.subject }),
             status: event.status,
         }] : []);
     const evidenceMap = await projectPredicateEvidence(runDirectory, charter, projection, records);
     const lastRecord = records.at(-1);
-    const nextLegalAction = projection.state === "SUCCEEDED"
-        ? charter.delivery === "change-request-ready" ? "/autopilot address review comments or /autopilot wrap up" : "/autopilot wrap up"
-        : projection.state === "STOPPED"
-            ? "Create a sealed successor run."
-            : projection.waiting?.kind === "operator-pause"
-                ? "/autopilot resume"
-                : projection.waiting?.kind === "execution-unknown"
-                    ? "Do not launch a replacement; prove or externally cancel the orphaned execution first."
-                    : projection.waiting?.kind === "provider-checks"
-                        ? "Wait for the bounded provider-check session, or /autopilot resume after the coordinator exits."
-                        : projection.state === "RUNNING" || projection.state === "RECONCILING" || projection.state === "VERIFYING"
-                            ? "Continue under the owning coordinator, or resume only after lifecycle discovery reports it inactive."
-                            : "/autopilot resume";
-    const continuityItems = charter.work.map((item) => {
+    const blockedRestack = Object.values(projection.restacks).find(({ state }) => state === "BLOCKED");
+    const nextLegalAction = blockedRestack !== undefined
+        ? `Inspect preserved evidence for ${blockedRestack.itemId}; no partial-suffix continuation is legal from this blocked snapshot.`
+        : projection.state === "SUCCEEDED"
+            ? charter.delivery === "change-request-ready" ? "/autopilot address review comments or /autopilot wrap up" : "/autopilot wrap up"
+            : projection.state === "STOPPED"
+                ? "Create a sealed successor run."
+                : projection.waiting?.kind === "operator-pause"
+                    ? "/autopilot resume"
+                    : projection.waiting?.kind === "execution-unknown"
+                        ? "Do not launch a replacement; prove or externally cancel the orphaned execution first."
+                        : projection.waiting?.kind === "provider-checks"
+                            ? "Wait for the bounded provider-check session, or /autopilot resume after the coordinator exits."
+                            : projection.state === "RUNNING" || projection.state === "RECONCILING" || projection.state === "VERIFYING"
+                                ? "Continue under the owning coordinator, or resume only after lifecycle discovery reports it inactive."
+                                : "/autopilot resume";
+    const continuityItems = ordinaryWork.map((item) => {
         const itemProjection = projection.items[item.id];
         const attempts = itemProjection?.attempts ?? [];
         const lastAttempt = attempts.at(-1);
@@ -64,7 +69,9 @@ export async function writeReports(runDirectory, charter, projection, records, a
     });
     const worktrees = await Promise.all(charter.work.map(async (item) => ({
         itemId: item.id,
-        path: records.flatMap(({ event }) => event.type === "WORKTREE_ADOPTED" && event.itemId === item.id ? [event.worktreePath] : []).at(-1) ?? await resolveWorktreePath(charter, item),
+        path: charter.restack?.descendants.find(({ itemId }) => itemId === item.id)?.worktreePath
+            ?? records.flatMap(({ event }) => event.type === "WORKTREE_ADOPTED" && event.itemId === item.id ? [event.worktreePath] : []).at(-1)
+            ?? await resolveWorktreePath(charter, item),
     })));
     const report = {
         schemaVersion: 1,
@@ -72,7 +79,7 @@ export async function writeReports(runDirectory, charter, projection, records, a
         runId: charter.runId,
         charterHash: charter.charterHash,
         state: projection.state,
-        items: charter.work.map((item) => {
+        items: ordinaryWork.map((item) => {
             const itemProjection = projection.items[item.id];
             return {
                 itemId: item.id,
@@ -84,6 +91,14 @@ export async function writeReports(runDirectory, charter, projection, records, a
                 ...(itemProjection?.blocker === undefined ? {} : { blocker: itemProjection.blocker }),
             };
         }),
+        restacks: Object.values(projection.restacks).map((restack) => ({
+            itemId: restack.itemId,
+            state: restack.state,
+            ...(restack.subject === undefined ? {} : { subject: restack.subject }),
+            ...(restack.blocker === undefined ? {} : { blocker: restack.blocker }),
+            ...(restack.candidateCommit === undefined ? {} : { candidateCommit: restack.candidateCommit }),
+            ...(restack.treeIdentity === undefined ? {} : { treeIdentity: restack.treeIdentity }),
+        })),
         lastReason: projection.lastReason,
         ...(predicateSummary?.type === "RUN_SUCCEEDED" ? { predicateSummary: predicateSummary.predicateSummary } : {}),
         effects,
@@ -102,12 +117,14 @@ export async function writeReports(runDirectory, charter, projection, records, a
         worktrees,
         decisions: records.filter(({ event }) => event.type === "DECISION_RECORDED").length,
         assurance,
-        ...(terminal ? {} : { continuationCommand: "/autopilot resume" }),
-        ...(projection.state === "STOPPED"
-            ? { successorInstruction: projection.stop?.remediation ?? "Create a successor charter with changed authority or budgets." }
-            : projection.state === "SUCCEEDED" && charter.delivery === "change-request-ready"
-                ? { successorInstruction: `To amend an open change request from this run, create a sealed single-item successor with amends.runId=${JSON.stringify(charter.runId)} and the reviewed item ID.` }
-                : {}),
+        ...(terminal || blockedRestack !== undefined ? {} : { continuationCommand: "/autopilot resume" }),
+        ...(blockedRestack !== undefined
+            ? {}
+            : projection.state === "STOPPED"
+                ? { successorInstruction: projection.stop?.remediation ?? "Create a successor charter with changed authority or budgets." }
+                : projection.state === "SUCCEEDED" && charter.delivery === "change-request-ready"
+                    ? { successorInstruction: `To amend an open change request from this run, create a sealed single-item successor with amends.runId=${JSON.stringify(charter.runId)} and the reviewed item ID.` }
+                    : {}),
         ...(charter.amends === undefined ? {} : { amendment: charter.amends }),
         commitPolicy: charter.commitPolicy ?? { preCommitHook: "skip", writableRoots: [], environmentNames: [] },
         unverifiedBoundaries,
