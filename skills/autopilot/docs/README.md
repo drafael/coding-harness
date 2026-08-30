@@ -16,6 +16,7 @@ The [main README](../README.md) is the short path for starting an unattended run
 - [ADR 0001: Use a durable event engine with explicit authority](adr/0001-durable-event-engine.md): the central architectural decision and its consequences.
 - [Implementation plan](implementation-plan.md): original phased implementation, acceptance evidence, and unverified integrations.
 - [Continuity and evidence plan](2026-08-30-continuity-evidence-implementation-plan.md): attempt context, predicate evidence, independent review, and blocked/deferred supervision work.
+- [Restack successor lifecycle design](restack-successor-design.md): explicit authority, verification, Git mutation, and recovery contract for successful-stack restacking.
 - [Runtime CLI reference](runtime-cli.md): maintainer automation, state overrides, journal repair, and build commands.
 
 ## Visual overviews
