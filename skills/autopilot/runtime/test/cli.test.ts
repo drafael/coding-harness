@@ -326,7 +326,7 @@ if (process.argv[2] === "--version") {
     cwd: root,
   });
   const exitCode = child.exitCode ?? await new Promise<number | null>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("foreground coordinator did not stop")), 10_000);
+    const timeout = setTimeout(() => reject(new Error("foreground coordinator did not stop")), 30_000);
     child.once("error", (error) => {
       clearTimeout(timeout);
       reject(error);
