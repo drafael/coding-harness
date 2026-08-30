@@ -30,7 +30,7 @@ Run `node runtime/dist/src/cli.js doctor` to observe installed versions. Doctor 
 
 Provider credentials remain in the CLI environment. Journal events store stable IDs, URLs, expected commits, and redacted outcomes, not credentials.
 
-Unit tests use controlled fake CLIs for command construction, changed-head denial, review-feedback observation and resolution, and wrap-up reconciliation. An authorized live wrap-up removed the merged head branch for GitHub chat4j PR #69 and reconciled its legacy lease worktree. This single result does not prove other authentication setups, organization approval rules, merge queues, GitLab merge trains, or broad provider idempotency; additional remote mutation—including live review-thread resolution—remains unverified until explicitly authorized.
+Unit tests use controlled fake CLIs for command construction, changed-head denial, review-feedback observation and resolution, and wrap-up reconciliation. An authorized live wrap-up removed the merged head branch for GitHub chat4j PR #69 and reconciled its legacy lease worktree. A separate authorized private disposable target, `drafael/autopilot-live-validation` PR #1, exercised `gh` 2.98.0 PR creation, marker reconciliation, exact open-head observation, review-thread discovery and resolution, and exact-head merge. Immediate marker rediscovery initially exposed GitHub search-index delay; the adapter now paginates pull-request bodies through the REST API instead of relying on indexed search. These results do not prove other authentication setups, organization approval rules, checks completion, merge queues, GitLab merge trains, broad provider idempotency, or the complete review-feedback amendment workflow.
 
 ## Capability degradation
 

@@ -129,18 +129,32 @@ export class GitHubDeliveryAdapter implements DeliveryPort {
   }
 
   async findChangeRequest(repositoryRoot: string, runId: string, itemId: string): Promise<ChangeRequestRef | undefined> {
-    const output = parseJson(
-      await gh(repositoryRoot, ["pr", "list", "--state", "all", "--search", `\"Autopilot-Run: ${runId}\" in:body`, "--json", "number,url,body"]),
-      "gh pr list",
-    );
-    if (!Array.isArray(output)) {
-      throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "gh pr list did not return an array");
+    const { owner, name } = await repositoryIdentity(repositoryRoot);
+    let page = 1;
+    while (true) {
+      const output = parseJson(await gh(repositoryRoot, [
+        "api", `repos/${owner}/${name}/pulls`, "--method", "GET", "-F", "state=all", "-F", "per_page=100", "-F", `page=${page}`,
+      ]), "gh api pull requests");
+      if (!Array.isArray(output)) {
+        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "gh api pull requests did not return an array");
+      }
+      const match = output.find((entry) => isRecord(entry)
+        && typeof entry.body === "string"
+        && entry.body.includes(`Autopilot-Run: ${runId}`)
+        && entry.body.includes(`Autopilot-Item: ${itemId}`));
+      if (match !== undefined) {
+        const pullRequest = expectRecord(match, "GitHub pull request");
+        return {
+          provider: "github",
+          id: String(expectInteger(pullRequest.number, "GitHub pull request.number", 1)),
+          url: expectString(pullRequest.html_url, "GitHub pull request.html_url"),
+        };
+      }
+      if (output.length < 100) {
+        return undefined;
+      }
+      page += 1;
     }
-    const match = output.find((entry) => isRecord(entry)
-      && typeof entry.body === "string"
-      && entry.body.includes(`Autopilot-Run: ${runId}`)
-      && entry.body.includes(`Autopilot-Item: ${itemId}`));
-    return match === undefined ? undefined : pullRequestRef(match);
   }
 
   async createChangeRequest(request: CreateChangeRequest): Promise<ChangeRequestRef> {

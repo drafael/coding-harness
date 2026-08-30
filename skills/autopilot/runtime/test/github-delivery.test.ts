@@ -5,8 +5,9 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { GitHubDeliveryAdapter } from "../delivery/github/index.js";
 
-async function fakeGitHubCli(): Promise<{ readonly bin: string; readonly marker: string }> {
+async function fakeGitHubCli(): Promise<{ readonly bin: string; readonly createMarker: string; readonly marker: string }> {
   const bin = await mkdtemp(join(tmpdir(), "autopilot-fake-gh-"));
+  const createMarker = join(bin, "create-called");
   const marker = join(bin, "merge-called");
   const script = `#!/usr/bin/env node
 import { writeFileSync } from "node:fs";
@@ -15,8 +16,13 @@ if (args[0] === "pr" && args[1] === "view") {
   console.log(JSON.stringify({number: 7, url: "https://example.invalid/pr/7", state: "OPEN", headRefOid: process.env.FAKE_HEAD, baseRefName: "main", reviewDecision: "APPROVED"}));
 } else if (args[0] === "pr" && args[1] === "merge") {
   writeFileSync(process.env.FAKE_MARKER, args.join(" "));
+} else if (args[0] === "pr" && args[1] === "create") {
+  writeFileSync(process.env.FAKE_CREATE_MARKER, args.join(" "));
+  console.log("https://example.invalid/pr/8");
 } else if (args[0] === "repo" && args[1] === "view") {
   console.log(JSON.stringify({nameWithOwner: "owner/project"}));
+} else if (args[0] === "api" && args[1] === "repos/owner/project/pulls") {
+  console.log(JSON.stringify([{number: 7, html_url: "https://example.invalid/pr/7", body: "Autopilot-Run: run-live\\nAutopilot-Item: item-1"}]));
 } else if (args[0] === "api" && args[1] === "graphql" && args.join(" ").includes("resolveReviewThread")) {
   const threadId = args.find((arg) => arg.startsWith("threadId="))?.slice("threadId=".length);
   console.log(JSON.stringify({data: {resolveReviewThread: {thread: {id: threadId, isResolved: true}}}}));
@@ -35,8 +41,36 @@ if (args[0] === "pr" && args[1] === "view") {
 `;
   await writeFile(join(bin, "gh"), script);
   await chmod(join(bin, "gh"), 0o755);
-  return { bin, marker };
+  return { bin, createMarker, marker };
 }
+
+test("GitHub delivery reconciles a created pull request without indexed search", async () => {
+  const fake = await fakeGitHubCli();
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${fake.bin}${delimiter}${priorPath ?? ""}`;
+  process.env.FAKE_CREATE_MARKER = fake.createMarker;
+  try {
+    const adapter = new GitHubDeliveryAdapter();
+    const found = await adapter.findChangeRequest(fake.bin, "run-live", "item-1");
+    const created = await adapter.createChangeRequest({
+      repositoryRoot: fake.bin,
+      runId: "run-live",
+      itemId: "item-1",
+      title: "Exercise provider lifecycle",
+      body: "test",
+      headBranch: "feature",
+      baseBranch: "main",
+      expectedHeadCommit: "head",
+    });
+
+    assert.deepEqual(found, { provider: "github", id: "7", url: "https://example.invalid/pr/7" });
+    assert.deepEqual(created, found);
+    await assert.rejects(readFile(fake.createMarker), /ENOENT/);
+  } finally {
+    process.env.PATH = priorPath;
+    delete process.env.FAKE_CREATE_MARKER;
+  }
+});
 
 test("GitHub delivery observes and resolves exact review threads", async () => {
   const fake = await fakeGitHubCli();
