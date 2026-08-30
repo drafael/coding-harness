@@ -1000,7 +1000,7 @@ test("engine preserves independent queue siblings and ordered stack ancestry", a
   const queue = await runMode("independent-queue");
   const stack = await runMode("ordered-stack");
 
-  assert.equal(queue.report.state, "SUCCEEDED");
+  assert.equal(queue.report.state, "SUCCEEDED", JSON.stringify(queue.report, null, 2));
   assert.equal(queue.report.items.filter(({ state }) => state === "SATISFIED").length, 2);
   assert.equal(stack.report.state, "SUCCEEDED");
   const first = stack.charter.work[0]?.branchName ?? "";
