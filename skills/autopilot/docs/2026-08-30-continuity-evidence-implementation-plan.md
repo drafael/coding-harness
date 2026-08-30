@@ -556,7 +556,11 @@ Validate modified Markdown links and balanced fences with the repository's estab
 
 ### Windows validation evidence
 
-GitHub Actions run [33319142329](https://github.com/drafael/coding-harness/actions/runs/33319142329) passed the same Node 24 typecheck, lint, format check, and 136-test suite on both `ubuntu-latest` and `windows-latest` at runtime commit `41500fb`. The Windows runs exposed and then verified fixes for unsupported directory fsync, direct governed-hook execution, portable fake CLI fixtures, and descendant process-tree cancellation. Windows writes still do not claim POSIX-equivalent sudden-power-loss directory metadata durability because Node.js cannot fsync a Windows directory handle. Restart reattachment remains a separate unimplemented supervisor boundary.
+GitHub Actions run [33335872725](https://github.com/drafael/coding-harness/actions/runs/33335872725) passed Node 24 typecheck, lint, format check, the 162-test suite, and deterministic generated-artifact checks on both `ubuntu-latest` and `windows-latest` at merge commit `b511331`. The Windows runs exposed and then verified fixes for unsupported directory fsync, direct governed-hook execution, portable fake CLI fixtures, descendant process-tree cancellation, CRLF-neutral restack assertions, and bounded Git worktree administration paths. Windows writes still do not claim POSIX-equivalent sudden-power-loss directory metadata durability because Node.js cannot fsync a Windows directory handle. Restart reattachment remains a separate unimplemented supervisor boundary.
+
+### Direct Pi validation evidence
+
+Pi 0.84.4 completed five isolated `--no-session --no-extensions` calls against a disposable Git repository. The matrix covered two sequential calls in one worktree, an explicit retry context, two additional calls in a sibling worktree under distinct run identities, and a read-only exact-tree review. Each implementation call created only its unique nonce file with the expected content; the review returned `AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[]}`. No output contained the historical `ctx is stale` error or either captured-context invalidation phrase. This validates the current direct Pi path for repeated process-isolated calls; it does not change the structured `pi-subagents` worker path or claim compatibility for the retired `/run` slash bridge.
 
 ## Cross-cutting test matrix
 
