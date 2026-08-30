@@ -1,9 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RunCharter } from "./charter.js";
+import { projectPredicateEvidence, type PredicateEvidenceEntry } from "./evidence-map.js";
 import type { JournalRecord } from "./journal.js";
 import { writeJsonAtomic } from "./journal.js";
-import type { RunProjection } from "./reducer.js";
+import { consumedAttempts, type RunProjection } from "./reducer.js";
 import { resolveWorktreePath } from "./repository.js";
 
 export interface RunReport {
@@ -19,6 +20,7 @@ export interface RunReport {
     readonly subject?: string;
     readonly blocker?: string;
     readonly attempts: number;
+    readonly chargedAttempts: number;
   }[];
   readonly lastReason: string;
   readonly predicateSummary?: string;
@@ -31,8 +33,29 @@ export interface RunReport {
   readonly receipts: readonly {
     readonly itemId?: string;
     readonly receiptId: string;
+    readonly gateId?: string;
+    readonly receiptKind?: string;
     readonly status: string;
   }[];
+  readonly evidenceMap: readonly PredicateEvidenceEntry[];
+  readonly waiting?: RunProjection["waiting"];
+  readonly continuity: {
+    readonly journalSequence: number;
+    readonly journalRecordHash: string | null;
+    readonly lastMilestone: string;
+    readonly lastMilestoneAt: string;
+    readonly nextLegalAction: string;
+    readonly items: readonly {
+      readonly itemId: string;
+      readonly state: string;
+      readonly lastAttemptOutcome?: string;
+      readonly lastFailure?: { readonly errorCode: string; readonly reason: string };
+      readonly remainingAttempts: number;
+      readonly remainingReplans: number;
+      readonly unmetPredicateIds: readonly string[];
+      readonly repeatedNoChangeAttempts: number;
+    }[];
+  };
   readonly waivers: readonly { readonly gateId: string; readonly reason: string }[];
   readonly worktrees: readonly { readonly itemId: string; readonly path: string }[];
   readonly decisions: number;
@@ -68,8 +91,52 @@ export async function writeReports(
   const receipts = records.flatMap(({ event }) => event.type === "RECEIPT_RECORDED" ? [{
     ...(event.itemId === undefined ? {} : { itemId: event.itemId }),
     receiptId: event.receiptId,
+    ...(event.gateId === undefined ? {} : { gateId: event.gateId }),
+    ...(event.receiptKind === undefined ? {} : { receiptKind: event.receiptKind }),
     status: event.status,
   }] : []);
+  const evidenceMap = await projectPredicateEvidence(runDirectory, charter, projection, records);
+  const lastRecord = records.at(-1);
+  const nextLegalAction = projection.state === "SUCCEEDED"
+    ? charter.delivery === "change-request-ready" ? "/autopilot address review comments or /autopilot wrap up" : "/autopilot wrap up"
+    : projection.state === "STOPPED"
+      ? "Create a sealed successor run."
+      : projection.waiting?.kind === "operator-pause"
+        ? "/autopilot resume"
+        : projection.waiting?.kind === "execution-unknown"
+          ? "Do not launch a replacement; prove or externally cancel the orphaned execution first."
+          : projection.waiting?.kind === "provider-checks"
+          ? "Wait for the bounded provider-check session, or /autopilot resume after the coordinator exits."
+          : projection.state === "RUNNING" || projection.state === "RECONCILING" || projection.state === "VERIFYING"
+            ? "Continue under the owning coordinator, or resume only after lifecycle discovery reports it inactive."
+            : "/autopilot resume";
+  const continuityItems = charter.work.map((item) => {
+    const itemProjection = projection.items[item.id];
+    const attempts = itemProjection?.attempts ?? [];
+    const lastAttempt = attempts.at(-1);
+    const lastFailure = records.findLast(({ event }) => event.type === "ITEM_BLOCKED" && event.itemId === item.id)?.event;
+    let repeatedNoChangeAttempts = 0;
+    for (const attempt of [...attempts].reverse()) {
+      if (attempt.expectedTreeIdentity === undefined || attempt.observedTreeIdentity !== attempt.expectedTreeIdentity) {
+        break;
+      }
+      repeatedNoChangeAttempts += 1;
+    }
+    return {
+      itemId: item.id,
+      state: itemProjection?.state ?? "PENDING",
+      ...(lastAttempt?.outcome === undefined ? {} : { lastAttemptOutcome: lastAttempt.outcome }),
+      ...(lastFailure?.type !== "ITEM_BLOCKED" ? {} : {
+        lastFailure: { errorCode: lastFailure.errorCode, reason: lastFailure.reason },
+      }),
+      remainingAttempts: Math.max(0, charter.limits.maxAttemptsPerItem - consumedAttempts(itemProjection)),
+      remainingReplans: Math.max(0, charter.limits.maxReplans - (itemProjection?.replansUsed ?? 0)),
+      unmetPredicateIds: evidenceMap
+        .filter(({ itemId, outcome }) => itemId === item.id && outcome !== "met")
+        .map(({ predicateId }) => predicateId),
+      repeatedNoChangeAttempts,
+    };
+  });
   const worktrees = await Promise.all(charter.work.map(async (item) => ({
     itemId: item.id,
     path: records.flatMap(({ event }) =>
@@ -89,6 +156,7 @@ export async function writeReports(
         state: itemProjection?.state ?? "PENDING",
         branchName: item.branchName,
         attempts: itemProjection?.attempts.length ?? 0,
+        chargedAttempts: consumedAttempts(itemProjection),
         ...(itemProjection?.subject === undefined ? {} : { subject: itemProjection.subject }),
         ...(itemProjection?.blocker === undefined ? {} : { blocker: itemProjection.blocker }),
       };
@@ -97,6 +165,16 @@ export async function writeReports(
     ...(predicateSummary?.type === "RUN_SUCCEEDED" ? { predicateSummary: predicateSummary.predicateSummary } : {}),
     effects,
     receipts,
+    evidenceMap,
+    ...(projection.waiting === undefined ? {} : { waiting: projection.waiting }),
+    continuity: {
+      journalSequence: lastRecord?.sequence ?? 0,
+      journalRecordHash: lastRecord?.recordHash ?? null,
+      lastMilestone: lastRecord?.event.type ?? "CHARTER_COMPILED",
+      lastMilestoneAt: lastRecord?.event.timestamp ?? charter.createdAt,
+      nextLegalAction,
+      items: continuityItems,
+    },
     waivers: charter.waivers.map(({ gateId, reason }) => ({ gateId, reason })),
     worktrees,
     decisions: records.filter(({ event }) => event.type === "DECISION_RECORDED").length,

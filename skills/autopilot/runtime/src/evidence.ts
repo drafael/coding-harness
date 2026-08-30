@@ -1,6 +1,8 @@
 import { mkdir, readdir, readFile, realpath } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
-import type { EvidenceWaiver, RunCharter, VerificationGate, WorkItem } from "./charter.js";
+import type { ReviewFinding } from "./adapter-protocol.js";
+import type { EvidenceWaiver, ReviewGate, RunCharter, VerificationGate, WorkItem } from "./charter.js";
+import type { PredicateEvaluationReceipt } from "./done.js";
 import { AutopilotError } from "./errors.js";
 import { writeImmutableJson } from "./journal.js";
 import { canonicalJson, sha256 } from "./json.js";
@@ -27,6 +29,8 @@ export interface VerificationReceipt {
   readonly executor: string;
   readonly truncated: boolean;
   readonly waiverReason?: string;
+  readonly reviewVerdict?: "clean" | "findings" | "inconclusive";
+  readonly reviewFindings?: readonly ReviewFinding[];
 }
 
 function gateApplies(gate: VerificationGate, item: WorkItem): boolean {
@@ -166,6 +170,9 @@ export async function executeGate(
       truncated: result.truncated,
     });
   }
+  if (gate.type === "review") {
+    throw new AutopilotError("UNSUPPORTED_CAPABILITY", "review gates require the harness review evaluator");
+  }
   const observedCount = await countLiteral(worktreePath, gate.paths, gate.query);
   return withReceiptId({
     schemaVersion: 1,
@@ -208,7 +215,7 @@ export async function executeItemGates(
   subject: string,
 ): Promise<readonly VerificationReceipt[]> {
   const direct: VerificationReceipt[] = [];
-  for (const gate of charter.gates.filter((candidate) => gateApplies(candidate, item))) {
+  for (const gate of charter.gates.filter((candidate) => candidate.type !== "review" && gateApplies(candidate, item))) {
     direct.push(await executeGate(charter, item, gate, worktreePath, subject));
   }
   return direct.map((receipt) => {
@@ -217,7 +224,7 @@ export async function executeItemGates(
   });
 }
 
-export async function storeReceipt(runDirectory: string, receipt: VerificationReceipt): Promise<string> {
+export async function storeReceipt(runDirectory: string, receipt: VerificationReceipt | PredicateEvaluationReceipt): Promise<string> {
   await mkdir(join(runDirectory, "receipts"), { recursive: true, mode: 0o700 });
   const path = join(runDirectory, "receipts", `${receipt.receiptId}.json`);
   try {
@@ -234,6 +241,46 @@ export async function storeReceipt(runDirectory: string, receipt: VerificationRe
   return path;
 }
 
+export function createReviewReceipt(
+  charter: RunCharter,
+  item: WorkItem,
+  gate: ReviewGate,
+  subject: string,
+  reviewer: string,
+  startedAt: string,
+  completedAt: string,
+  verdict: "clean" | "findings" | "inconclusive",
+  findings: readonly ReviewFinding[],
+  truncated: boolean,
+): VerificationReceipt {
+  const status: ReceiptStatus = truncated || verdict === "inconclusive"
+    ? "UNVERIFIED"
+    : verdict === "clean" && findings.length === 0 ? "PASSED" : "FAILED";
+  return withReceiptId({
+    schemaVersion: 1,
+    runId: charter.runId,
+    itemId: item.id,
+    gateId: gate.id,
+    subject,
+    gateDefinitionHash: sha256(canonicalJson(gate)),
+    environmentIdentity: sha256(canonicalJson({ reviewer })),
+    status,
+    startedAt,
+    completedAt,
+    exitCode: status === "UNVERIFIED" ? null : status === "PASSED" ? 0 : 1,
+    stdout: verdict === "clean" ? "Reviewer reported no findings." : `Reviewer reported ${findings.length} finding(s).`,
+    stderr: "",
+    executor: reviewer,
+    truncated,
+    reviewVerdict: verdict,
+    reviewFindings: findings,
+  });
+}
+
 export function receiptIsFresh(receipt: VerificationReceipt, subject: string, gate: VerificationGate): boolean {
-  return receipt.subject === subject && receipt.gateDefinitionHash === sha256(canonicalJson(gate)) && receipt.environmentIdentity === environmentIdentity(gate);
+  const expectedEnvironment = gate.type === "review"
+    ? sha256(canonicalJson({ reviewer: receipt.executor }))
+    : environmentIdentity(gate);
+  return receipt.subject === subject && receipt.gateDefinitionHash === sha256(canonicalJson(gate))
+    && receipt.environmentIdentity === expectedEnvironment;
 }

@@ -15,6 +15,7 @@ export declare class AutopilotEngine {
     #private;
     constructor(options: EngineOptions);
     requestStop(): Promise<void>;
+    requestPause(): Promise<void>;
     run(): Promise<RunReport>;
 }
 export {};

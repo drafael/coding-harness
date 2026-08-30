@@ -4,6 +4,21 @@ import { expectBoolean, expectInteger, expectLiteral, expectRecord, expectString
 
 export type EventSource = "runtime" | "operator" | "reconciler";
 
+export type WaitingDetails =
+  | { readonly kind: "operator-pause"; readonly requestId: string }
+  | { readonly kind: "execution-unknown"; readonly itemId: string; readonly attemptId: string }
+  | {
+      readonly kind: "provider-checks";
+      readonly provider: "github" | "gitlab";
+      readonly itemId: string;
+      readonly changeRequestId: string;
+      readonly changeRequestUrl: string;
+      readonly subjectCommit: string;
+      readonly baseBranch: string;
+      readonly heartbeatMs: number;
+      readonly deadline: string;
+    };
+
 interface EventBase {
   readonly eventId: string;
   readonly timestamp: string;
@@ -18,7 +33,9 @@ export type LifecycleEvent =
   | (EventBase & { readonly type: "CHARTER_COMPILED" })
   | (EventBase & { readonly type: "RECONCILIATION_STARTED" })
   | (EventBase & { readonly type: "RECONCILIATION_COMPLETED" })
-  | (EventBase & { readonly type: "RUN_WAITING" })
+  | (EventBase & { readonly type: "RUN_PAUSE_REQUESTED"; readonly requestId: string })
+  | (EventBase & { readonly type: "RUN_WAITING"; readonly waiting?: WaitingDetails })
+  | (EventBase & { readonly type: "RUN_WOKEN"; readonly observationId: string })
   | (EventBase & { readonly type: "RUN_RESUMED" })
   | (EventBase & { readonly type: "RUN_VERIFYING" })
   | (EventBase & { readonly type: "RUN_SUCCEEDED"; readonly predicateSummary: string })
@@ -41,10 +58,13 @@ export type LifecycleEvent =
       readonly attemptId: string;
       readonly leaseEpoch: number;
       readonly expectedBaseCommit: string;
+      readonly expectedTreeIdentity?: string;
       readonly expectedRefIdentity?: string;
       readonly expectedConfigurationIdentity?: string;
       readonly expectedHookIdentity?: string;
       readonly expectedHookPath?: string;
+      readonly contextHash?: string;
+      readonly contextJournalSequence?: number;
       readonly deadline: string;
       readonly idempotencyKey: string;
     })
@@ -53,15 +73,48 @@ export type LifecycleEvent =
       readonly itemId: string;
       readonly attemptId: string;
       readonly observedHeadCommit: string;
+      readonly observedTreeIdentity?: string;
       readonly outcome: "completed" | "failed" | "cancelled" | "timed-out" | "stale";
     })
   | (EventBase & { readonly type: "ITEM_VERIFYING"; readonly itemId: string; readonly attemptId: string })
+  | (EventBase & {
+      readonly type: "ATTEMPT_PAUSED";
+      readonly itemId: string;
+      readonly attemptId: string;
+      readonly budgetConsumed?: boolean;
+    })
+  | (EventBase & {
+      readonly type: "ITEM_VERIFIED";
+      readonly itemId: string;
+      readonly attemptId: string;
+      readonly subject: string;
+      readonly headCommit: string;
+      readonly treeIdentity: string;
+      readonly auxiliaryRefIdentity: string;
+      readonly configurationIdentity: string;
+      readonly hookIdentity?: string;
+      readonly hookPath?: string;
+      readonly commitRequired: boolean;
+      readonly receiptIds: readonly string[];
+    })
   | (EventBase & { readonly type: "ITEM_SATISFIED"; readonly itemId: string; readonly attemptId: string; readonly subject: string })
   | (EventBase & { readonly type: "ITEM_BLOCKED"; readonly itemId: string; readonly errorCode: string })
   | (EventBase & { readonly type: "ITEM_ABANDONED"; readonly itemId: string })
   | (EventBase & { readonly type: "EFFECT_INTENDED"; readonly effect: string; readonly idempotencyKey: string; readonly expectedState: string })
-  | (EventBase & { readonly type: "EFFECT_CONFIRMED"; readonly effect: string; readonly idempotencyKey: string; readonly observedState: string })
-  | (EventBase & { readonly type: "RECEIPT_RECORDED"; readonly receiptId: string; readonly status: "PASSED" | "FAILED" | "WAIVED" | "UNVERIFIED" })
+  | (EventBase & {
+      readonly type: "EFFECT_CONFIRMED";
+      readonly effect: string;
+      readonly idempotencyKey: string;
+      readonly observedState: string;
+      readonly repositoryAuxiliaryRefIdentity?: string;
+    })
+  | (EventBase & {
+      readonly type: "RECEIPT_RECORDED";
+      readonly receiptId: string;
+      readonly gateId?: string;
+      readonly receiptKind?: "gate" | "predicate" | "review" | "remote-checks";
+      readonly status: "PASSED" | "FAILED" | "WAIVED" | "UNVERIFIED";
+    })
   | (EventBase & {
       readonly type: "PRE_COMMIT_HOOK_FINISHED";
       readonly itemId: string;
@@ -74,13 +127,40 @@ export type LifecycleEvent =
   | (EventBase & { readonly type: "DECISION_RECORDED"; readonly decision: string; readonly basis: string });
 
 const EVENT_TYPES = [
-  "CHARTER_COMPILED", "RECONCILIATION_STARTED", "RECONCILIATION_COMPLETED", "RUN_WAITING", "RUN_RESUMED", "RUN_VERIFYING",
-  "RUN_SUCCEEDED", "RUN_STOPPED", "WRAP_UP_STARTED", "WORKTREE_ADOPTED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ITEM_SATISFIED",
+  "CHARTER_COMPILED", "RECONCILIATION_STARTED", "RECONCILIATION_COMPLETED", "RUN_PAUSE_REQUESTED", "RUN_WAITING", "RUN_WOKEN",
+  "RUN_RESUMED", "RUN_VERIFYING", "RUN_SUCCEEDED", "RUN_STOPPED", "WRAP_UP_STARTED", "WORKTREE_ADOPTED", "ITEM_READY",
+  "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED", "ITEM_VERIFIED", "ITEM_SATISFIED",
   "ITEM_BLOCKED", "ITEM_ABANDONED", "EFFECT_INTENDED", "EFFECT_CONFIRMED", "RECEIPT_RECORDED", "PRE_COMMIT_HOOK_FINISHED", "DECISION_RECORDED",
 ] as const;
 
 export function newEventId(): string {
   return randomUUID();
+}
+
+function parseWaitingDetails(value: unknown): WaitingDetails {
+  const object = expectRecord(value, "event.waiting");
+  const kind = expectLiteral(object.kind, ["operator-pause", "execution-unknown", "provider-checks"], "event.waiting.kind");
+  if (kind === "operator-pause") {
+    return { kind, requestId: expectString(object.requestId, "event.waiting.requestId") };
+  }
+  if (kind === "execution-unknown") {
+    return {
+      kind,
+      itemId: expectString(object.itemId, "event.waiting.itemId"),
+      attemptId: expectString(object.attemptId, "event.waiting.attemptId"),
+    };
+  }
+  return {
+    kind,
+    provider: expectLiteral(object.provider, ["github", "gitlab"], "event.waiting.provider"),
+    itemId: expectString(object.itemId, "event.waiting.itemId"),
+    changeRequestId: expectString(object.changeRequestId, "event.waiting.changeRequestId"),
+    changeRequestUrl: expectString(object.changeRequestUrl, "event.waiting.changeRequestUrl"),
+    subjectCommit: expectString(object.subjectCommit, "event.waiting.subjectCommit"),
+    baseBranch: expectString(object.baseBranch, "event.waiting.baseBranch"),
+    heartbeatMs: expectInteger(object.heartbeatMs, "event.waiting.heartbeatMs", 1),
+    deadline: expectString(object.deadline, "event.waiting.deadline"),
+  };
 }
 
 export function parseLifecycleEvent(value: unknown): LifecycleEvent {
@@ -96,6 +176,12 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
   };
   const type = expectLiteral(object.type, EVENT_TYPES, "event.type");
   switch (type) {
+    case "RUN_PAUSE_REQUESTED":
+      return { ...base, type, requestId: expectString(object.requestId, "event.requestId") };
+    case "RUN_WAITING":
+      return { ...base, type, ...(object.waiting === undefined ? {} : { waiting: parseWaitingDetails(object.waiting) }) };
+    case "RUN_WOKEN":
+      return { ...base, type, observationId: expectString(object.observationId, "event.observationId") };
     case "RUN_SUCCEEDED":
       return { ...base, type, predicateSummary: expectString(object.predicateSummary, "event.predicateSummary") };
     case "RUN_STOPPED":
@@ -135,6 +221,9 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         attemptId: expectString(object.attemptId, "event.attemptId"),
         leaseEpoch: expectInteger(object.leaseEpoch, "event.leaseEpoch", 1),
         expectedBaseCommit: expectString(object.expectedBaseCommit, "event.expectedBaseCommit"),
+        ...(object.expectedTreeIdentity === undefined ? {} : {
+          expectedTreeIdentity: expectString(object.expectedTreeIdentity, "event.expectedTreeIdentity"),
+        }),
         ...(object.expectedRefIdentity === undefined ? {} : {
           expectedRefIdentity: expectString(object.expectedRefIdentity, "event.expectedRefIdentity"),
         }),
@@ -147,6 +236,12 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         ...(object.expectedHookPath === undefined ? {} : {
           expectedHookPath: expectString(object.expectedHookPath, "event.expectedHookPath"),
         }),
+        ...(object.contextHash === undefined ? {} : {
+          contextHash: expectString(object.contextHash, "event.contextHash"),
+        }),
+        ...(object.contextJournalSequence === undefined ? {} : {
+          contextJournalSequence: expectInteger(object.contextJournalSequence, "event.contextJournalSequence"),
+        }),
         deadline: expectString(object.deadline, "event.deadline"),
         idempotencyKey: expectString(object.idempotencyKey, "event.idempotencyKey"),
       };
@@ -157,10 +252,38 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         itemId: expectString(object.itemId, "event.itemId"),
         attemptId: expectString(object.attemptId, "event.attemptId"),
         observedHeadCommit: expectString(object.observedHeadCommit, "event.observedHeadCommit"),
+        ...(object.observedTreeIdentity === undefined ? {} : {
+          observedTreeIdentity: expectString(object.observedTreeIdentity, "event.observedTreeIdentity"),
+        }),
         outcome: expectLiteral(object.outcome, ["completed", "failed", "cancelled", "timed-out", "stale"], "event.outcome"),
       };
     case "ITEM_VERIFYING":
-      return { ...base, type, itemId: expectString(object.itemId, "event.itemId"), attemptId: expectString(object.attemptId, "event.attemptId") };
+    case "ATTEMPT_PAUSED":
+      return {
+        ...base,
+        type,
+        itemId: expectString(object.itemId, "event.itemId"),
+        attemptId: expectString(object.attemptId, "event.attemptId"),
+        ...(object.budgetConsumed === undefined ? {} : {
+          budgetConsumed: expectBoolean(object.budgetConsumed, "event.budgetConsumed"),
+        }),
+      };
+    case "ITEM_VERIFIED":
+      return {
+        ...base,
+        type,
+        itemId: expectString(object.itemId, "event.itemId"),
+        attemptId: expectString(object.attemptId, "event.attemptId"),
+        subject: expectString(object.subject, "event.subject"),
+        headCommit: expectString(object.headCommit, "event.headCommit"),
+        treeIdentity: expectString(object.treeIdentity, "event.treeIdentity"),
+        auxiliaryRefIdentity: expectString(object.auxiliaryRefIdentity, "event.auxiliaryRefIdentity"),
+        configurationIdentity: expectString(object.configurationIdentity, "event.configurationIdentity"),
+        ...(object.hookIdentity === undefined ? {} : { hookIdentity: expectString(object.hookIdentity, "event.hookIdentity") }),
+        ...(object.hookPath === undefined ? {} : { hookPath: expectString(object.hookPath, "event.hookPath") }),
+        commitRequired: expectBoolean(object.commitRequired, "event.commitRequired"),
+        receiptIds: expectStringArray(object.receiptIds, "event.receiptIds"),
+      };
     case "ITEM_SATISFIED":
       return {
         ...base,
@@ -186,12 +309,22 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         effect: expectString(object.effect, "event.effect"),
         idempotencyKey: expectString(object.idempotencyKey, "event.idempotencyKey"),
         observedState: expectString(object.observedState, "event.observedState"),
+        ...(object.repositoryAuxiliaryRefIdentity === undefined ? {} : {
+          repositoryAuxiliaryRefIdentity: expectString(
+            object.repositoryAuxiliaryRefIdentity,
+            "event.repositoryAuxiliaryRefIdentity",
+          ),
+        }),
       };
     case "RECEIPT_RECORDED":
       return {
         ...base,
         type,
         receiptId: expectString(object.receiptId, "event.receiptId"),
+        ...(object.gateId === undefined ? {} : { gateId: expectString(object.gateId, "event.gateId") }),
+        ...(object.receiptKind === undefined ? {} : {
+          receiptKind: expectLiteral(object.receiptKind, ["gate", "predicate", "review", "remote-checks"], "event.receiptKind"),
+        }),
         status: expectLiteral(object.status, ["PASSED", "FAILED", "WAIVED", "UNVERIFIED"], "event.status"),
       };
     case "PRE_COMMIT_HOOK_FINISHED":
@@ -215,7 +348,6 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
     case "CHARTER_COMPILED":
     case "RECONCILIATION_STARTED":
     case "RECONCILIATION_COMPLETED":
-    case "RUN_WAITING":
     case "RUN_RESUMED":
     case "RUN_VERIFYING":
       return { ...base, type };

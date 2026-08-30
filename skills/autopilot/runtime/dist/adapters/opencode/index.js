@@ -15,7 +15,11 @@ export function createOpenCodeAdapter() {
         assurance: "cooperative",
         maxConcurrency: 1,
         cancellation: true,
-        limitations: ["Auto-approved tool restrictions are cooperative.", "Executions cannot be reattached after restart."],
+        limitations: [
+            "Auto-approved tool restrictions are cooperative.",
+            "Executions cannot be reattached after restart.",
+            "The exact-tree review role is cooperative and has no version-pinned live verification.",
+        ],
         expectsJsonLines: true,
     });
 }

@@ -7,8 +7,12 @@ import {
   type ExecutionObservation,
   type ExecutionRequest,
   type HarnessPort,
+  type ReviewFinding,
+  type ReviewResult,
 } from "./adapter-protocol.js";
+import { renderAttemptContext, renderReviewContext } from "./attempt-context.js";
 import { AutopilotError } from "./errors.js";
+import { isRecord } from "./json.js";
 import { runProcess, type ProcessResult } from "./process.js";
 
 export interface CliHarnessConfiguration {
@@ -41,16 +45,90 @@ function adapterEnvironment(request: ExecutionRequest): NodeJS.ProcessEnv {
   ));
 }
 
-function workerPrompt(request: ExecutionRequest): string {
-  return [
-    "You are a bounded Autopilot implementation worker.",
-    `Objective: ${request.objective}`,
-    `Acceptance: ${request.acceptanceSummary}`,
-    `Writable repository-relative roots: ${request.writableRoots.join(", ")}`,
-    "Edit only those roots. Do not commit, push, create or update change requests, merge, reset, clean, or modify Git refs.",
-    "Run only exploratory checks needed to implement the objective. The Autopilot runtime independently verifies and owns lifecycle decisions.",
-    "When finished, summarize edits and unresolved blockers. Your summary is not completion evidence.",
-  ].join("\n\n");
+function executionPrompt(request: ExecutionRequest): string {
+  return request.role === "review"
+    ? renderReviewContext(request.context, request.reviewFocus ?? "Review the exact subject for actionable correctness defects.")
+    : renderAttemptContext(request.context);
+}
+
+function stringValues(value: unknown): readonly string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(stringValues);
+  }
+  if (isRecord(value)) {
+    return Object.values(value).flatMap(stringValues);
+  }
+  return [];
+}
+
+function parseFinding(value: unknown): ReviewFinding | undefined {
+  if (!isRecord(value) || typeof value.message !== "string" || value.message.length === 0) {
+    return undefined;
+  }
+  if (value.path !== undefined && (typeof value.path !== "string" || value.path.length === 0)) {
+    return undefined;
+  }
+  if (value.line !== undefined && (!Number.isSafeInteger(value.line) || (value.line as number) < 1)) {
+    return undefined;
+  }
+  if (value.severity !== undefined && (typeof value.severity !== "string" || value.severity.length === 0)) {
+    return undefined;
+  }
+  return {
+    ...(value.path === undefined ? {} : { path: value.path as string }),
+    ...(value.line === undefined ? {} : { line: value.line as number }),
+    ...(value.severity === undefined ? {} : { severity: value.severity as string }),
+    message: value.message,
+  };
+}
+
+function normalizeReviewResult(value: unknown): ReviewResult | undefined {
+  if (!isRecord(value) || !Array.isArray(value.findings)
+    || (value.verdict !== "clean" && value.verdict !== "findings" && value.verdict !== "inconclusive")) {
+    return undefined;
+  }
+  const findings = value.findings.map(parseFinding);
+  if (findings.some((finding) => finding === undefined)
+    || (value.verdict === "clean" && findings.length > 0)
+    || (value.verdict === "findings" && findings.length === 0)) {
+    return undefined;
+  }
+  return { verdict: value.verdict, findings: findings as ReviewFinding[] };
+}
+
+export function parseReviewResult(stdout: string): ReviewResult | undefined {
+  const marker = "AUTOPILOT_REVIEW_RESULT:";
+  const candidates: string[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.length === 0) {
+      continue;
+    }
+    let values: readonly string[] = [line];
+    try {
+      values = stringValues(JSON.parse(line) as unknown);
+    } catch {
+      // Some adapters may return a plain final response rather than a JSON event.
+    }
+    values.forEach((value) => {
+      const position = value.indexOf(marker);
+      if (position >= 0) {
+        candidates.push(value.slice(position + marker.length).trim());
+      }
+    });
+  }
+  const parsed = candidates.flatMap((candidate): readonly ReviewResult[] => {
+    try {
+      const result = normalizeReviewResult(JSON.parse(candidate) as unknown);
+      return result === undefined ? [] : [result];
+    } catch {
+      return [];
+    }
+  });
+  const unique = new Map(parsed.map((result) => [JSON.stringify(result), result]));
+  return unique.size === 1 ? [...unique.values()][0] : undefined;
 }
 
 function redactSecrets(text: string): string {
@@ -112,7 +190,10 @@ export class CliHarnessAdapter implements HarnessPort {
       cancellation: this.#configuration.cancellation,
       restartReattachment: false,
       restrictions: this.#configuration.assurance,
-      limitations: this.#configuration.limitations,
+      limitations: [
+        ...this.#configuration.limitations,
+        "Independent review does not require a different model or provider from implementation.",
+      ],
     };
     const normalized = parseAdapterMessage(JSON.stringify({ protocolVersion: 1, type: "capabilities", manifest }), 1_048_576);
     if (normalized.type !== "capabilities") {
@@ -131,7 +212,7 @@ export class CliHarnessAdapter implements HarnessPort {
     const timeoutMs = Math.max(1, Date.parse(request.deadline) - Date.now());
     const promise = runProcess({
       executable: this.#configuration.executable,
-      arguments: this.#configuration.buildArguments(request, workerPrompt(request)),
+      arguments: this.#configuration.buildArguments(request, executionPrompt(request)),
       cwd: request.worktreePath,
       environment: adapterEnvironment(request),
       timeoutMs,
@@ -158,6 +239,14 @@ export class CliHarnessAdapter implements HarnessPort {
       if (terminal.type !== "terminal") {
         throw new AutopilotError("ADAPTER_MALFORMED", "adapter terminal normalization failed");
       }
+      const parsedReviewResult = request.role === "review" ? parseReviewResult(result.stdout) : undefined;
+      const reviewResult = parsedReviewResult === undefined ? undefined : {
+        ...parsedReviewResult,
+        findings: parsedReviewResult.findings.map((finding) => ({
+          ...finding,
+          message: redactSecrets(finding.message),
+        })),
+      };
       return {
         protocolVersion: 1,
         adapterExecutionId,
@@ -167,6 +256,7 @@ export class CliHarnessAdapter implements HarnessPort {
         stdout: redactSecrets(result.stdout),
         stderr: redactSecrets(malformed === undefined ? result.stderr : `${result.stderr}\n${malformed}`.trim()),
         truncated: result.truncated,
+        ...(reviewResult === undefined ? {} : { reviewResult }),
       };
     }).catch((error: unknown): ExecutionObservation => ({
       protocolVersion: 1,

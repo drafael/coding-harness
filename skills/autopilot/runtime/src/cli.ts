@@ -14,11 +14,11 @@ import { AutopilotError } from "./errors.js";
 import { newEventId } from "./events.js";
 import { appendEvent, readJournal, repairTruncatedJournal, writeImmutableJson } from "./journal.js";
 import { isRecord } from "./json.js";
-import { acquireBranchOwnershipLock, acquireRunLock, requestRunStop, type RunLock } from "./lock.js";
+import { acquireBranchOwnershipLock, acquireRunLock, requestRunPause, requestRunStop, type RunLock } from "./lock.js";
 import { loadProjection, rebuildProjection, writeSnapshot } from "./projection.js";
 import { reduce } from "./reducer.js";
 import { branchExists, resolveCommit, validateBaseCommit, validateBranchName } from "./repository.js";
-import { writeReports } from "./report.js";
+import { writeReports, type RunReport } from "./report.js";
 import { observeReviewFeedback, type ReviewFeedbackSelection } from "./review-feedback.js";
 import {
   discoverLifecycleRuns,
@@ -46,6 +46,7 @@ Usage:
   autopilot [--state-dir <path>] [--json] start <charter-file>
   autopilot [--state-dir <path>] [--json] status [run-id]
   autopilot [--state-dir <path>] [--json] [--repair-journal] resume [run-id]
+  autopilot [--state-dir <path>] [--json] pause [run-id]
   autopilot [--state-dir <path>] [--json] stop [run-id]
   autopilot [--state-dir <path>] [--json] review-feedback [run-id]
   autopilot [--state-dir <path>] [--json] [--handoff] wrap-up [run-id]
@@ -64,6 +65,27 @@ function output(value: unknown, json: boolean): void {
   } else {
     process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
   }
+}
+
+function formatStatusReport(report: RunReport): string {
+  const items = report.continuity.items.map((item) => {
+    const unmet = item.unmetPredicateIds.length === 0
+      ? "none"
+      : item.unmetPredicateIds.map((predicateId) => predicateId.slice(0, 12)).join(", ");
+    return `- ${item.itemId}: ${item.state}; attempts left ${item.remainingAttempts}; replans left ${item.remainingReplans}; unmet ${unmet}`;
+  });
+  return [
+    `Autopilot ${report.runId.slice(0, 12)}: ${report.state}`,
+    `Last milestone: ${report.continuity.lastMilestone} at ${report.continuity.lastMilestoneAt}`,
+    ...items,
+    `Next: ${report.continuity.nextLegalAction}`,
+    `Assurance: ${report.assurance}`,
+  ].join("\n");
+}
+
+function isRunReport(value: unknown): value is RunReport {
+  return isRecord(value) && value.schemaVersion === 1 && typeof value.runId === "string"
+    && typeof value.state === "string" && isRecord(value.continuity) && Array.isArray(value.evidenceMap);
 }
 
 async function loadRun(runId: string, stateDirectory: string | undefined, repair: boolean): Promise<{
@@ -112,14 +134,17 @@ async function runEngine(engine: AutopilotEngine, lock: RunLock, runId: string):
     checkingControlRequest = true;
     pendingControlCheck = (async () => {
       try {
-        if (await lock.stopRequested(runId)) {
+        const action = await lock.controlRequested(runId);
+        if (action === "stop") {
           controlMonitorStopped = true;
           await engine.requestStop();
+        } else if (action === "pause") {
+          await engine.requestPause();
         }
       } catch (error) {
         if (!controlMonitorFailureReported) {
           controlMonitorFailureReported = true;
-          process.stderr.write(`Autopilot could not read the stop request: ${error instanceof Error ? error.message : String(error)}\n`);
+          process.stderr.write(`Autopilot could not read the control request: ${error instanceof Error ? error.message : String(error)}\n`);
         }
       } finally {
         checkingControlRequest = false;
@@ -406,6 +431,60 @@ function formatWrapUpDiscovery(discovery: WrapUpDiscovery, options: CliOptions):
   return ["Multiple wrap-up candidates; no cleanup performed.", "run-id\tcompleted\tmode\tprovider\titems", ...rows, "", ...commands].join("\n");
 }
 
+async function pause(runId: string | undefined, options: CliOptions): Promise<unknown> {
+  const selected = await selectLifecycleRun("pause", runId, options);
+  if (typeof selected !== "string") {
+    return selected;
+  }
+  const stateRoot = await resolveStateRoot(process.cwd(), options.stateDir);
+  const location = await locateStoredRun(stateRoot, selected);
+  let lock: RunLock;
+  try {
+    lock = await acquireRunLock(join(location.directory, "run.lock"));
+  } catch (error) {
+    if (!(error instanceof AutopilotError) || error.code !== "LOCK_HELD") {
+      throw error;
+    }
+    const request = await requestRunPause(join(location.directory, "run.lock"), selected);
+    if (request.status === "requested") {
+      return {
+        kind: "pause-requested",
+        runId: selected,
+        owner: { host: request.owner.host, pid: request.owner.pid, startedAt: request.owner.startedAt },
+      };
+    }
+    lock = await acquireRunLock(join(location.directory, "run.lock"));
+  }
+  try {
+    const run = await loadRun(selected, options.stateDir, false);
+    const projection = rebuildProjection(run.charter, run.journal.records);
+    if (projection.state === "SUCCEEDED" || projection.state === "STOPPED" || projection.waiting?.kind === "operator-pause") {
+      const metadata = await loadReportMetadata(run.directory);
+      return await writeReports(
+        run.directory,
+        run.charter,
+        projection,
+        run.journal.records,
+        metadata.assurance,
+        metadata.unverifiedBoundaries,
+        false,
+      );
+    }
+    const engine = new AutopilotEngine({
+      stateRoot: run.stateRoot,
+      runDirectory: run.directory,
+      charter: run.charter,
+      adapter: createAdapter(run.charter.harnessAdapter),
+      records: run.journal.records,
+      projection,
+    });
+    await engine.requestPause();
+    return await runEngine(engine, lock, run.charter.runId);
+  } finally {
+    await lock.release();
+  }
+}
+
 async function stop(runId: string | undefined, options: CliOptions): Promise<unknown> {
   const selected = await selectLifecycleRun("stop", runId, options);
   if (typeof selected !== "string") {
@@ -512,6 +591,9 @@ export async function main(arguments_: readonly string[] = process.argv.slice(2)
     case "resume":
       result = await resume(argument, options);
       break;
+    case "pause":
+      result = await pause(argument, options);
+      break;
     case "stop":
       result = await stop(argument, options);
       break;
@@ -532,6 +614,8 @@ export async function main(arguments_: readonly string[] = process.argv.slice(2)
     }
   } else if (!options.json && isRecord(result) && result.kind === "review-feedback-selection") {
     output(formatReviewFeedbackSelection(result as unknown as ReviewFeedbackSelection), false);
+  } else if (!options.json && command === "status" && isRunReport(result)) {
+    output(formatStatusReport(result), false);
   } else {
     output(result, options.json);
   }

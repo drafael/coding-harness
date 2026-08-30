@@ -7,7 +7,10 @@ export function initialProjection(charter) {
         runId: charter.runId,
         charterHash: charter.charterHash,
         state: "COMPILED",
-        items: Object.fromEntries(charter.work.map(({ id }) => [id, { itemId: id, state: "PENDING", attempts: [] }])),
+        items: Object.fromEntries(charter.work.map(({ id }) => [
+            id,
+            { itemId: id, state: "PENDING", attempts: [], replansUsed: 0 },
+        ])),
         appliedEventIds: new Set(),
         lastReason: "Charter sealed",
     };
@@ -36,11 +39,21 @@ function assertRunTransition(current, event) {
                 throw new AutopilotError("ILLEGAL_TRANSITION", `${event.type} requires RECONCILING, received ${current}`);
             }
             return "RUNNING";
+        case "RUN_PAUSE_REQUESTED":
+            return current;
         case "RUN_WAITING":
-            if (current !== "RUNNING") {
-                throw new AutopilotError("ILLEGAL_TRANSITION", `${event.type} requires RUNNING, received ${current}`);
+            if (event.waiting?.kind === "operator-pause") {
+                return "WAITING";
+            }
+            if (current !== "RUNNING" && current !== "WAITING") {
+                throw new AutopilotError("ILLEGAL_TRANSITION", `${event.type} requires RUNNING or WAITING, received ${current}`);
             }
             return "WAITING";
+        case "RUN_WOKEN":
+            if (current !== "WAITING") {
+                throw new AutopilotError("ILLEGAL_TRANSITION", `${event.type} requires WAITING, received ${current}`);
+            }
+            return "RUNNING";
         case "RUN_VERIFYING":
             if (current !== "RUNNING") {
                 throw new AutopilotError("ILLEGAL_TRANSITION", `${event.type} requires RUNNING, received ${current}`);
@@ -62,6 +75,10 @@ function transitionItem(item, event) {
         throw new AutopilotError("ILLEGAL_TRANSITION", `terminal item state ${item.state} cannot accept ${event.type}`);
     }
     switch (event.type) {
+        case "DECISION_RECORDED":
+            return event.decision === "Replan pending implementation"
+                ? { ...item, replansUsed: item.replansUsed + 1 }
+                : item;
         case "ITEM_READY":
             if (item.state !== "PENDING" && item.state !== "BLOCKED") {
                 throw new AutopilotError("ILLEGAL_TRANSITION", `ITEM_READY cannot follow ${item.state}`);
@@ -80,12 +97,15 @@ function transitionItem(item, event) {
                         attemptId: event.attemptId,
                         leaseEpoch: event.leaseEpoch,
                         expectedBaseCommit: event.expectedBaseCommit,
+                        ...(event.expectedTreeIdentity === undefined ? {} : { expectedTreeIdentity: event.expectedTreeIdentity }),
                         ...(event.expectedRefIdentity === undefined ? {} : { expectedRefIdentity: event.expectedRefIdentity }),
                         ...(event.expectedConfigurationIdentity === undefined ? {} : {
                             expectedConfigurationIdentity: event.expectedConfigurationIdentity,
                         }),
                         ...(event.expectedHookIdentity === undefined ? {} : { expectedHookIdentity: event.expectedHookIdentity }),
                         ...(event.expectedHookPath === undefined ? {} : { expectedHookPath: event.expectedHookPath }),
+                        ...(event.contextHash === undefined ? {} : { contextHash: event.contextHash }),
+                        ...(event.contextJournalSequence === undefined ? {} : { contextJournalSequence: event.contextJournalSequence }),
                         deadline: event.deadline,
                         idempotencyKey: event.idempotencyKey,
                     },
@@ -102,7 +122,12 @@ function transitionItem(item, event) {
             return {
                 ...item,
                 attempts: item.attempts.map((attempt) => attempt.attemptId === event.attemptId
-                    ? { ...attempt, outcome: event.outcome, observedHeadCommit: event.observedHeadCommit }
+                    ? {
+                        ...attempt,
+                        outcome: event.outcome,
+                        observedHeadCommit: event.observedHeadCommit,
+                        ...(event.observedTreeIdentity === undefined ? {} : { observedTreeIdentity: event.observedTreeIdentity }),
+                    }
                     : attempt),
             };
         }
@@ -111,6 +136,40 @@ function transitionItem(item, event) {
                 throw new AutopilotError("ILLEGAL_TRANSITION", `ITEM_VERIFYING has no current attempt for ${item.itemId}`);
             }
             return { ...item, state: "VERIFYING" };
+        case "ATTEMPT_PAUSED": {
+            const pausedAttempt = item.attempts.at(-1);
+            if (item.state !== "ACTIVE" || pausedAttempt?.attemptId !== event.attemptId
+                || pausedAttempt.outcome === undefined
+                || (event.budgetConsumed !== true && pausedAttempt.outcome !== "cancelled")) {
+                throw new AutopilotError("ILLEGAL_TRANSITION", `ATTEMPT_PAUSED has no pause-cancelled active attempt for ${item.itemId}`);
+            }
+            return {
+                ...item,
+                state: "READY",
+                attempts: item.attempts.map((attempt) => attempt.attemptId === event.attemptId
+                    ? { ...attempt, budgetConsumed: event.budgetConsumed === true }
+                    : attempt),
+            };
+        }
+        case "ITEM_VERIFIED":
+            if (item.state !== "VERIFYING" || item.attempts.at(-1)?.attemptId !== event.attemptId) {
+                throw new AutopilotError("ILLEGAL_TRANSITION", `ITEM_VERIFIED has no verifying attempt for ${item.itemId}`);
+            }
+            return {
+                ...item,
+                verified: {
+                    attemptId: event.attemptId,
+                    subject: event.subject,
+                    headCommit: event.headCommit,
+                    treeIdentity: event.treeIdentity,
+                    auxiliaryRefIdentity: event.auxiliaryRefIdentity,
+                    configurationIdentity: event.configurationIdentity,
+                    ...(event.hookIdentity === undefined ? {} : { hookIdentity: event.hookIdentity }),
+                    ...(event.hookPath === undefined ? {} : { hookPath: event.hookPath }),
+                    commitRequired: event.commitRequired,
+                    receiptIds: event.receiptIds,
+                },
+            };
         case "ITEM_SATISFIED":
             if (item.state !== "VERIFYING" || item.attempts.at(-1)?.attemptId !== event.attemptId) {
                 throw new AutopilotError("ILLEGAL_TRANSITION", `ITEM_SATISFIED has no verifying attempt for ${item.itemId}`);
@@ -131,10 +190,14 @@ export function reduce(projection, event) {
     if (projection.appliedEventIds.has(event.eventId)) {
         return projection;
     }
+    if (event.type === "RUN_SUCCEEDED" && projection.pauseRequestId !== undefined) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", "RUN_SUCCEEDED cannot overtake an accepted pause request");
+    }
     const nextState = assertRunTransition(projection.state, event);
     let items = projection.items;
     if (event.itemId !== undefined && [
-        "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ITEM_SATISFIED", "ITEM_BLOCKED", "ITEM_ABANDONED",
+        "DECISION_RECORDED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED",
+        "ITEM_VERIFIED", "ITEM_SATISFIED", "ITEM_BLOCKED", "ITEM_ABANDONED",
     ].includes(event.type)) {
         const item = projection.items[event.itemId];
         if (item === undefined) {
@@ -145,12 +208,24 @@ export function reduce(projection, event) {
     const appliedEventIds = new Set(projection.appliedEventIds);
     appliedEventIds.add(event.eventId);
     const stop = event.type === "RUN_STOPPED" ? { errorCode: event.errorCode, remediation: event.remediation } : projection.stop;
+    const pauseRequestId = event.type === "RUN_PAUSE_REQUESTED"
+        ? event.requestId
+        : event.type === "RECONCILIATION_COMPLETED" || event.type === "RUN_WOKEN" ? undefined : projection.pauseRequestId;
+    const waiting = event.type === "RUN_WAITING"
+        ? event.waiting ?? { kind: "legacy" }
+        : event.type === "RECONCILIATION_STARTED" || event.type === "RUN_WOKEN" ? undefined : projection.waiting;
+    const { pauseRequestId: _pauseRequestId, waiting: _waiting, ...projectionWithoutWaiting } = projection;
     return {
-        ...projection,
+        ...projectionWithoutWaiting,
         state: nextState,
         items,
         appliedEventIds,
         lastReason: event.reason,
+        ...(pauseRequestId === undefined ? {} : { pauseRequestId }),
+        ...(waiting === undefined ? {} : { waiting }),
         ...(stop === undefined ? {} : { stop }),
     };
+}
+export function consumedAttempts(item) {
+    return item?.attempts.filter(({ budgetConsumed }) => budgetConsumed !== false).length ?? 0;
 }

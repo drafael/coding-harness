@@ -1,8 +1,40 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AttemptContext } from "../src/adapter-protocol.js";
 import type { ProposedRunCharter, RunMode } from "../src/charter.js";
 import { runChecked } from "../src/process.js";
+
+export function attemptContextFixture(attemptId = "attempt"): AttemptContext {
+  return {
+    schemaVersion: 1,
+    charterHash: "charter-hash",
+    sourceJournalSequence: 1,
+    sourceJournalRecordHash: "record-hash",
+    runId: "run",
+    itemId: "item",
+    attemptId,
+    leaseEpoch: 1,
+    expectedBaseCommit: "base-commit",
+    currentTreeIdentity: "tree-identity",
+    objective: "test",
+    predicates: [{ type: "path-present", path: "result.txt" }],
+    gates: [],
+    dependencyCommits: [],
+    evidence: [],
+    priorFailures: [],
+    reviewFindings: [],
+    remainingAttempts: 1,
+    remainingReplans: 0,
+    attemptTimeoutMs: 10_000,
+    idleTimeoutMs: 5_000,
+    assumptions: [],
+    writableRoots: ["."],
+    grants: [],
+    forbiddenEffects: ["commit"],
+    requiredResult: ["summarize changed files"],
+  };
+}
 
 export async function createRepository(): Promise<{ readonly root: string; readonly baseCommit: string }> {
   const root = await mkdtemp(join(tmpdir(), "autopilot-test-repo-"));

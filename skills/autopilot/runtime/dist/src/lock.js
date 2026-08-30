@@ -14,8 +14,8 @@ function processExists(pid) {
         return error instanceof Error && "code" in error && error.code === "EPERM";
     }
 }
-function stopRequestPath(path, ownerToken) {
-    return join(path, `stop-${sha256(ownerToken)}.json`);
+function controlRequestPath(path, ownerToken, action) {
+    return join(path, `${action}-${sha256(ownerToken)}.json`);
 }
 export function lockOwnerIsActive(owner) {
     return owner.host !== hostname() || processExists(owner.pid);
@@ -34,14 +34,15 @@ export async function readLockOwner(path) {
         return undefined;
     }
 }
-export async function requestRunStop(path, runId) {
+export async function requestRunControl(path, runId, action) {
     const owner = await readLockOwner(path);
     if (owner === undefined || !lockOwnerIsActive(owner)) {
         return { status: "unowned" };
     }
     try {
-        await writeJsonAtomic(stopRequestPath(path, owner.token), {
+        await writeJsonAtomic(controlRequestPath(path, owner.token, action), {
             schemaVersion: 1,
+            action,
             runId,
             ownerToken: owner.token,
             requestedAt: new Date().toISOString(),
@@ -55,6 +56,12 @@ export async function requestRunStop(path, runId) {
     }
     const current = await readLockOwner(path);
     return current?.token === owner.token ? { status: "requested", owner } : { status: "unowned" };
+}
+export async function requestRunStop(path, runId) {
+    return await requestRunControl(path, runId, "stop");
+}
+export async function requestRunPause(path, runId) {
+    return await requestRunControl(path, runId, "pause");
 }
 async function createLock(path, owner) {
     await mkdir(path, { mode: 0o700 });
@@ -99,9 +106,30 @@ export async function acquireRunLock(path, resource = "run") {
             }
             ownedPath = nextPath;
         },
+        async controlRequested(runId) {
+            const requested = async (action) => {
+                try {
+                    const object = expectRecord(JSON.parse(await readFile(controlRequestPath(ownedPath, owner.token, action), "utf8")), `${action} request`);
+                    return object.schemaVersion === 1
+                        && (object.action === undefined || expectString(object.action, `${action} request.action`) === action)
+                        && expectString(object.runId, `${action} request.runId`) === runId
+                        && expectString(object.ownerToken, `${action} request.ownerToken`) === owner.token;
+                }
+                catch (error) {
+                    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+                        return false;
+                    }
+                    throw error;
+                }
+            };
+            if (await requested("stop")) {
+                return "stop";
+            }
+            return await requested("pause") ? "pause" : undefined;
+        },
         async stopRequested(runId) {
             try {
-                const object = expectRecord(JSON.parse(await readFile(stopRequestPath(ownedPath, owner.token), "utf8")), "stop request");
+                const object = expectRecord(JSON.parse(await readFile(controlRequestPath(ownedPath, owner.token, "stop"), "utf8")), "stop request");
                 return object.schemaVersion === 1
                     && expectString(object.runId, "stop request.runId") === runId
                     && expectString(object.ownerToken, "stop request.ownerToken") === owner.token;

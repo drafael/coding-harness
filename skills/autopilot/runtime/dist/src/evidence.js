@@ -125,6 +125,9 @@ export async function executeGate(charter, item, gate, worktreePath, subject) {
             truncated: result.truncated,
         });
     }
+    if (gate.type === "review") {
+        throw new AutopilotError("UNSUPPORTED_CAPABILITY", "review gates require the harness review evaluator");
+    }
     const observedCount = await countLiteral(worktreePath, gate.paths, gate.query);
     return withReceiptId({
         schemaVersion: 1,
@@ -156,7 +159,7 @@ function applyWaiver(receipt, waiver, receipts) {
 }
 export async function executeItemGates(charter, item, worktreePath, subject) {
     const direct = [];
-    for (const gate of charter.gates.filter((candidate) => gateApplies(candidate, item))) {
+    for (const gate of charter.gates.filter((candidate) => candidate.type !== "review" && gateApplies(candidate, item))) {
         direct.push(await executeGate(charter, item, gate, worktreePath, subject));
     }
     return direct.map((receipt) => {
@@ -181,6 +184,34 @@ export async function storeReceipt(runDirectory, receipt) {
     }
     return path;
 }
+export function createReviewReceipt(charter, item, gate, subject, reviewer, startedAt, completedAt, verdict, findings, truncated) {
+    const status = truncated || verdict === "inconclusive"
+        ? "UNVERIFIED"
+        : verdict === "clean" && findings.length === 0 ? "PASSED" : "FAILED";
+    return withReceiptId({
+        schemaVersion: 1,
+        runId: charter.runId,
+        itemId: item.id,
+        gateId: gate.id,
+        subject,
+        gateDefinitionHash: sha256(canonicalJson(gate)),
+        environmentIdentity: sha256(canonicalJson({ reviewer })),
+        status,
+        startedAt,
+        completedAt,
+        exitCode: status === "UNVERIFIED" ? null : status === "PASSED" ? 0 : 1,
+        stdout: verdict === "clean" ? "Reviewer reported no findings." : `Reviewer reported ${findings.length} finding(s).`,
+        stderr: "",
+        executor: reviewer,
+        truncated,
+        reviewVerdict: verdict,
+        reviewFindings: findings,
+    });
+}
 export function receiptIsFresh(receipt, subject, gate) {
-    return receipt.subject === subject && receipt.gateDefinitionHash === sha256(canonicalJson(gate)) && receipt.environmentIdentity === environmentIdentity(gate);
+    const expectedEnvironment = gate.type === "review"
+        ? sha256(canonicalJson({ reviewer: receipt.executor }))
+        : environmentIdentity(gate);
+    return receipt.subject === subject && receipt.gateDefinitionHash === sha256(canonicalJson(gate))
+        && receipt.environmentIdentity === expectedEnvironment;
 }

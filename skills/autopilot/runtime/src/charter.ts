@@ -63,7 +63,14 @@ export interface SearchGate {
   readonly appliesTo: readonly string[];
 }
 
-export type VerificationGate = CommandGate | SearchGate;
+export interface ReviewGate {
+  readonly id: string;
+  readonly type: "review";
+  readonly focus: string;
+  readonly appliesTo: readonly string[];
+}
+
+export type VerificationGate = CommandGate | SearchGate | ReviewGate;
 
 export type Predicate =
   | { readonly type: "gate-passed"; readonly gateId: string }
@@ -104,6 +111,11 @@ export interface DeliveryTarget {
   readonly provider: "github" | "gitlab";
   readonly remote: string;
   readonly baseBranch: string;
+}
+
+export interface ProviderCheckWaitPolicy {
+  readonly heartbeatMs: number;
+  readonly timeoutMs: number;
 }
 
 export interface AmendmentReference {
@@ -151,6 +163,7 @@ export interface ProposedRunCharter {
   readonly work: readonly WorkItem[];
   readonly delivery: DeliveryMode;
   readonly deliveryTarget?: DeliveryTarget;
+  readonly providerCheckWait?: ProviderCheckWaitPolicy;
   readonly grants: readonly CapabilityGrant[];
   readonly gates: readonly VerificationGate[];
   readonly waivers: readonly EvidenceWaiver[];
@@ -263,7 +276,7 @@ function parseWorkItem(value: unknown, path: string): WorkItem {
 
 function parseGate(value: unknown, path: string): VerificationGate {
   const object = expectRecord(value, path);
-  const type = expectLiteral(object.type, ["command", "search"], `${path}.type`);
+  const type = expectLiteral(object.type, ["command", "search", "review"], `${path}.type`);
   if (type === "command") {
     assertKnownKeys(object, ["id", "type", "executable", "arguments", "workingDirectory", "environmentNames", "appliesTo"], path);
     return {
@@ -276,13 +289,22 @@ function parseGate(value: unknown, path: string): VerificationGate {
       appliesTo: expectStringArray(object.appliesTo, `${path}.appliesTo`),
     };
   }
-  assertKnownKeys(object, ["id", "type", "query", "paths", "expectedCount", "appliesTo"], path);
+  if (type === "search") {
+    assertKnownKeys(object, ["id", "type", "query", "paths", "expectedCount", "appliesTo"], path);
+    return {
+      id: expectString(object.id, `${path}.id`),
+      type,
+      query: expectString(object.query, `${path}.query`),
+      paths: expectStringArray(object.paths, `${path}.paths`),
+      expectedCount: expectInteger(object.expectedCount, `${path}.expectedCount`),
+      appliesTo: expectStringArray(object.appliesTo, `${path}.appliesTo`),
+    };
+  }
+  assertKnownKeys(object, ["id", "type", "focus", "appliesTo"], path);
   return {
     id: expectString(object.id, `${path}.id`),
     type,
-    query: expectString(object.query, `${path}.query`),
-    paths: expectStringArray(object.paths, `${path}.paths`),
-    expectedCount: expectInteger(object.expectedCount, `${path}.expectedCount`),
+    focus: expectString(object.focus, `${path}.focus`),
     appliesTo: expectStringArray(object.appliesTo, `${path}.appliesTo`),
   };
 }
@@ -320,6 +342,15 @@ function parseRepository(value: unknown, path: string): RepositorySpec {
     baseRef: expectString(object.baseRef, `${path}.baseRef`),
     baseCommit: expectString(object.baseCommit, `${path}.baseCommit`),
     writableRoots: expectStringArray(object.writableRoots, `${path}.writableRoots`),
+  };
+}
+
+function parseProviderCheckWait(value: unknown, path: string): ProviderCheckWaitPolicy {
+  const object = expectRecord(value, path);
+  assertKnownKeys(object, ["heartbeatMs", "timeoutMs"], path);
+  return {
+    heartbeatMs: expectInteger(object.heartbeatMs, `${path}.heartbeatMs`, 1),
+    timeoutMs: expectInteger(object.timeoutMs, `${path}.timeoutMs`, 1),
   };
 }
 
@@ -368,8 +399,8 @@ function parseResolutionSources(value: unknown, path: string): Readonly<Record<s
 function parseProposed(value: unknown, allowHash: boolean): ProposedRunCharter {
   const object = expectRecord(value, "charter");
   const keys = [
-    "schemaVersion", "runId", "sourceText", "createdAt", "repository", "harnessAdapter", "mode", "work", "delivery", "deliveryTarget", "grants", "gates",
-    "waivers", "limits", "assumptions", "minimumAssurance", "resolutionSources", "predecessorRunId", "amends", "reviewFeedback", "commitPolicy",
+    "schemaVersion", "runId", "sourceText", "createdAt", "repository", "harnessAdapter", "mode", "work", "delivery", "deliveryTarget",
+    "providerCheckWait", "grants", "gates", "waivers", "limits", "assumptions", "minimumAssurance", "resolutionSources", "predecessorRunId", "amends", "reviewFeedback", "commitPolicy",
   ];
   assertKnownKeys(object, allowHash ? [...keys, "charterHash"] : keys, "charter");
   if (object.schemaVersion !== 1) {
@@ -389,6 +420,9 @@ function parseProposed(value: unknown, allowHash: boolean): ProposedRunCharter {
     work: object.work.map((entry, index) => parseWorkItem(entry, `charter.work[${index}]`)),
     delivery: expectLiteral(object.delivery, ["local-commits", "change-request-ready", "merge-verified"], "charter.delivery"),
     ...(object.deliveryTarget === undefined ? {} : { deliveryTarget: parseDeliveryTarget(object.deliveryTarget, "charter.deliveryTarget") }),
+    ...(object.providerCheckWait === undefined ? {} : {
+      providerCheckWait: parseProviderCheckWait(object.providerCheckWait, "charter.providerCheckWait"),
+    }),
     grants: object.grants.map((entry, index) => parseGrant(entry, `charter.grants[${index}]`)),
     gates: object.gates.map((entry, index) => parseGate(entry, `charter.gates[${index}]`)),
     waivers: object.waivers.map((entry, index) => parseWaiver(entry, `charter.waivers[${index}]`)),
@@ -420,6 +454,13 @@ function relativeRootWithin(candidate: string, root: string): boolean {
 }
 
 function validateCharterSemantics(charter: ProposedRunCharter): void {
+  if (charter.providerCheckWait !== undefined
+    && (charter.delivery !== "merge-verified" || charter.providerCheckWait.heartbeatMs > charter.providerCheckWait.timeoutMs)) {
+    throw new AutopilotError(
+      "CHARTER_INVALID",
+      "providerCheckWait requires merge-verified delivery and heartbeatMs must not exceed timeoutMs",
+    );
+  }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(charter.runId)) {
     throw new AutopilotError("CHARTER_INVALID", "runId must be a safe path component of at most 128 characters");
   }
@@ -477,7 +518,7 @@ function validateCharterSemantics(charter: ProposedRunCharter): void {
   for (const gate of charter.gates) {
     if (gate.type === "command") {
       validateRelativeRoots([gate.workingDirectory], `gate ${gate.id} workingDirectory`);
-    } else {
+    } else if (gate.type === "search") {
       validateRelativeRoots(gate.paths, `gate ${gate.id} paths`);
     }
     if (gate.appliesTo.some((id) => !itemIds.has(id))) {
@@ -503,6 +544,9 @@ function validateCharterSemantics(charter: ProposedRunCharter): void {
   for (const waiver of charter.waivers) {
     if (!gateIds.has(waiver.gateId) || waiver.alternativeGateIds.length === 0 || waiver.alternativeGateIds.some((id) => !gateIds.has(id))) {
       throw new AutopilotError("CHARTER_INVALID", `waiver for ${waiver.gateId} has unknown or missing alternative gates`);
+    }
+    if (charter.gates.find(({ id }) => id === waiver.gateId)?.type === "review") {
+      throw new AutopilotError("CHARTER_INVALID", `review gate ${waiver.gateId} cannot be waived`);
     }
   }
   if (charter.mode === "single" && charter.work.length !== 1) {

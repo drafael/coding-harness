@@ -12,6 +12,7 @@ export async function readLease(runDirectory, itemId) {
             epoch: expectInteger(object.epoch, "lease.epoch", 1),
             attemptId: expectString(object.attemptId, "lease.attemptId"),
             expiresAt: expectString(object.expiresAt, "lease.expiresAt"),
+            ...(object.retiredAt === undefined ? {} : { retiredAt: expectString(object.retiredAt, "lease.retiredAt") }),
         };
     }
     catch (error) {
@@ -35,6 +36,18 @@ export async function acquireWriterLease(runDirectory, itemId, branchName, workt
     await writeJsonAtomic(join(runDirectory, "leases", `${itemId}.json`), lease);
     return lease;
 }
+export async function retireWriterLease(runDirectory, expected) {
+    const current = await readLease(runDirectory, expected.itemId);
+    if (current === undefined || current.attemptId !== expected.attemptId || current.epoch !== expected.epoch) {
+        throw new Error(`writer lease identity changed before retirement for ${expected.itemId}`);
+    }
+    if (current.retiredAt !== undefined) {
+        return current;
+    }
+    const retired = { ...current, retiredAt: new Date().toISOString() };
+    await writeJsonAtomic(join(runDirectory, "leases", `${expected.itemId}.json`), retired);
+    return retired;
+}
 export function leaseIsCurrent(lease, attemptId, now = Date.now()) {
-    return lease.attemptId === attemptId && Date.parse(lease.expiresAt) > now;
+    return lease.retiredAt === undefined && lease.attemptId === attemptId && Date.parse(lease.expiresAt) > now;
 }

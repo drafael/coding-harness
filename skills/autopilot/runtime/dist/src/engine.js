@@ -1,21 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadAmendmentContext } from "./amendment.js";
+import { attemptContextHash, buildAttemptContext } from "./attempt-context.js";
 import { createDeliveryAdapter } from "./delivery-adapters.js";
 import { changeRequestTitle, reviewThreadDigest } from "./delivery.js";
-import { evaluateItemDone } from "./done.js";
+import { createPredicateEvaluationReceipt, evaluateItemDone, predicateIdentity } from "./done.js";
+import { projectPredicateEvidence, projectReviewFindings } from "./evidence-map.js";
 import { AutopilotError } from "./errors.js";
-import { executeItemGates, redactEnvironmentSecrets, storeReceipt } from "./evidence.js";
+import { createReviewReceipt, executeItemGates, redactEnvironmentSecrets, storeReceipt } from "./evidence.js";
 import { newEventId } from "./events.js";
 import { blockedByDependency, runnableFrontier } from "./frontier.js";
 import { appendEvent, writeImmutableJson, writeJsonAtomic } from "./journal.js";
-import { canonicalJson, sha256 } from "./json.js";
-import { acquireWriterLease, leaseIsCurrent, readLease } from "./leases.js";
+import { canonicalJson, isRecord, sha256 } from "./json.js";
+import { acquireWriterLease, leaseIsCurrent, readLease, retireWriterLease } from "./leases.js";
 import { authorizeEffect } from "./policy.js";
 import { writeSnapshot } from "./projection.js";
 import { reduce } from "./reducer.js";
-import { assertWritablePaths, branchExists, commitAcceptedWork, ensureWorktree, inspectPreCommitHook, observeRepository, pushAmendmentBranch, pushBranch, remoteBranchCommit, resolveCommit, resolveWorktreePath, runPreCommitHook, } from "./repository.js";
+import { assertWritablePaths, branchExists, commitAcceptedWork, ensureWorktree, inspectCommit, inspectPreCommitHook, observeRepository, pushAmendmentBranch, pushBranch, remoteBranchCommit, resolveCommit, resolveWorktreePath, runPreCommitHook, } from "./repository.js";
 import { writeReports } from "./report.js";
 const RUNTIME_CAPABILITIES = {
     families: [
@@ -30,6 +32,13 @@ const RUNTIME_CAPABILITIES = {
 };
 function eventBase(reason, source = "runtime") {
     return { eventId: newEventId(), timestamp: new Date().toISOString(), source, reason };
+}
+function credentialValues(charter) {
+    return charter.grants
+        .filter(({ family }) => family === "credentials.use")
+        .flatMap(({ environmentNames }) => environmentNames ?? [])
+        .map((name) => process.env[name])
+        .filter((value) => value !== undefined);
 }
 function playbookRequests(charter) {
     const requested = new Set(["files.read", "files.write", "process.execute", "network.access", "credentials.use", "git.commit"]);
@@ -57,7 +66,11 @@ export class AutopilotEngine {
     #manifest;
     #amendment;
     #stopRequested = false;
+    #pauseRequested = false;
+    #pauseRequestId;
+    #waitAbort;
     #activeHandles = new Map();
+    #implementationHandleIds = new Set();
     constructor(options) {
         this.#stateRoot = options.stateRoot;
         this.#runDirectory = options.runDirectory;
@@ -65,6 +78,9 @@ export class AutopilotEngine {
         this.#adapter = options.adapter;
         this.#records = [...options.records];
         this.#projection = options.projection;
+        this.#pauseRequested = options.projection.pauseRequestId !== undefined
+            && options.projection.waiting?.kind !== "operator-pause";
+        this.#pauseRequestId = options.projection.pauseRequestId;
         this.#requested = playbookRequests(options.charter);
     }
     async requestStop() {
@@ -72,6 +88,7 @@ export class AutopilotEngine {
             return;
         }
         this.#stopRequested = true;
+        this.#waitAbort?.abort();
         await Promise.all([...this.#activeHandles.values()].map(async (handle) => {
             try {
                 await this.#adapter.cancel(handle);
@@ -79,6 +96,28 @@ export class AutopilotEngine {
             catch {
                 // The coordinator still stops after the bounded process deadline.
             }
+        }));
+    }
+    async requestPause() {
+        if (this.#stopRequested || this.#projection.state === "SUCCEEDED" || this.#projection.state === "STOPPED") {
+            return;
+        }
+        this.#pauseRequested = true;
+        this.#pauseRequestId ??= this.#projection.pauseRequestId ?? randomUUID();
+        if (this.#projection.pauseRequestId === undefined) {
+            await this.#record({
+                ...eventBase("Coordinator accepted a fenced pause request", "operator"),
+                type: "RUN_PAUSE_REQUESTED",
+                requestId: this.#pauseRequestId,
+            });
+        }
+        this.#waitAbort?.abort();
+        await Promise.all([...this.#implementationHandleIds].flatMap((executionId) => {
+            const handle = this.#activeHandles.get(executionId);
+            if (handle === undefined) {
+                return [];
+            }
+            return [this.#adapter.cancel(handle).catch(() => undefined)];
         }));
     }
     async #blockItemForStop(item, attemptId) {
@@ -97,9 +136,71 @@ export class AutopilotEngine {
         }
         return true;
     }
+    #hasUnobservedExecution() {
+        return Object.values(this.#projection.items).some(({ attempts }) => attempts.length > 0 && attempts.at(-1)?.outcome === undefined);
+    }
+    async #settlePauseIfRequested() {
+        if (!this.#pauseRequested || this.#stopRequested) {
+            return false;
+        }
+        if (this.#activeHandles.size > 0) {
+            return true;
+        }
+        if (Object.values(this.#projection.items).some(({ blocker }) => blocker === "EXECUTION_STATE_UNKNOWN")
+            || this.#hasUnobservedExecution()) {
+            return false;
+        }
+        for (const item of Object.values(this.#projection.items)) {
+            const attempt = item.attempts.at(-1);
+            if (attempt === undefined || attempt.outcome === undefined) {
+                continue;
+            }
+            const lease = await readLease(this.#runDirectory, item.itemId);
+            if (lease !== undefined && lease.retiredAt === undefined
+                && lease.attemptId === attempt.attemptId && lease.epoch === attempt.leaseEpoch) {
+                await retireWriterLease(this.#runDirectory, {
+                    itemId: item.itemId,
+                    attemptId: attempt.attemptId,
+                    epoch: attempt.leaseEpoch,
+                });
+            }
+        }
+        if (this.#projection.waiting?.kind !== "operator-pause") {
+            await this.#record({
+                ...eventBase("All coordinator-owned activity is quiescent", "operator"),
+                type: "RUN_WAITING",
+                waiting: { kind: "operator-pause", requestId: this.#pauseRequestId ?? randomUUID() },
+            });
+        }
+        return true;
+    }
+    async #waitForUnknownExecution() {
+        const item = Object.values(this.#projection.items).find(({ blocker }) => blocker === "EXECUTION_STATE_UNKNOWN");
+        const attempt = item?.attempts.at(-1);
+        if (item === undefined || attempt === undefined) {
+            return false;
+        }
+        await this.#record({
+            ...eventBase("Executor quiescence cannot be proven; replacement launch is prohibited", "reconciler"),
+            type: "RUN_WAITING",
+            itemId: item.itemId,
+            waiting: { kind: "execution-unknown", itemId: item.itemId, attemptId: attempt.attemptId },
+        });
+        return true;
+    }
     async #stopRunIfRequested() {
         if (!this.#stopRequested) {
             return false;
+        }
+        for (const item of Object.values(this.#projection.items)) {
+            if (item.state === "ACTIVE" || item.state === "VERIFYING") {
+                await this.#record({
+                    ...eventBase("Operator stopped before the item reached a completion boundary", "operator"),
+                    type: "ITEM_BLOCKED",
+                    itemId: item.itemId,
+                    errorCode: "OPERATOR_STOP",
+                });
+            }
         }
         await this.#record({
             ...eventBase("Coordinator received an interrupt request", "operator"),
@@ -113,8 +214,9 @@ export class AutopilotEngine {
         let failure;
         this.#appendQueue = this.#appendQueue.then(async () => {
             try {
+                const nextProjection = reduce(this.#projection, event);
                 const record = await appendEvent(`${this.#runDirectory}/events.jsonl`, event);
-                this.#projection = reduce(this.#projection, event);
+                this.#projection = nextProjection;
                 this.#records.push(record);
                 await writeSnapshot(`${this.#runDirectory}/snapshot.json`, this.#projection, this.#records);
             }
@@ -175,6 +277,24 @@ export class AutopilotEngine {
             const itemProjection = this.#projection.items[item.id];
             const attempt = itemProjection?.attempts.at(-1);
             if ((itemProjection?.state === "ACTIVE" || itemProjection?.state === "VERIFYING") && attempt !== undefined) {
+                if (attempt.contextHash !== undefined) {
+                    let storedContext;
+                    try {
+                        storedContext = JSON.parse(await readFile(join(this.#runDirectory, "reports", "attempts", `${attempt.attemptId}.context.json`), "utf8"));
+                    }
+                    catch (error) {
+                        throw new AutopilotError("JOURNAL_CORRUPT", "interrupted attempt context artifact is missing or malformed", {
+                            cause: error instanceof Error ? error.message : String(error),
+                        });
+                    }
+                    const attemptRecord = this.#records.find(({ event }) => event.type === "ATTEMPT_STARTED" && event.attemptId === attempt.attemptId);
+                    if (!isRecord(storedContext) || sha256(canonicalJson(storedContext)) !== attempt.contextHash
+                        || storedContext.sourceJournalSequence !== attempt.contextJournalSequence
+                        || attemptRecord === undefined || attemptRecord.sequence !== (attempt.contextJournalSequence ?? -1) + 1
+                        || storedContext.sourceJournalRecordHash !== attemptRecord.previousHash) {
+                        throw new AutopilotError("JOURNAL_CORRUPT", "interrupted attempt context identity changed");
+                    }
+                }
                 const lease = await readLease(this.#runDirectory, item.id);
                 const hasIdentityBaseline = attempt.expectedRefIdentity !== undefined
                     || attempt.expectedConfigurationIdentity !== undefined || attempt.expectedHookIdentity !== undefined;
@@ -200,7 +320,15 @@ export class AutopilotEngine {
                         && observed.headCommit !== confirmedCommit && observed.headCommit !== reconciledCommit) {
                         throw new AutopilotError("BRANCH_COLLISION", "verifying attempt has an unowned HEAD commit");
                     }
-                    if (attempt.expectedRefIdentity !== undefined && observed.auxiliaryRefIdentity !== attempt.expectedRefIdentity) {
+                    const confirmedPushRefIdentity = this.#records.flatMap(({ event }) => event.type === "EFFECT_CONFIRMED" && event.itemId === item.id && event.effect === "remote.push"
+                        && event.repositoryAuxiliaryRefIdentity !== undefined
+                        ? [event.repositoryAuxiliaryRefIdentity]
+                        : []).at(-1);
+                    const expectedAuxiliaryRefIdentity = confirmedPushRefIdentity
+                        ?? itemProjection.verified?.auxiliaryRefIdentity
+                        ?? attempt.expectedRefIdentity;
+                    if (expectedAuxiliaryRefIdentity !== undefined
+                        && observed.auxiliaryRefIdentity !== expectedAuxiliaryRefIdentity) {
                         throw new AutopilotError("BRANCH_COLLISION", "Git refs changed during an interrupted attempt");
                     }
                     if (attempt.expectedConfigurationIdentity !== undefined
@@ -253,7 +381,7 @@ export class AutopilotEngine {
                     this.#runtimeAuthorize("credentials.use", { environmentName });
                 }
             }
-            else {
+            else if (gate.type === "search") {
                 gate.paths.forEach((path) => this.#runtimeAuthorize("files.read", { path: resolve(this.#charter.repository.root, path) }));
             }
         }
@@ -350,7 +478,7 @@ export class AutopilotEngine {
             throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "change request changed before review-thread resolution");
         }
         const selectedThreads = await this.#validateReviewFeedback(delivery, reference, "either");
-        if (this.#stopRequested || threadIds.length === 0) {
+        if (this.#stopRequested || this.#pauseRequested || threadIds.length === 0) {
             return;
         }
         this.#deliveryAuthorize("review-thread.resolve", { repository: this.#charter.repository.root });
@@ -371,7 +499,7 @@ export class AutopilotEngine {
                 expectedState: canonicalJson({ headCommit: expectedHeadCommit, threadIds }),
             });
         }
-        if (this.#stopRequested) {
+        if (this.#stopRequested || this.#pauseRequested) {
             return;
         }
         const resolvableIds = new Set(threadIds);
@@ -399,6 +527,9 @@ export class AutopilotEngine {
             if (attempt === undefined) {
                 continue;
             }
+            if (itemProjection.verified !== undefined) {
+                continue;
+            }
             const reconciledCommit = this.#amendment?.reconciledCommit;
             if (itemProjection.state === "VERIFYING" && this.#amendment !== undefined
                 && reconciledCommit?.attemptId === attempt.attemptId) {
@@ -419,13 +550,311 @@ export class AutopilotEngine {
                 });
                 continue;
             }
+            if (itemProjection.state === "ACTIVE" && attempt.outcome === "cancelled"
+                && this.#projection.pauseRequestId !== undefined) {
+                await this.#record({
+                    ...eventBase("Pause-cancelled execution was already observed before coordinator loss", "reconciler"),
+                    type: "ATTEMPT_PAUSED",
+                    itemId: item.id,
+                    attemptId: attempt.attemptId,
+                });
+                continue;
+            }
+            const executionUnknown = itemProjection.state === "ACTIVE" && attempt.outcome === undefined;
             await this.#record({
-                ...eventBase("Interrupted attempt requires a fresh lease", "reconciler"),
+                ...eventBase(executionUnknown
+                    ? "Coordinator loss left executor quiescence unknown"
+                    : "Durably finished execution was interrupted before its next checkpoint", "reconciler"),
                 type: "ITEM_BLOCKED",
                 itemId: item.id,
                 attemptId: attempt.attemptId,
-                errorCode: "INTERRUPTED_ATTEMPT",
+                errorCode: executionUnknown ? "EXECUTION_STATE_UNKNOWN" : "INTERRUPTED_ATTEMPT",
             });
+        }
+    }
+    #effectIntent(idempotencyKey) {
+        return this.#records.findLast(({ event }) => event.type === "EFFECT_INTENDED" && event.idempotencyKey === idempotencyKey)?.event;
+    }
+    #effectConfirmation(idempotencyKey) {
+        return this.#records.findLast(({ event }) => event.type === "EFFECT_CONFIRMED" && event.idempotencyKey === idempotencyKey)?.event;
+    }
+    async #validateVerifiedCheckpointEvidence(item, checkpoint) {
+        const checkpointReceiptIds = [...checkpoint.receiptIds];
+        if (new Set(checkpointReceiptIds).size !== checkpointReceiptIds.length) {
+            throw new AutopilotError("RECEIPT_STALE", "verified checkpoint contains duplicate receipt identities");
+        }
+        const receiptEvents = checkpointReceiptIds.map((receiptId) => this.#records.findLast(({ event }) => event.type === "RECEIPT_RECORDED" && event.itemId === item.id && event.attemptId === checkpoint.attemptId
+            && event.receiptId === receiptId)?.event).filter((event) => event?.type === "RECEIPT_RECORDED");
+        const requiredGateIds = new Set(item.acceptance.flatMap((predicate) => predicate.type === "gate-passed" ? [predicate.gateId] : []));
+        const requiredGates = this.#charter.gates.filter(({ id }) => requiredGateIds.has(id));
+        const predicateEvents = receiptEvents.filter(({ receiptKind }) => receiptKind === "predicate");
+        if (receiptEvents.length !== checkpointReceiptIds.length || predicateEvents.length !== 1
+            || requiredGates.some((gate) => !receiptEvents.some((event) => (event.receiptKind === "gate" || event.receiptKind === "review") && event.gateId === gate.id))) {
+            throw new AutopilotError("RECEIPT_STALE", "verified checkpoint receipt set is incomplete");
+        }
+        for (const receiptEvent of receiptEvents) {
+            let value;
+            try {
+                value = JSON.parse(await readFile(join(this.#runDirectory, "receipts", `${receiptEvent.receiptId}.json`), "utf8"));
+            }
+            catch (error) {
+                throw new AutopilotError("RECEIPT_STALE", "verified checkpoint receipt is missing or malformed", {
+                    receiptId: receiptEvent.receiptId,
+                    cause: String(error),
+                });
+            }
+            if (!isRecord(value) || value.receiptId !== receiptEvent.receiptId) {
+                throw new AutopilotError("RECEIPT_STALE", "verified checkpoint receipt identity is malformed");
+            }
+            const { receiptId: _receiptId, ...payload } = value;
+            if (sha256(canonicalJson(payload)) !== receiptEvent.receiptId
+                || value.runId !== this.#charter.runId || value.itemId !== item.id
+                || value.subject !== checkpoint.subject || value.status !== receiptEvent.status) {
+                throw new AutopilotError("RECEIPT_STALE", "verified checkpoint receipt no longer matches its exact subject");
+            }
+            if (receiptEvent.receiptKind === "predicate") {
+                const results = value.results;
+                if (receiptEvent.status !== "PASSED" || value.type !== "predicate-evaluation" || !Array.isArray(results)
+                    || results.length !== item.acceptance.length
+                    || item.acceptance.some((predicate, predicateIndex) => {
+                        const result = results[predicateIndex];
+                        return !isRecord(result) || result.predicateIndex !== predicateIndex || result.outcome !== "met"
+                            || result.subject !== checkpoint.subject
+                            || result.predicateId !== predicateIdentity(item.id, predicateIndex, predicate)
+                            || canonicalJson(result.predicate) !== canonicalJson(predicate);
+                    })) {
+                    throw new AutopilotError("RECEIPT_STALE", "verified checkpoint predicate evidence is not a complete passing evaluation");
+                }
+                continue;
+            }
+            const gate = requiredGates.find(({ id }) => id === receiptEvent.gateId);
+            const statusAccepted = gate?.type === "review"
+                ? receiptEvent.status === "PASSED"
+                : receiptEvent.status === "PASSED" || receiptEvent.status === "WAIVED";
+            if (gate === undefined || !statusAccepted || value.gateId !== gate.id
+                || value.gateDefinitionHash !== sha256(canonicalJson(gate))) {
+                throw new AutopilotError("RECEIPT_STALE", "verified checkpoint gate evidence does not match the sealed passing gate");
+            }
+        }
+    }
+    async #completeVerifiedItem(item, worktreePath, checkpoint) {
+        await this.#validateVerifiedCheckpointEvidence(item, checkpoint);
+        let observation = await observeRepository(worktreePath);
+        const confirmedPushRefIdentity = this.#records.flatMap(({ event }) => event.type === "EFFECT_CONFIRMED" && event.itemId === item.id && event.effect === "remote.push"
+            && event.repositoryAuxiliaryRefIdentity !== undefined
+            ? [event.repositoryAuxiliaryRefIdentity]
+            : []).at(-1);
+        const expectedAuxiliaryRefIdentity = confirmedPushRefIdentity ?? checkpoint.auxiliaryRefIdentity;
+        if (observation.auxiliaryRefIdentity !== expectedAuxiliaryRefIdentity
+            || observation.configurationIdentity !== checkpoint.configurationIdentity) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "repository identity changed after item verification");
+        }
+        if (checkpoint.hookIdentity !== undefined) {
+            const hook = await inspectPreCommitHook(worktreePath);
+            if (hook.identity !== checkpoint.hookIdentity || hook.path !== checkpoint.hookPath) {
+                throw new AutopilotError("CAPABILITY_DENIED", "pre-commit hook changed after item verification");
+            }
+        }
+        let acceptedCommit = checkpoint.headCommit;
+        if (checkpoint.commitRequired) {
+            this.#runtimeAuthorize("git.commit", { repository: this.#charter.repository.root, branch: item.branchName });
+            const key = `commit:${this.#charter.runId}:${item.id}:${checkpoint.treeIdentity}`;
+            const confirmed = this.#effectConfirmation(key);
+            if (confirmed !== undefined) {
+                acceptedCommit = confirmed.observedState;
+            }
+            else {
+                if (this.#effectIntent(key) === undefined) {
+                    if (this.#pauseRequested || this.#stopRequested) {
+                        return;
+                    }
+                    await this.#record({
+                        ...eventBase("Recording commit intent before the Git effect"),
+                        type: "EFFECT_INTENDED",
+                        itemId: item.id,
+                        attemptId: checkpoint.attemptId,
+                        effect: "git.commit",
+                        idempotencyKey: key,
+                        expectedState: checkpoint.treeIdentity,
+                    });
+                }
+                observation = await observeRepository(worktreePath);
+                if (observation.headCommit === checkpoint.headCommit) {
+                    if (observation.treeIdentity !== checkpoint.treeIdentity) {
+                        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "verified tree changed before commit reconciliation");
+                    }
+                    acceptedCommit = await commitAcceptedWork(worktreePath, this.#charter, item, checkpoint.attemptId, checkpoint.treeIdentity, checkpoint.headCommit);
+                }
+                else {
+                    const commit = await inspectCommit(worktreePath, observation.headCommit);
+                    const expectedTrailers = [
+                        `Autopilot-Run: ${this.#charter.runId}`,
+                        `Autopilot-Item: ${item.id}`,
+                        `Autopilot-Attempt: ${checkpoint.attemptId}`,
+                    ];
+                    if (commit.parents.length !== 1 || commit.parents[0] !== checkpoint.headCommit
+                        || commit.treeIdentity !== checkpoint.treeIdentity
+                        || expectedTrailers.some((trailer) => !commit.message.includes(trailer))) {
+                        throw new AutopilotError("BRANCH_COLLISION", "unconfirmed commit intent does not match the verified item");
+                    }
+                    acceptedCommit = observation.headCommit;
+                }
+                await this.#record({
+                    ...eventBase("Verified commit observed"),
+                    type: "EFFECT_CONFIRMED",
+                    itemId: item.id,
+                    attemptId: checkpoint.attemptId,
+                    effect: "git.commit",
+                    idempotencyKey: key,
+                    observedState: acceptedCommit,
+                });
+            }
+            observation = await observeRepository(worktreePath);
+            if (observation.headCommit !== acceptedCommit) {
+                throw new AutopilotError("BRANCH_COLLISION", "managed branch no longer points to the confirmed commit");
+            }
+            const commit = await inspectCommit(worktreePath, acceptedCommit);
+            if (commit.treeIdentity !== checkpoint.treeIdentity) {
+                throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "confirmed commit no longer matches the verified tree");
+            }
+        }
+        else if (observation.headCommit !== checkpoint.headCommit || observation.treeIdentity !== checkpoint.treeIdentity) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "clean verified subject changed before delivery");
+        }
+        if (this.#pauseRequested || this.#stopRequested) {
+            return;
+        }
+        const delivered = await this.#deliverItem(item, worktreePath, acceptedCommit);
+        if (!delivered || this.#pauseRequested || this.#stopRequested) {
+            return;
+        }
+        await this.#record({
+            ...eventBase("All item predicates and delivery requirements are met"),
+            type: "ITEM_SATISFIED",
+            itemId: item.id,
+            attemptId: checkpoint.attemptId,
+            subject: checkpoint.subject,
+        });
+    }
+    async #observeProviderChecks(delivery, reference, expectedCommit, baseBranch) {
+        const changeRequest = await delivery.observeChangeRequest(this.#charter.repository.root, reference);
+        if (changeRequest.ref.id !== reference.id || changeRequest.ref.url !== reference.url
+            || changeRequest.headCommit !== expectedCommit || changeRequest.baseBranch !== baseBranch
+            || changeRequest.state === "closed") {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "provider check subject changed while waiting");
+        }
+        if (changeRequest.state === "merged") {
+            return {
+                status: "merged",
+                checks: [],
+                observationId: sha256(canonicalJson({ changeRequest, checks: [] })),
+            };
+        }
+        const checks = await delivery.observeChecks(this.#charter.repository.root, expectedCommit);
+        if (checks.some(({ subjectCommit }) => subjectCommit !== expectedCommit)) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "provider returned checks for a different commit");
+        }
+        const status = checks.some(({ status: checkStatus }) => checkStatus === "failed")
+            ? "failed"
+            : checks.length > 0 && checks.every(({ status: checkStatus }) => checkStatus === "passed")
+                ? "passed"
+                : "pending";
+        return {
+            status,
+            checks,
+            observationId: sha256(canonicalJson({ changeRequest, checks })),
+        };
+    }
+    async #recordRemoteChecks(item, provider, expectedCommit, status, checks) {
+        const artifact = {
+            schemaVersion: 1,
+            type: "remote-checks",
+            provider,
+            subject: expectedCommit,
+            observedAt: new Date().toISOString(),
+            status,
+            checks,
+        };
+        const receiptId = sha256(canonicalJson(artifact));
+        const path = join(this.#runDirectory, "receipts", `${receiptId}.json`);
+        await writeImmutableJson(path, { ...artifact, receiptId });
+        await this.#record({
+            ...eventBase(`Remote checks recorded ${status}`),
+            type: "RECEIPT_RECORDED",
+            itemId: item.id,
+            receiptId,
+            receiptKind: "remote-checks",
+            status,
+            evidence: [path],
+        });
+    }
+    async #waitForProviderChecks(item, delivery, reference, provider, expectedCommit, baseBranch) {
+        let observation = await this.#observeProviderChecks(delivery, reference, expectedCommit, baseBranch);
+        if (observation.status !== "pending") {
+            if (observation.status !== "merged") {
+                await this.#recordRemoteChecks(item, provider, expectedCommit, observation.status === "passed" ? "PASSED" : "FAILED", observation.checks);
+            }
+            return observation.status;
+        }
+        const policy = this.#charter.providerCheckWait ?? { heartbeatMs: 30_000, timeoutMs: 300_000 };
+        const deadline = new Date(Date.now() + policy.timeoutMs).toISOString();
+        await this.#record({
+            ...eventBase("Waiting for exact-subject provider checks"),
+            type: "RUN_WAITING",
+            itemId: item.id,
+            waiting: {
+                kind: "provider-checks",
+                provider,
+                itemId: item.id,
+                changeRequestId: reference.id,
+                changeRequestUrl: reference.url,
+                subjectCommit: expectedCommit,
+                baseBranch,
+                heartbeatMs: policy.heartbeatMs,
+                deadline,
+            },
+        });
+        const controller = new AbortController();
+        this.#waitAbort = controller;
+        try {
+            while (Date.now() < Date.parse(deadline)) {
+                const remaining = Math.max(1, Date.parse(deadline) - Date.now());
+                await new Promise((resolveDelay) => {
+                    const finish = () => {
+                        controller.signal.removeEventListener("abort", abort);
+                        resolveDelay();
+                    };
+                    const timer = setTimeout(finish, Math.min(policy.heartbeatMs, remaining));
+                    const abort = () => {
+                        clearTimeout(timer);
+                        finish();
+                    };
+                    controller.signal.addEventListener("abort", abort, { once: true });
+                });
+                if (controller.signal.aborted || this.#pauseRequested || this.#stopRequested) {
+                    return "cancelled";
+                }
+                observation = await this.#observeProviderChecks(delivery, reference, expectedCommit, baseBranch);
+                if (observation.status !== "pending") {
+                    await this.#record({
+                        ...eventBase("Exact provider observation ended the check wait", "reconciler"),
+                        type: "RUN_WOKEN",
+                        itemId: item.id,
+                        observationId: observation.observationId,
+                    });
+                    if (observation.status !== "merged") {
+                        await this.#recordRemoteChecks(item, provider, expectedCommit, observation.status === "passed" ? "PASSED" : "FAILED", observation.checks);
+                    }
+                    return observation.status;
+                }
+            }
+            await this.#recordRemoteChecks(item, provider, expectedCommit, "UNVERIFIED", observation.checks);
+            return "pending";
+        }
+        finally {
+            if (this.#waitAbort === controller) {
+                this.#waitAbort = undefined;
+            }
         }
     }
     async #deliverItem(item, worktreePath, expectedCommit) {
@@ -437,29 +866,45 @@ export class AutopilotEngine {
         this.#runtimeAuthorize("network.access");
         this.#runtimeAuthorize("credentials.use");
         const pushKey = `push:${this.#charter.runId}:${item.id}:${expectedCommit}`;
-        await this.#record({
-            ...eventBase("Recording push intent before the remote Git effect"),
-            type: "EFFECT_INTENDED",
-            itemId: item.id,
-            effect: "remote.push",
-            idempotencyKey: pushKey,
-            expectedState: expectedCommit,
-        });
-        const remoteCommit = this.#amendment === undefined
-            ? await pushBranch(worktreePath, target.remote, item.branchName, expectedCommit)
-            : await pushAmendmentBranch(worktreePath, target.remote, item.branchName, this.#amendment.deliveryBaseCommit, expectedCommit);
-        await this.#record({
-            ...eventBase("Expected remote branch commit observed"),
-            type: "EFFECT_CONFIRMED",
-            itemId: item.id,
-            effect: "remote.push",
-            idempotencyKey: pushKey,
-            observedState: remoteCommit,
-        });
+        let remoteCommit = this.#effectConfirmation(pushKey)?.observedState;
+        if (remoteCommit !== undefined) {
+            const observedRemote = await remoteBranchCommit(worktreePath, target.remote, item.branchName);
+            if (observedRemote !== expectedCommit || remoteCommit !== expectedCommit) {
+                throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "confirmed remote push no longer matches the verified commit");
+            }
+        }
+        else {
+            if (this.#effectIntent(pushKey) === undefined) {
+                if (this.#pauseRequested || this.#stopRequested) {
+                    return false;
+                }
+                await this.#record({
+                    ...eventBase("Recording push intent before the remote Git effect"),
+                    type: "EFFECT_INTENDED",
+                    itemId: item.id,
+                    effect: "remote.push",
+                    idempotencyKey: pushKey,
+                    expectedState: expectedCommit,
+                });
+            }
+            remoteCommit = this.#amendment === undefined
+                ? await pushBranch(worktreePath, target.remote, item.branchName, expectedCommit)
+                : await pushAmendmentBranch(worktreePath, target.remote, item.branchName, this.#amendment.deliveryBaseCommit, expectedCommit);
+            const afterPush = await observeRepository(worktreePath);
+            await this.#record({
+                ...eventBase("Expected remote branch commit observed"),
+                type: "EFFECT_CONFIRMED",
+                itemId: item.id,
+                effect: "remote.push",
+                idempotencyKey: pushKey,
+                observedState: remoteCommit,
+                repositoryAuxiliaryRefIdentity: afterPush.auxiliaryRefIdentity,
+            });
+        }
         if (this.#amendment !== undefined) {
             this.#amendment = { ...this.#amendment, deliveryBaseCommit: remoteCommit };
         }
-        if (this.#stopRequested) {
+        if (this.#stopRequested || this.#pauseRequested) {
             return false;
         }
         this.#deliveryAuthorize("network.access");
@@ -467,28 +912,59 @@ export class AutopilotEngine {
         const changeRequestEffect = this.#amendment === undefined ? "change-request.open" : "change-request.update";
         this.#deliveryAuthorize(changeRequestEffect, { repository: this.#charter.repository.root });
         const delivery = createDeliveryAdapter(target.provider);
-        await delivery.describe();
-        if (this.#stopRequested) {
+        const deliveryCapabilities = await delivery.describe();
+        if (this.#stopRequested || this.#pauseRequested) {
             return false;
         }
-        const changeRequestKey = `change-request:${this.#charter.runId}:${item.id}`;
-        await this.#record({
-            ...eventBase(this.#amendment === undefined ? "Recording change-request intent before provider mutation" : "Recording existing change-request head update"),
-            type: "EFFECT_INTENDED",
-            itemId: item.id,
-            effect: changeRequestEffect,
-            idempotencyKey: changeRequestKey,
-            expectedState: expectedCommit,
-        });
         const predecessorId = item.dependsOn.at(-1);
         const predecessor = predecessorId === undefined ? undefined : this.#charter.work.find(({ id }) => id === predecessorId);
         const baseBranch = this.#charter.mode === "ordered-stack" && this.#charter.delivery === "change-request-ready" && predecessor !== undefined
             ? predecessor.branchName
             : target.baseBranch;
-        const existing = this.#amendment === undefined
-            ? await delivery.findChangeRequest(this.#charter.repository.root, this.#charter.runId, item.id)
-            : this.#amendment.changeRequest;
-        if (existing === undefined && this.#stopRequested) {
+        const changeRequestKey = `change-request:${this.#charter.runId}:${item.id}`;
+        const priorChangeRequestIntent = this.#effectIntent(changeRequestKey);
+        const priorChangeRequestConfirmation = this.#effectConfirmation(changeRequestKey);
+        const priorWaiting = this.#records.findLast(({ event }) => event.type === "RUN_WAITING" && event.itemId === item.id && event.waiting?.kind === "provider-checks")?.event;
+        const waitingDetails = priorWaiting?.type === "RUN_WAITING" && priorWaiting.waiting?.kind === "provider-checks"
+            ? priorWaiting.waiting
+            : undefined;
+        if (waitingDetails !== undefined && waitingDetails.provider !== target.provider) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "provider-check wait identity changed across restart");
+        }
+        const confirmedUrl = priorChangeRequestConfirmation?.observedState;
+        if (waitingDetails !== undefined && confirmedUrl !== undefined && waitingDetails.changeRequestUrl !== confirmedUrl) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "provider-check wait no longer matches the confirmed change request");
+        }
+        const durableReference = waitingDetails === undefined
+            ? confirmedUrl === undefined ? undefined : {
+                provider: target.provider,
+                id: confirmedUrl.replace(/\/+$/u, "").split("/").at(-1) ?? "",
+                url: confirmedUrl,
+            }
+            : {
+                provider: waitingDetails.provider,
+                id: waitingDetails.changeRequestId,
+                url: waitingDetails.changeRequestUrl,
+            };
+        if (durableReference !== undefined && durableReference.id.length === 0) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "confirmed change-request identity is malformed");
+        }
+        const existing = this.#amendment?.changeRequest ?? durableReference
+            ?? await delivery.findChangeRequest(this.#charter.repository.root, this.#charter.runId, item.id);
+        if (existing === undefined && (priorChangeRequestIntent !== undefined || priorChangeRequestConfirmation !== undefined)) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "change-request mutation is ambiguous after process loss; creation was not repeated");
+        }
+        if (priorChangeRequestIntent === undefined) {
+            await this.#record({
+                ...eventBase(this.#amendment === undefined ? "Recording change-request intent before provider mutation" : "Recording existing change-request head update"),
+                type: "EFFECT_INTENDED",
+                itemId: item.id,
+                effect: changeRequestEffect,
+                idempotencyKey: changeRequestKey,
+                expectedState: canonicalJson({ provider: target.provider, expectedCommit, baseBranch }),
+            });
+        }
+        if (existing === undefined && (this.#stopRequested || this.#pauseRequested)) {
             return false;
         }
         const reference = existing ?? await delivery.createChangeRequest({
@@ -502,87 +978,112 @@ export class AutopilotEngine {
             expectedHeadCommit: expectedCommit,
         });
         const observed = await delivery.observeChangeRequest(this.#charter.repository.root, reference);
+        if (observed.ref.provider !== reference.provider || observed.ref.id !== reference.id || observed.ref.url !== reference.url) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "provider returned a different change request during delivery reconciliation");
+        }
         if (this.#amendment !== undefined && observed.ref.url !== this.#amendment.changeRequest.url) {
             throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "provider returned a different change request during amendment delivery");
         }
-        if (observed.headCommit !== expectedCommit) {
-            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "change-request head does not match the verified commit", {
-                expected: expectedCommit,
-                observed: observed.headCommit,
+        if (observed.headCommit !== expectedCommit || observed.baseBranch !== baseBranch) {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "change-request head or base does not match verified delivery", {
+                expectedHead: expectedCommit,
+                observedHead: observed.headCommit,
+                expectedBase: baseBranch,
+                observedBase: observed.baseBranch,
             });
         }
         if (observed.state === "closed") {
             throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "matching change request is closed without a merge");
         }
-        await this.#record({
-            ...eventBase("Change request at expected head observed"),
-            type: "EFFECT_CONFIRMED",
-            itemId: item.id,
-            effect: changeRequestEffect,
-            idempotencyKey: changeRequestKey,
-            observedState: reference.url,
-        });
-        if (this.#stopRequested) {
+        if (priorChangeRequestConfirmation === undefined) {
+            await this.#record({
+                ...eventBase("Change request at expected head observed"),
+                type: "EFFECT_CONFIRMED",
+                itemId: item.id,
+                effect: changeRequestEffect,
+                idempotencyKey: changeRequestKey,
+                observedState: reference.url,
+            });
+        }
+        if (this.#stopRequested || this.#pauseRequested) {
             return false;
         }
         await this.#resolveReviewFeedback(delivery, reference, item, expectedCommit);
-        if (this.#stopRequested) {
+        if (this.#stopRequested || this.#pauseRequested) {
             return false;
         }
         if (this.#charter.delivery !== "merge-verified") {
             return true;
         }
         this.#deliveryAuthorize("merge.execute", { repository: this.#charter.repository.root });
+        if (!deliveryCapabilities.checks) {
+            throw new AutopilotError("ADAPTER_UNSUPPORTED", `${target.provider} adapter cannot observe remote checks`);
+        }
         const mergeKey = `merge:${target.provider}:${reference.id}:${expectedCommit}`;
+        const mergeConfirmation = this.#effectConfirmation(mergeKey);
+        if (mergeConfirmation !== undefined && observed.state !== "merged") {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "confirmed merge is no longer reported as merged");
+        }
         if (observed.state === "merged") {
+            if (mergeConfirmation === undefined) {
+                await this.#record({
+                    ...eventBase("Previously merged expected head reconciled"),
+                    type: "EFFECT_CONFIRMED",
+                    itemId: item.id,
+                    effect: "merge.execute",
+                    idempotencyKey: mergeKey,
+                    observedState: expectedCommit,
+                });
+            }
+            return !this.#stopRequested && !this.#pauseRequested;
+        }
+        const checksStatus = await this.#waitForProviderChecks(item, delivery, reference, target.provider, expectedCommit, baseBranch);
+        if (checksStatus === "failed") {
+            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "remote checks failed for the expected head");
+        }
+        if (checksStatus === "merged") {
             await this.#record({
-                ...eventBase("Previously merged expected head reconciled"),
+                ...eventBase("Expected head was merged while provider checks were waiting", "reconciler"),
                 type: "EFFECT_CONFIRMED",
                 itemId: item.id,
                 effect: "merge.execute",
                 idempotencyKey: mergeKey,
                 observedState: expectedCommit,
             });
-            return !this.#stopRequested;
+            return true;
         }
-        const checks = await delivery.observeChecks(this.#charter.repository.root, expectedCommit);
-        const checksStatus = checks.length === 0
-            ? "UNVERIFIED"
-            : checks.every(({ subjectCommit, status }) => subjectCommit === expectedCommit && status === "passed") ? "PASSED" : "FAILED";
-        const checksArtifact = {
-            schemaVersion: 1,
-            type: "remote-checks",
-            provider: target.provider,
-            subject: expectedCommit,
-            observedAt: new Date().toISOString(),
-            status: checksStatus,
-            checks,
-        };
-        const checksReceiptId = sha256(canonicalJson(checksArtifact));
-        const checksPath = join(this.#runDirectory, "receipts", `${checksReceiptId}.json`);
-        await writeImmutableJson(checksPath, { ...checksArtifact, receiptId: checksReceiptId });
-        await this.#record({
-            ...eventBase(`Remote checks recorded ${checksStatus}`),
-            type: "RECEIPT_RECORDED",
-            itemId: item.id,
-            receiptId: checksReceiptId,
-            status: checksStatus,
-            evidence: [checksPath],
-        });
-        if (checksStatus === "FAILED") {
-            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "remote checks are not all passed for the expected head");
+        if (checksStatus === "passed") {
+            const beforeMerge = await delivery.observeChangeRequest(this.#charter.repository.root, reference);
+            if (beforeMerge.ref.provider !== reference.provider || beforeMerge.ref.id !== reference.id
+                || beforeMerge.ref.url !== reference.url || beforeMerge.headCommit !== expectedCommit
+                || beforeMerge.baseBranch !== baseBranch || beforeMerge.state === "closed") {
+                throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "change request changed after checks passed");
+            }
+            if (beforeMerge.state === "merged") {
+                await this.#record({
+                    ...eventBase("Expected head was merged after checks passed", "reconciler"),
+                    type: "EFFECT_CONFIRMED",
+                    itemId: item.id,
+                    effect: "merge.execute",
+                    idempotencyKey: mergeKey,
+                    observedState: expectedCommit,
+                });
+                return true;
+            }
         }
-        if (this.#stopRequested) {
+        if (checksStatus !== "passed" || this.#stopRequested || this.#pauseRequested) {
             return false;
         }
-        await this.#record({
-            ...eventBase("Recording merge intent for the verified current head"),
-            type: "EFFECT_INTENDED",
-            itemId: item.id,
-            effect: "merge.execute",
-            idempotencyKey: mergeKey,
-            expectedState: expectedCommit,
-        });
+        if (this.#effectIntent(mergeKey) === undefined) {
+            await this.#record({
+                ...eventBase("Recording merge intent for the verified current head"),
+                type: "EFFECT_INTENDED",
+                itemId: item.id,
+                effect: "merge.execute",
+                idempotencyKey: mergeKey,
+                expectedState: expectedCommit,
+            });
+        }
         const outcome = await delivery.merge({
             repositoryRoot: this.#charter.repository.root,
             ref: reference,
@@ -602,6 +1103,90 @@ export class AutopilotEngine {
         });
         return true;
     }
+    async #executeReviewGate(item, gate, worktreePath, attemptId, observation) {
+        if (this.#manifest === undefined) {
+            throw new AutopilotError("ADAPTER_UNSUPPORTED", "adapter capabilities have not been loaded");
+        }
+        const attempt = this.#projection.items[item.id]?.attempts.at(-1);
+        if (attempt === undefined) {
+            throw new AutopilotError("JOURNAL_CORRUPT", "review gate has no active attempt identity");
+        }
+        const predicateEvidence = await projectPredicateEvidence(this.#runDirectory, this.#charter, this.#projection, this.#records);
+        const reviewFindings = await projectReviewFindings(this.#runDirectory, this.#records);
+        const context = buildAttemptContext({
+            charter: this.#charter,
+            item,
+            attemptId,
+            leaseEpoch: attempt.leaseEpoch,
+            observation,
+            records: this.#records,
+            projection: this.#projection,
+            predicateEvidence,
+            reviewFindings,
+            sensitiveValues: credentialValues(this.#charter),
+        });
+        const contextJson = canonicalJson(context);
+        if (Buffer.byteLength(contextJson) > this.#charter.limits.maxRetainedOutputBytes) {
+            throw new AutopilotError("CONTEXT_TOO_LARGE", "review context exceeds the charter output bound");
+        }
+        const contextHash = attemptContextHash(context);
+        const attemptsDirectory = join(this.#runDirectory, "reports", "attempts");
+        await mkdir(attemptsDirectory, { recursive: true, mode: 0o700 });
+        const reviewKey = sha256(gate.id).slice(0, 16);
+        const contextPath = join(attemptsDirectory, `${attemptId}.review-${reviewKey}-${contextHash.slice(0, 16)}.context.json`);
+        await writeImmutableJson(contextPath, context);
+        const deadline = new Date(Date.now() + this.#charter.limits.attemptTimeoutMs).toISOString();
+        const handle = await this.#adapter.launch({
+            protocolVersion: 1,
+            role: "review",
+            runId: this.#charter.runId,
+            itemId: item.id,
+            attemptId: `${attemptId}-review-${reviewKey}`,
+            worktreePath,
+            objective: item.objective,
+            acceptanceSummary: item.acceptance.map((predicate) => JSON.stringify(predicate)).join("; "),
+            context,
+            contextHash,
+            reviewFocus: gate.focus,
+            writableRoots: [],
+            grants: this.#charter.grants.filter(({ actor, family }) => actor === "adapter" || (actor === "worker" && family === "files.read")),
+            deadline,
+            idleTimeoutMs: this.#charter.limits.idleTimeoutMs,
+            maximumLineBytes: this.#charter.limits.maxAdapterLineBytes,
+            maximumOutputBytes: this.#charter.limits.maxRetainedOutputBytes,
+        });
+        this.#activeHandles.set(handle.adapterExecutionId, handle);
+        let adapterObservation;
+        try {
+            adapterObservation = await this.#adapter.observe(handle);
+        }
+        finally {
+            this.#activeHandles.delete(handle.adapterExecutionId);
+        }
+        const reviewObservationPath = join(attemptsDirectory, `${attemptId}.review-${reviewKey}-${contextHash.slice(0, 16)}.json`);
+        await writeJsonAtomic(reviewObservationPath, adapterObservation);
+        const after = await observeRepository(worktreePath);
+        if (after.headCommit !== observation.headCommit || after.treeIdentity !== observation.treeIdentity
+            || after.refIdentity !== observation.refIdentity || after.configurationIdentity !== observation.configurationIdentity) {
+            throw new AutopilotError("CAPABILITY_DENIED", "reviewer changed the worktree, Git refs, or Git configuration");
+        }
+        const result = adapterObservation.status === "completed" ? adapterObservation.reviewResult : undefined;
+        const reviewer = `${this.#manifest.adapterName}@${this.#manifest.adapterVersion}/${this.#manifest.harnessVersion}`;
+        const receipt = createReviewReceipt(this.#charter, item, gate, `tree:${observation.treeIdentity}`, reviewer, handle.startedAt, adapterObservation.completedAt, result?.verdict ?? "inconclusive", result?.findings ?? [], adapterObservation.truncated);
+        const receiptPath = await storeReceipt(this.#runDirectory, receipt);
+        await this.#record({
+            ...eventBase(`Independent review ${gate.id} recorded ${receipt.status}`),
+            type: "RECEIPT_RECORDED",
+            itemId: item.id,
+            attemptId,
+            receiptId: receipt.receiptId,
+            gateId: gate.id,
+            receiptKind: "review",
+            status: receipt.status,
+            evidence: [contextPath, reviewObservationPath, receiptPath],
+        });
+        return receipt;
+    }
     async #verifyItem(item, worktreePath, attemptId, observation) {
         for (const gate of this.#charter.gates.filter(({ appliesTo }) => appliesTo.length === 0 || appliesTo.includes(item.id))) {
             if (gate.type === "command") {
@@ -611,19 +1196,31 @@ export class AutopilotEngine {
                     this.#runtimeAuthorize("credentials.use", { environmentName });
                 }
             }
-            else {
+            else if (gate.type === "search") {
                 this.#runtimeAuthorize("files.read");
             }
         }
         const subject = `tree:${observation.treeIdentity}`;
-        const receipts = await executeItemGates(this.#charter, item, worktreePath, subject);
+        const receipts = [...await executeItemGates(this.#charter, item, worktreePath, subject)];
+        const afterDirectGates = await observeRepository(worktreePath);
+        if (afterDirectGates.headCommit !== observation.headCommit || afterDirectGates.treeIdentity !== observation.treeIdentity
+            || afterDirectGates.refIdentity !== observation.refIdentity
+            || afterDirectGates.configurationIdentity !== observation.configurationIdentity) {
+            throw new AutopilotError("CAPABILITY_DENIED", "verification gate changed the worktree, Git refs, or Git configuration");
+        }
+        for (const gate of this.#charter.gates.filter((candidate) => candidate.type === "review" && (candidate.appliesTo.length === 0 || candidate.appliesTo.includes(item.id)))) {
+            receipts.push(await this.#executeReviewGate(item, gate, worktreePath, attemptId, observation));
+        }
         const afterGates = await observeRepository(worktreePath);
         if (afterGates.headCommit !== observation.headCommit || afterGates.treeIdentity !== observation.treeIdentity
             || afterGates.refIdentity !== observation.refIdentity
             || afterGates.configurationIdentity !== observation.configurationIdentity) {
-            throw new AutopilotError("CAPABILITY_DENIED", "verification gate changed the worktree, Git refs, or Git configuration");
+            throw new AutopilotError("CAPABILITY_DENIED", "review gate changed the worktree, Git refs, or Git configuration");
         }
         for (const receipt of receipts) {
+            if (this.#charter.gates.find(({ id }) => id === receipt.gateId)?.type === "review") {
+                continue;
+            }
             const path = await storeReceipt(this.#runDirectory, receipt);
             await this.#record({
                 ...eventBase(`Verification gate ${receipt.gateId} recorded ${receipt.status}`),
@@ -631,15 +1228,29 @@ export class AutopilotEngine {
                 itemId: item.id,
                 attemptId,
                 receiptId: receipt.receiptId,
+                gateId: receipt.gateId,
+                receiptKind: "gate",
                 status: receipt.status,
                 evidence: [path],
             });
         }
         const evaluation = await evaluateItemDone(this.#charter, item, worktreePath, subject, receipts);
+        const predicateReceipt = createPredicateEvaluationReceipt(this.#charter, item, subject, evaluation);
+        const predicateReceiptPath = await storeReceipt(this.#runDirectory, predicateReceipt);
+        await this.#record({
+            ...eventBase(`Acceptance predicates recorded ${predicateReceipt.status}`),
+            type: "RECEIPT_RECORDED",
+            itemId: item.id,
+            attemptId,
+            receiptId: predicateReceipt.receiptId,
+            receiptKind: "predicate",
+            status: predicateReceipt.status,
+            evidence: [predicateReceiptPath],
+        });
         return { subject, met: evaluation.outcome === "met", reasons: evaluation.reasons };
     }
     async #runItem(item) {
-        if (this.#stopRequested) {
+        if (this.#stopRequested || this.#pauseRequested) {
             return;
         }
         const prior = this.#projection.items[item.id];
@@ -675,6 +1286,29 @@ export class AutopilotEngine {
         const attemptId = randomUUID();
         const lease = await acquireWriterLease(this.#runDirectory, item.id, item.branchName, worktreePath, attemptId, this.#charter.limits.attemptTimeoutMs);
         const deadline = lease.expiresAt;
+        const predicateEvidence = await projectPredicateEvidence(this.#runDirectory, this.#charter, this.#projection, this.#records);
+        const reviewFindings = await projectReviewFindings(this.#runDirectory, this.#records);
+        const context = buildAttemptContext({
+            charter: this.#charter,
+            item,
+            attemptId,
+            leaseEpoch: lease.epoch,
+            observation: before,
+            records: this.#records,
+            projection: this.#projection,
+            predicateEvidence,
+            reviewFindings,
+            sensitiveValues: credentialValues(this.#charter),
+        });
+        const contextJson = canonicalJson(context);
+        if (Buffer.byteLength(contextJson) > this.#charter.limits.maxRetainedOutputBytes) {
+            throw new AutopilotError("CONTEXT_TOO_LARGE", "attempt context exceeds the charter output bound");
+        }
+        const contextHash = attemptContextHash(context);
+        const attemptsDirectory = join(this.#runDirectory, "reports", "attempts");
+        await mkdir(attemptsDirectory, { recursive: true, mode: 0o700 });
+        const contextPath = join(attemptsDirectory, `${attemptId}.context.json`);
+        await writeImmutableJson(contextPath, context);
         await this.#record({
             ...eventBase("Starting a fresh bounded harness session"),
             type: "ATTEMPT_STARTED",
@@ -682,13 +1316,17 @@ export class AutopilotEngine {
             attemptId,
             leaseEpoch: lease.epoch,
             expectedBaseCommit: before.headCommit,
+            expectedTreeIdentity: before.treeIdentity,
             expectedRefIdentity: before.auxiliaryRefIdentity,
             expectedConfigurationIdentity: before.configurationIdentity,
             ...(hookSnapshot === undefined ? {} : {
                 expectedHookIdentity: hookSnapshot.identity,
                 ...(hookSnapshot.path === undefined ? {} : { expectedHookPath: hookSnapshot.path }),
             }),
+            contextHash,
+            contextJournalSequence: context.sourceJournalSequence,
             deadline,
+            evidence: [contextPath],
             idempotencyKey: `attempt:${this.#charter.runId}:${item.id}:${lease.epoch}`,
         });
         this.#workerAuthorize("files.read");
@@ -701,12 +1339,15 @@ export class AutopilotEngine {
         }
         const handle = await this.#adapter.launch({
             protocolVersion: 1,
+            role: "implementation",
             runId: this.#charter.runId,
             itemId: item.id,
             attemptId,
             worktreePath,
             objective: item.objective,
             acceptanceSummary: item.acceptance.map((predicate) => JSON.stringify(predicate)).join("; "),
+            context,
+            contextHash,
             writableRoots: item.writableRoots,
             grants: this.#charter.grants.filter(({ actor }) => actor === "worker" || actor === "adapter"),
             deadline,
@@ -715,7 +1356,8 @@ export class AutopilotEngine {
             maximumOutputBytes: this.#charter.limits.maxRetainedOutputBytes,
         });
         this.#activeHandles.set(handle.adapterExecutionId, handle);
-        if (this.#stopRequested) {
+        this.#implementationHandleIds.add(handle.adapterExecutionId);
+        if (this.#stopRequested || this.#pauseRequested) {
             try {
                 await this.#adapter.cancel(handle);
             }
@@ -729,33 +1371,38 @@ export class AutopilotEngine {
         }
         finally {
             this.#activeHandles.delete(handle.adapterExecutionId);
+            this.#implementationHandleIds.delete(handle.adapterExecutionId);
         }
-        const attemptsDirectory = join(this.#runDirectory, "reports", "attempts");
-        await mkdir(attemptsDirectory, { recursive: true, mode: 0o700 });
         const observationPath = join(attemptsDirectory, `${attemptId}.json`);
         await writeJsonAtomic(observationPath, observation);
         const currentLease = await readLease(this.#runDirectory, item.id);
         const after = await observeRepository(worktreePath);
-        const stale = currentLease === undefined || !leaseIsCurrent(currentLease, attemptId) || currentLease.epoch !== lease.epoch;
+        const leaseIdentityCurrent = currentLease !== undefined
+            && currentLease.attemptId === attemptId && currentLease.epoch === lease.epoch;
+        const stale = !leaseIdentityCurrent || !leaseIsCurrent(currentLease, attemptId);
         await this.#record({
             ...eventBase(stale ? "Late adapter result quarantined" : "Adapter execution observed"),
             type: "ATTEMPT_FINISHED",
             itemId: item.id,
             attemptId,
             observedHeadCommit: after.headCommit,
+            observedTreeIdentity: after.treeIdentity,
             outcome: stale ? "stale" : observation.status,
             evidence: [observationPath],
         });
+        if (leaseIdentityCurrent) {
+            await retireWriterLease(this.#runDirectory, { itemId: item.id, attemptId, epoch: lease.epoch });
+        }
         if (await this.#blockItemForStop(item, attemptId)) {
             return;
         }
-        if (stale || observation.status !== "completed") {
+        if (stale) {
             await this.#record({
-                ...eventBase(stale ? "Writer lease expired" : `Adapter failed with exit code ${observation.exitCode}`),
+                ...eventBase("Writer lease expired"),
                 type: "ITEM_BLOCKED",
                 itemId: item.id,
                 attemptId,
-                errorCode: stale ? "STALE_LEASE" : "ADAPTER_FAILED",
+                errorCode: "STALE_LEASE",
             });
             return;
         }
@@ -790,6 +1437,27 @@ export class AutopilotEngine {
             return;
         }
         await assertWritablePaths(worktreePath, after.changedPaths, item.writableRoots);
+        if (this.#pauseRequested) {
+            await this.#record({
+                ...eventBase("Operator pause preserved the observed worker tree", "operator"),
+                type: "ATTEMPT_PAUSED",
+                itemId: item.id,
+                attemptId,
+                ...(observation.status === "cancelled" ? {} : { budgetConsumed: true }),
+            });
+            await retireWriterLease(this.#runDirectory, { itemId: item.id, attemptId, epoch: lease.epoch });
+            return;
+        }
+        if (observation.status !== "completed") {
+            await this.#record({
+                ...eventBase(`Adapter failed with exit code ${observation.exitCode}`),
+                type: "ITEM_BLOCKED",
+                itemId: item.id,
+                attemptId,
+                errorCode: "ADAPTER_FAILED",
+            });
+            return;
+        }
         if (await this.#blockItemForStop(item, attemptId)) {
             return;
         }
@@ -875,57 +1543,49 @@ export class AutopilotEngine {
             }
             finalObservation = hookObservation;
         }
-        let acceptedCommit = finalObservation.headCommit;
-        if (await this.#blockItemForStop(item, attemptId)) {
-            return;
-        }
-        if (!finalObservation.clean) {
-            this.#runtimeAuthorize("git.commit", { repository: this.#charter.repository.root, branch: item.branchName });
-            const idempotencyKey = `commit:${this.#charter.runId}:${item.id}:${finalObservation.treeIdentity}`;
-            await this.#record({
-                ...eventBase("Recording commit intent before the Git effect"),
-                type: "EFFECT_INTENDED",
-                itemId: item.id,
-                attemptId,
-                effect: "git.commit",
-                idempotencyKey,
-                expectedState: finalObservation.treeIdentity,
-            });
-            acceptedCommit = await commitAcceptedWork(worktreePath, this.#charter, item, attemptId, finalObservation.treeIdentity, finalObservation.headCommit);
-            await this.#record({
-                ...eventBase("Verified commit observed"),
-                type: "EFFECT_CONFIRMED",
-                itemId: item.id,
-                attemptId,
-                effect: "git.commit",
-                idempotencyKey,
-                observedState: acceptedCommit,
-            });
-        }
-        if (await this.#blockItemForStop(item, attemptId)) {
-            return;
-        }
-        const delivered = await this.#deliverItem(item, worktreePath, acceptedCommit);
-        if (!delivered) {
-            await this.#blockItemForStop(item, attemptId);
-            return;
-        }
-        if (await this.#blockItemForStop(item, attemptId)) {
-            return;
+        const finalHook = await inspectPreCommitHook(worktreePath);
+        const receiptIds = [];
+        for (const { event: receiptEvent } of this.#records) {
+            if (receiptEvent.type !== "RECEIPT_RECORDED" || receiptEvent.itemId !== item.id
+                || receiptEvent.attemptId !== attemptId) {
+                continue;
+            }
+            const receiptValue = JSON.parse(await readFile(join(this.#runDirectory, "receipts", `${receiptEvent.receiptId}.json`), "utf8"));
+            const requiredGateReceipt = receiptEvent.gateId !== undefined && item.acceptance.some((predicate) => predicate.type === "gate-passed" && predicate.gateId === receiptEvent.gateId);
+            if (isRecord(receiptValue) && receiptValue.subject === verification.subject
+                && (receiptEvent.receiptKind === "predicate" || requiredGateReceipt)) {
+                receiptIds.push(receiptEvent.receiptId);
+            }
         }
         await this.#record({
-            ...eventBase("All item predicates and delivery requirements are met"),
-            type: "ITEM_SATISFIED",
+            ...eventBase("Exact tree and acceptance evidence verified"),
+            type: "ITEM_VERIFIED",
             itemId: item.id,
             attemptId,
             subject: verification.subject,
+            headCommit: finalObservation.headCommit,
+            treeIdentity: finalObservation.treeIdentity,
+            auxiliaryRefIdentity: finalObservation.auxiliaryRefIdentity,
+            configurationIdentity: finalObservation.configurationIdentity,
+            hookIdentity: finalHook.identity,
+            ...(finalHook.path === undefined ? {} : { hookPath: finalHook.path }),
+            commitRequired: !finalObservation.clean,
+            receiptIds,
         });
+        const checkpoint = this.#projection.items[item.id]?.verified;
+        if (checkpoint === undefined) {
+            throw new AutopilotError("JOURNAL_CORRUPT", "verified checkpoint was not projected");
+        }
+        await this.#completeVerifiedItem(item, worktreePath, checkpoint);
     }
     async run() {
         if (this.#projection.state === "SUCCEEDED" || this.#projection.state === "STOPPED") {
             return await this.#writeReport();
         }
         if (await this.#stopRunIfRequested()) {
+            return await this.#writeReport();
+        }
+        if (!this.#hasUnobservedExecution() && await this.#settlePauseIfRequested()) {
             return await this.#writeReport();
         }
         try {
@@ -941,6 +1601,9 @@ export class AutopilotEngine {
             return await this.#writeReport();
         }
         if (await this.#stopRunIfRequested()) {
+            return await this.#writeReport();
+        }
+        if (!this.#hasUnobservedExecution() && await this.#settlePauseIfRequested()) {
             return await this.#writeReport();
         }
         if (this.#charter.minimumAssurance === "enforced" && this.#manifest.assurance !== "enforced") {
@@ -967,29 +1630,86 @@ export class AutopilotEngine {
         if (await this.#stopRunIfRequested()) {
             return await this.#writeReport();
         }
+        if (await this.#settlePauseIfRequested()) {
+            return await this.#writeReport();
+        }
         await this.#record({ ...eventBase("Reconciling durable state and observed effects", "reconciler"), type: "RECONCILIATION_STARTED" });
         await this.#reconcileInterruptedItems();
         await this.#record({ ...eventBase("Reconciliation completed", "reconciler"), type: "RECONCILIATION_COMPLETED" });
+        if (await this.#waitForUnknownExecution()) {
+            return await this.#writeReport();
+        }
         while (this.#projection.state === "RUNNING") {
             if (await this.#stopRunIfRequested()) {
                 break;
+            }
+            if (await this.#settlePauseIfRequested()) {
+                break;
+            }
+            const verifiedItems = this.#charter.work.filter(({ id }) => {
+                const projected = this.#projection.items[id];
+                return projected?.state === "VERIFYING" && projected.verified !== undefined;
+            });
+            if (verifiedItems.length > 0) {
+                await Promise.all(verifiedItems.map(async (item) => {
+                    const checkpoint = this.#projection.items[item.id]?.verified;
+                    if (checkpoint === undefined) {
+                        return;
+                    }
+                    const lease = await readLease(this.#runDirectory, item.id);
+                    const worktreePath = lease?.worktreePath ?? await resolveWorktreePath(this.#charter, item);
+                    try {
+                        await this.#completeVerifiedItem(item, worktreePath, checkpoint);
+                    }
+                    catch (error) {
+                        if (!this.#pauseRequested && !this.#stopRequested) {
+                            await this.#record({
+                                ...eventBase(error instanceof Error ? error.message : String(error)),
+                                type: "ITEM_BLOCKED",
+                                itemId: item.id,
+                                attemptId: checkpoint.attemptId,
+                                errorCode: error instanceof AutopilotError ? error.code : "UNKNOWN_FAILURE",
+                            });
+                        }
+                    }
+                }));
+                if (this.#pauseRequested) {
+                    await this.#settlePauseIfRequested();
+                }
+                if (this.#stopRequested) {
+                    await this.#stopRunIfRequested();
+                }
+                continue;
             }
             const frontier = runnableFrontier(this.#charter, this.#projection, this.#manifest.maxConcurrency);
             if (frontier.length === 0) {
                 const satisfied = this.#charter.work.every(({ id }) => this.#projection.items[id]?.state === "SATISFIED");
                 if (satisfied) {
-                    if (await this.#stopRunIfRequested()) {
+                    if (await this.#stopRunIfRequested() || await this.#settlePauseIfRequested()) {
                         break;
                     }
                     await this.#record({ ...eventBase("Evaluating the complete charter"), type: "RUN_VERIFYING" });
-                    if (await this.#stopRunIfRequested()) {
+                    if (await this.#stopRunIfRequested() || await this.#settlePauseIfRequested()) {
                         break;
                     }
-                    await this.#record({
-                        ...eventBase("Every original completion predicate is satisfied"),
-                        type: "RUN_SUCCEEDED",
-                        predicateSummary: "All work items are SATISFIED with current tree-bound receipts.",
-                    });
+                    try {
+                        await this.#record({
+                            ...eventBase("Every original completion predicate is satisfied"),
+                            type: "RUN_SUCCEEDED",
+                            predicateSummary: "All work items are SATISFIED with current tree-bound receipts.",
+                        });
+                    }
+                    catch (error) {
+                        if (!this.#pauseRequested && !this.#stopRequested) {
+                            throw error;
+                        }
+                        if (this.#stopRequested) {
+                            await this.#stopRunIfRequested();
+                        }
+                        else {
+                            await this.#settlePauseIfRequested();
+                        }
+                    }
                     break;
                 }
                 for (const item of blockedByDependency(this.#charter, this.#projection)) {
