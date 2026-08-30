@@ -96,9 +96,11 @@ export class AutopilotEngine {
   readonly #charter: RunCharter;
   readonly #adapter: HarnessPort;
   readonly #requested: ReadonlySet<GrantFamily>;
+  readonly #managedBranches: readonly string[];
   #records: JournalRecord[];
   #projection: RunProjection;
   #appendQueue: Promise<void> = Promise.resolve();
+  #worktreeMutationQueue: Promise<void> = Promise.resolve();
   #manifest: CapabilityManifest | undefined;
   #amendment: AmendmentContext | undefined;
   #stopRequested = false;
@@ -119,6 +121,7 @@ export class AutopilotEngine {
       && options.projection.waiting?.kind !== "operator-pause";
     this.#pauseRequestId = options.projection.pauseRequestId;
     this.#requested = playbookRequests(options.charter);
+    this.#managedBranches = options.charter.work.map(({ branchName }) => branchName);
   }
 
   async requestStop(): Promise<void> {
@@ -275,6 +278,10 @@ export class AutopilotEngine {
     }
   }
 
+  async #observeRepository(worktreePath: string): Promise<RepositoryObservation> {
+    return await observeRepository(worktreePath, this.#managedBranches);
+  }
+
   #runtimeAuthorize(family: GrantFamily, details: Omit<Parameters<typeof authorizeEffect>[0], "family" | "actor"> = {}): void {
     authorizeEffect({ family, actor: "runtime", ...details }, this.#requested, this.#charter.grants, RUNTIME_CAPABILITIES);
   }
@@ -369,7 +376,7 @@ export class AutopilotEngine {
             || lease.attemptId !== attempt.attemptId || lease.epoch !== attempt.leaseEpoch) {
             throw new AutopilotError("JOURNAL_CORRUPT", "interrupted attempt writer lease changed identity");
           }
-          const observed = await observeRepository(lease.worktreePath);
+          const observed = await this.#observeRepository(lease.worktreePath);
           const confirmedCommit = this.#records.flatMap(({ event }) =>
             event.type === "EFFECT_CONFIRMED" && event.itemId === item.id && event.effect === "git.commit"
               ? [event.observedState]
@@ -383,17 +390,24 @@ export class AutopilotEngine {
             && observed.headCommit !== confirmedCommit && observed.headCommit !== reconciledCommit) {
             throw new AutopilotError("BRANCH_COLLISION", "verifying attempt has an unowned HEAD commit");
           }
-          const confirmedPushRefIdentity = this.#records.flatMap(({ event }) =>
+          const confirmedPush = this.#records.findLast(({ event }) =>
             event.type === "EFFECT_CONFIRMED" && event.itemId === item.id && event.effect === "remote.push"
-              && event.repositoryAuxiliaryRefIdentity !== undefined
-              ? [event.repositoryAuxiliaryRefIdentity]
-              : []
-          ).at(-1);
-          const expectedAuxiliaryRefIdentity = confirmedPushRefIdentity
+          )?.event;
+          const expectedExternalRefIdentity = confirmedPush?.type === "EFFECT_CONFIRMED"
+            ? confirmedPush.repositoryExternalRefIdentity
+            : undefined;
+          const externalRefIdentity = expectedExternalRefIdentity
+            ?? itemProjection.verified?.externalRefIdentity
+            ?? attempt.expectedExternalRefIdentity;
+          const legacyAuxiliaryRefIdentity = confirmedPush?.type === "EFFECT_CONFIRMED"
+            ? confirmedPush.repositoryAuxiliaryRefIdentity
+            : undefined;
+          const auxiliaryRefIdentity = legacyAuxiliaryRefIdentity
             ?? itemProjection.verified?.auxiliaryRefIdentity
             ?? attempt.expectedRefIdentity;
-          if (expectedAuxiliaryRefIdentity !== undefined
-            && observed.auxiliaryRefIdentity !== expectedAuxiliaryRefIdentity) {
+          if ((externalRefIdentity !== undefined && observed.externalRefIdentity !== externalRefIdentity)
+            || (externalRefIdentity === undefined && auxiliaryRefIdentity !== undefined
+              && observed.auxiliaryRefIdentity !== auxiliaryRefIdentity)) {
             throw new AutopilotError("BRANCH_COLLISION", "Git refs changed during an interrupted attempt");
           }
           if (attempt.expectedConfigurationIdentity !== undefined
@@ -741,15 +755,18 @@ export class AutopilotEngine {
 
   async #completeVerifiedItem(item: WorkItem, worktreePath: string, checkpoint: VerifiedCheckpoint): Promise<void> {
     await this.#validateVerifiedCheckpointEvidence(item, checkpoint);
-    let observation = await observeRepository(worktreePath);
-    const confirmedPushRefIdentity = this.#records.flatMap(({ event }) =>
+    let observation = await this.#observeRepository(worktreePath);
+    const confirmedPush = this.#records.findLast(({ event }) =>
       event.type === "EFFECT_CONFIRMED" && event.itemId === item.id && event.effect === "remote.push"
-        && event.repositoryAuxiliaryRefIdentity !== undefined
-        ? [event.repositoryAuxiliaryRefIdentity]
-        : []
-    ).at(-1);
-    const expectedAuxiliaryRefIdentity = confirmedPushRefIdentity ?? checkpoint.auxiliaryRefIdentity;
-    if (observation.auxiliaryRefIdentity !== expectedAuxiliaryRefIdentity
+    )?.event;
+    const expectedExternalRefIdentity = confirmedPush?.type === "EFFECT_CONFIRMED"
+      ? confirmedPush.repositoryExternalRefIdentity ?? checkpoint.externalRefIdentity
+      : checkpoint.externalRefIdentity;
+    const expectedAuxiliaryRefIdentity = confirmedPush?.type === "EFFECT_CONFIRMED"
+      ? confirmedPush.repositoryAuxiliaryRefIdentity ?? checkpoint.auxiliaryRefIdentity
+      : checkpoint.auxiliaryRefIdentity;
+    if ((expectedExternalRefIdentity !== undefined && observation.externalRefIdentity !== expectedExternalRefIdentity)
+      || (expectedExternalRefIdentity === undefined && observation.auxiliaryRefIdentity !== expectedAuxiliaryRefIdentity)
       || observation.configurationIdentity !== checkpoint.configurationIdentity) {
       throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "repository identity changed after item verification");
     }
@@ -781,7 +798,7 @@ export class AutopilotEngine {
             expectedState: checkpoint.treeIdentity,
           });
         }
-        observation = await observeRepository(worktreePath);
+        observation = await this.#observeRepository(worktreePath);
         if (observation.headCommit === checkpoint.headCommit) {
           if (observation.treeIdentity !== checkpoint.treeIdentity) {
             throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "verified tree changed before commit reconciliation");
@@ -818,7 +835,7 @@ export class AutopilotEngine {
           observedState: acceptedCommit,
         });
       }
-      observation = await observeRepository(worktreePath);
+      observation = await this.#observeRepository(worktreePath);
       if (observation.headCommit !== acceptedCommit) {
         throw new AutopilotError("BRANCH_COLLISION", "managed branch no longer points to the confirmed commit");
       }
@@ -1040,7 +1057,7 @@ export class AutopilotEngine {
           this.#amendment.deliveryBaseCommit,
           expectedCommit,
         );
-      const afterPush = await observeRepository(worktreePath);
+      const afterPush = await this.#observeRepository(worktreePath);
       await this.#record({
         ...eventBase("Expected remote branch commit observed"),
         type: "EFFECT_CONFIRMED",
@@ -1049,6 +1066,7 @@ export class AutopilotEngine {
         idempotencyKey: pushKey,
         observedState: remoteCommit,
         repositoryAuxiliaryRefIdentity: afterPush.auxiliaryRefIdentity,
+        repositoryExternalRefIdentity: afterPush.externalRefIdentity,
       });
     }
     if (this.#amendment !== undefined) {
@@ -1341,9 +1359,10 @@ export class AutopilotEngine {
     }
     const reviewObservationPath = join(attemptsDirectory, `${attemptId}.review-${reviewKey}-${contextHash.slice(0, 16)}.json`);
     await writeJsonAtomic(reviewObservationPath, adapterObservation);
-    const after = await observeRepository(worktreePath);
+    const after = await this.#observeRepository(worktreePath);
     if (after.headCommit !== observation.headCommit || after.treeIdentity !== observation.treeIdentity
-      || after.refIdentity !== observation.refIdentity || after.configurationIdentity !== observation.configurationIdentity) {
+      || after.externalRefIdentity !== observation.externalRefIdentity
+      || after.configurationIdentity !== observation.configurationIdentity) {
       throw new AutopilotError("CAPABILITY_DENIED", "reviewer changed the worktree, Git refs, or Git configuration");
     }
     const result = adapterObservation.status === "completed" ? adapterObservation.reviewResult : undefined;
@@ -1394,9 +1413,9 @@ export class AutopilotEngine {
     }
     const subject = `tree:${observation.treeIdentity}`;
     const receipts = [...await executeItemGates(this.#charter, item, worktreePath, subject)];
-    const afterDirectGates = await observeRepository(worktreePath);
+    const afterDirectGates = await this.#observeRepository(worktreePath);
     if (afterDirectGates.headCommit !== observation.headCommit || afterDirectGates.treeIdentity !== observation.treeIdentity
-      || afterDirectGates.refIdentity !== observation.refIdentity
+      || afterDirectGates.externalRefIdentity !== observation.externalRefIdentity
       || afterDirectGates.configurationIdentity !== observation.configurationIdentity) {
       throw new AutopilotError("CAPABILITY_DENIED", "verification gate changed the worktree, Git refs, or Git configuration");
     }
@@ -1405,9 +1424,9 @@ export class AutopilotEngine {
     )) {
       receipts.push(await this.#executeReviewGate(item, gate, worktreePath, attemptId, observation));
     }
-    const afterGates = await observeRepository(worktreePath);
+    const afterGates = await this.#observeRepository(worktreePath);
     if (afterGates.headCommit !== observation.headCommit || afterGates.treeIdentity !== observation.treeIdentity
-      || afterGates.refIdentity !== observation.refIdentity
+      || afterGates.externalRefIdentity !== observation.externalRefIdentity
       || afterGates.configurationIdentity !== observation.configurationIdentity) {
       throw new AutopilotError("CAPABILITY_DENIED", "review gate changed the worktree, Git refs, or Git configuration");
     }
@@ -1474,9 +1493,21 @@ export class AutopilotEngine {
         ? [event.observedState]
         : []
     );
-    const worktreePath = this.#amendment?.worktreePath
-      ?? await ensureWorktree(this.#charter, item, baseCommit, ownedCommits);
-    const before = await observeRepository(worktreePath);
+    let worktreePath = this.#amendment?.worktreePath;
+    if (worktreePath === undefined) {
+      const previousMutation = this.#worktreeMutationQueue;
+      let releaseMutation: () => void = () => undefined;
+      this.#worktreeMutationQueue = new Promise((resolveMutation) => {
+        releaseMutation = resolveMutation;
+      });
+      await previousMutation;
+      try {
+        worktreePath = await ensureWorktree(this.#charter, item, baseCommit, ownedCommits);
+      } finally {
+        releaseMutation();
+      }
+    }
+    const before = await this.#observeRepository(worktreePath);
     const hookSnapshot = this.#charter.commitPolicy?.preCommitHook === "run"
       ? await inspectPreCommitHook(worktreePath)
       : undefined;
@@ -1527,6 +1558,7 @@ export class AutopilotEngine {
       expectedBaseCommit: before.headCommit,
       expectedTreeIdentity: before.treeIdentity,
       expectedRefIdentity: before.auxiliaryRefIdentity,
+      expectedExternalRefIdentity: before.externalRefIdentity,
       expectedConfigurationIdentity: before.configurationIdentity,
       ...(hookSnapshot === undefined ? {} : {
         expectedHookIdentity: hookSnapshot.identity,
@@ -1585,7 +1617,7 @@ export class AutopilotEngine {
     const observationPath = join(attemptsDirectory, `${attemptId}.json`);
     await writeJsonAtomic(observationPath, observation);
     const currentLease = await readLease(this.#runDirectory, item.id);
-    const after = await observeRepository(worktreePath);
+    const after = await this.#observeRepository(worktreePath);
     const leaseIdentityCurrent = currentLease !== undefined
       && currentLease.attemptId === attemptId && currentLease.epoch === lease.epoch;
     const stale = !leaseIdentityCurrent || !leaseIsCurrent(currentLease, attemptId);
@@ -1625,7 +1657,7 @@ export class AutopilotEngine {
       });
       return;
     }
-    if (after.refIdentity !== before.refIdentity) {
+    if (after.externalRefIdentity !== before.externalRefIdentity) {
       await this.#record({
         ...eventBase("Harness worker changed a Git ref"),
         type: "ITEM_BLOCKED",
@@ -1698,7 +1730,7 @@ export class AutopilotEngine {
         this.#charter.limits.attemptTimeoutMs,
         this.#charter.limits.maxRetainedOutputBytes,
       );
-      const hookObservation = await observeRepository(worktreePath);
+      const hookObservation = await this.#observeRepository(worktreePath);
       const hooksDirectory = join(this.#runDirectory, "reports", "hooks");
       await mkdir(hooksDirectory, { recursive: true, mode: 0o700 });
       const hookPath = join(hooksDirectory, `${attemptId}.json`);
@@ -1727,7 +1759,8 @@ export class AutopilotEngine {
       if (await this.#blockItemForStop(item, attemptId)) {
         return;
       }
-      if (hookObservation.headCommit !== finalObservation.headCommit || hookObservation.refIdentity !== finalObservation.refIdentity) {
+      if (hookObservation.headCommit !== finalObservation.headCommit
+        || hookObservation.externalRefIdentity !== finalObservation.externalRefIdentity) {
         throw new AutopilotError("BRANCH_COLLISION", "pre-commit hook changed HEAD or another Git ref");
       }
       if (hookObservation.configurationIdentity !== finalObservation.configurationIdentity) {
@@ -1791,6 +1824,7 @@ export class AutopilotEngine {
       headCommit: finalObservation.headCommit,
       treeIdentity: finalObservation.treeIdentity,
       auxiliaryRefIdentity: finalObservation.auxiliaryRefIdentity,
+      externalRefIdentity: finalObservation.externalRefIdentity,
       configurationIdentity: finalObservation.configurationIdentity,
       hookIdentity: finalHook.identity,
       ...(finalHook.path === undefined ? {} : { hookPath: finalHook.path }),

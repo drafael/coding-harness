@@ -8,6 +8,7 @@ export interface AttemptProjection {
     readonly expectedBaseCommit: string;
     readonly expectedTreeIdentity?: string;
     readonly expectedRefIdentity?: string;
+    readonly expectedExternalRefIdentity?: string;
     readonly expectedConfigurationIdentity?: string;
     readonly expectedHookIdentity?: string;
     readonly expectedHookPath?: string;
@@ -26,6 +27,7 @@ export interface VerifiedCheckpoint {
     readonly headCommit: string;
     readonly treeIdentity: string;
     readonly auxiliaryRefIdentity: string;
+    readonly externalRefIdentity?: string;
     readonly configurationIdentity: string;
     readonly hookIdentity?: string;
     readonly hookPath?: string;

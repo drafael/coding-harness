@@ -37,6 +37,21 @@ test("repository observation stages a deterministic tree and rejects out-of-scop
   await assert.rejects(assertWritablePaths(worktree, observation.changedPaths, item.writableRoots), /outside writable roots/);
 });
 
+test("repository observation excludes only declared managed branches from external ref identity", async () => {
+  const repository = await createRepository();
+  const managedBranch = "autopilot/run/item";
+  const before = await observeRepository(repository.root, [managedBranch]);
+
+  await runChecked({ executable: "git", arguments: ["branch", managedBranch], cwd: repository.root });
+  const afterManagedBranch = await observeRepository(repository.root, [managedBranch]);
+  await runChecked({ executable: "git", arguments: ["branch", "unexpected-ref"], cwd: repository.root });
+  const afterUnexpectedBranch = await observeRepository(repository.root, [managedBranch]);
+
+  assert.notEqual(afterManagedBranch.refIdentity, before.refIdentity);
+  assert.equal(afterManagedBranch.externalRefIdentity, before.externalRefIdentity);
+  assert.notEqual(afterUnexpectedBranch.externalRefIdentity, before.externalRefIdentity);
+});
+
 test("long sibling worktree names are bounded and identity-specific", async () => {
   const repository = await createRepository();
   const proposal = proposedCharter(repository.root, repository.baseCommit, "single", "r".repeat(128));

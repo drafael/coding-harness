@@ -182,7 +182,7 @@ export async function assertWritablePaths(worktreePath, changed, writableRoots) 
         }
     }
 }
-export async function observeRepository(worktreePath) {
+export async function observeRepository(worktreePath, managedBranches = []) {
     const [headCommit, branchName, refState, configurationState] = await Promise.all([
         git(worktreePath, ["rev-parse", "HEAD"]),
         currentBranch(worktreePath),
@@ -190,7 +190,10 @@ export async function observeRepository(worktreePath) {
         git(worktreePath, ["config", "--show-origin", "--null", "--list"]),
     ]);
     const refIdentity = sha256(refState);
-    const auxiliaryRefIdentity = sha256(refState.split("\n").filter((line) => !line.startsWith(`refs/heads/${branchName}\t`)).join("\n"));
+    const refLines = refState.split("\n");
+    const auxiliaryRefIdentity = sha256(refLines.filter((line) => !line.startsWith(`refs/heads/${branchName}\t`)).join("\n"));
+    const managedRefs = new Set(managedBranches.map((managedBranch) => `refs/heads/${managedBranch}`));
+    const externalRefIdentity = sha256(refLines.filter((line) => !managedRefs.has(line.split("\t", 1)[0] ?? "")).join("\n"));
     const configurationIdentity = sha256(configurationState);
     const changed = await changedPaths(worktreePath);
     let treeIdentity = await git(worktreePath, ["rev-parse", "HEAD^{tree}"]);
@@ -205,6 +208,7 @@ export async function observeRepository(worktreePath) {
         clean: changed.length === 0,
         refIdentity,
         auxiliaryRefIdentity,
+        externalRefIdentity,
         configurationIdentity,
     };
 }

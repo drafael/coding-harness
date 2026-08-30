@@ -76,6 +76,7 @@ export type LifecycleEvent = (EventBase & {
     readonly expectedBaseCommit: string;
     readonly expectedTreeIdentity?: string;
     readonly expectedRefIdentity?: string;
+    readonly expectedExternalRefIdentity?: string;
     readonly expectedConfigurationIdentity?: string;
     readonly expectedHookIdentity?: string;
     readonly expectedHookPath?: string;
@@ -107,6 +108,7 @@ export type LifecycleEvent = (EventBase & {
     readonly headCommit: string;
     readonly treeIdentity: string;
     readonly auxiliaryRefIdentity: string;
+    readonly externalRefIdentity?: string;
     readonly configurationIdentity: string;
     readonly hookIdentity?: string;
     readonly hookPath?: string;
@@ -135,6 +137,7 @@ export type LifecycleEvent = (EventBase & {
     readonly idempotencyKey: string;
     readonly observedState: string;
     readonly repositoryAuxiliaryRefIdentity?: string;
+    readonly repositoryExternalRefIdentity?: string;
 }) | (EventBase & {
     readonly type: "RECEIPT_RECORDED";
     readonly receiptId: string;

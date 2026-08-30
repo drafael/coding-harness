@@ -7,6 +7,7 @@ export interface RepositoryObservation {
     readonly clean: boolean;
     readonly refIdentity: string;
     readonly auxiliaryRefIdentity: string;
+    readonly externalRefIdentity: string;
     readonly configurationIdentity: string;
 }
 export declare function resolveCommit(repositoryRoot: string, ref: string): Promise<string>;
@@ -27,7 +28,7 @@ export declare function resolveWorktreePath(charter: RunCharter, item: WorkItem)
 export declare function assertRegisteredWorktree(repositoryRoot: string, worktreePath: string): Promise<void>;
 export declare function ensureWorktree(charter: RunCharter, item: WorkItem, baseCommit?: string, ownedCommits?: readonly string[]): Promise<string>;
 export declare function assertWritablePaths(worktreePath: string, changed: readonly string[], writableRoots: readonly string[]): Promise<void>;
-export declare function observeRepository(worktreePath: string): Promise<RepositoryObservation>;
+export declare function observeRepository(worktreePath: string, managedBranches?: readonly string[]): Promise<RepositoryObservation>;
 export declare function remoteBranchCommit(repositoryRoot: string, remote: string, branchName: string): Promise<string | undefined>;
 export declare function pushBranch(worktreePath: string, remote: string, branchName: string, expectedCommit: string): Promise<string>;
 export declare function pushAmendmentBranch(worktreePath: string, remote: string, branchName: string, previousCommit: string, expectedCommit: string): Promise<string>;
