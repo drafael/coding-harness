@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; Windows, provider notification wake, restart reattachment, and restack evidence remain incomplete
+- **Status:** Developer-preview implementation available; provider notification wake, restart reattachment, and restack evidence remain incomplete
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
@@ -233,6 +233,8 @@ run.lock                 single-coordinator lock
 ```
 
 `events.jsonl` is canonical. Each event carries a sequence number, previous-event hash, run and item identities, attempt identity where applicable, timestamp, reason, and evidence pointers. `snapshot.json` is a cache and may be discarded and rebuilt.
+
+The runtime fsyncs written files before publishing them. POSIX hosts also fsync the parent directory after immutable creation or atomic replacement. Node.js directory handles reject fsync on Windows, so the Windows path relies on the completed file sync plus same-volume rename and does not claim equivalent sudden-power-loss metadata persistence. Node 24 CI on `windows-latest` exercises locks, atomic writes, worktrees, governed hooks through Git for Windows, provider fixtures, cancellation, and descendant process-tree termination.
 
 Git objects remain authoritative for commits, trees, and refs. Verification receipts remain authoritative for observed gate results. Material decisions are journal events. `decisions.tsv` is a generated review projection, not a second mutable source of truth.
 
@@ -555,7 +557,7 @@ Implementation evidence must resolve:
 - Whether Node Single Executable Applications, Bun compilation, or another mechanism best packages future standalone executables.
 - Which public event surfaces provide reliable cancellation and completion for each target harness version.
 - How GitHub and GitLab stack semantics differ when a lower change request merges or retargets descendants.
-- Which filesystem-lock strategy behaves consistently on Windows.
+- Whether Windows needs a platform-native directory durability mechanism beyond file fsync and same-volume rename for sudden-power-loss guarantees.
 - Which environment attributes must participate in a verification receipt identity without making receipts needlessly stale.
 - Whether provider CLIs expose enough idempotency metadata or adapters need direct API calls.
 

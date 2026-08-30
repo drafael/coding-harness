@@ -6,14 +6,14 @@ Adapters start fresh noninteractive sessions and normalize observations. They ca
 
 | Adapter | Command surface | Assurance | Restart reattachment | Verification status |
 |---|---|---|---|---|
-| Pi | Pi JSON mode plus `pi-subagents` structured delegation when version 0.53.0+ is installed; direct Pi fallback otherwise | Cooperative | No | Local edit, exact-tree review, verification, commit, and provider amendment passed with Pi 0.84.4 through pi-subagents 0.60.0; the direct fallback is covered by a controlled adapter test; cancellation and crash reattachment remain unverified |
-| Claude Code | `claude --print --output-format stream-json --safe-mode ...` | Cooperative | No | Command and failure reporting exercised with 2.1.210; edit flow blocked by expired local OAuth and remains unverified |
-| Codex | `codex exec --json --ephemeral --sandbox workspace-write ...` | Cooperative overall; Codex enforces the workspace sandbox, while item-path restrictions are post-checked | No | Local single-objective edit, verification, and commit passed with 0.149.0 |
-| OpenCode | `opencode run --format json --pure --auto ...` | Cooperative | No | Local single-objective edit, verification, and commit passed with 1.18.21 |
+| Pi | Pi JSON mode plus `pi-subagents` structured delegation when version 0.53.0+ is installed; direct Pi fallback otherwise | Cooperative | No | Local edit, exact-tree review, verification, commit, and provider amendment passed with Pi 0.84.4 through pi-subagents 0.60.0; the direct fallback and process-tree cancellation have controlled coverage; crash reattachment remains unverified |
+| Claude Code | `claude --print --output-format stream-json --safe-mode ...` | Cooperative | No | Two disposable exact-tree attempts with 2.1.251 ended `ADAPTER_FAILED` while the process reported `apiKeySource: none`; authenticated edit and review flows remain unverified |
+| Codex | `codex exec --json --ephemeral --sandbox workspace-write ...` | Cooperative overall; Codex enforces the workspace sandbox, while item-path restrictions are post-checked | No | Disposable local edit, exact-tree review, verification, and commit passed with 0.151.0 |
+| OpenCode | `opencode run --format json --pure --auto ...` | Cooperative | No | Disposable local edit, exact-tree review, verification, and commit passed with 1.18.25 |
 
 The adapter parser bounds output and rejects malformed JSON-mode output. The runtime ignores model completion claims and inspects the worktree directly.
 
-For a `review` gate, the runtime sends a separate role-scoped request with no writable roots or worker write/process grants. Claude Code receives only read/search tools, Codex uses its read-only sandbox, and direct Pi receives only its read tool. OpenCode and any ambient operating-system access remain cooperative. The adapter extracts exactly one structured review marker; missing, contradictory, malformed, truncated, timed-out, or inconclusive output is `UNVERIFIED`. The runtime compares the complete tree, HEAD, refs, and Git configuration before and after review and rejects any mutation. The Pi path passed a version-pinned disposable live run with Pi 0.84.4; the other bundled harness review paths have controlled coverage only.
+For a `review` gate, the runtime sends a separate role-scoped request with no writable roots or worker write/process grants. Claude Code receives only read/search tools, Codex uses its read-only sandbox, and direct Pi receives only its read tool. OpenCode and any ambient operating-system access remain cooperative. The adapter extracts exactly one structured review marker; missing, contradictory, malformed, truncated, timed-out, or inconclusive output is `UNVERIFIED`. The runtime compares the complete tree, HEAD, refs, and Git configuration before and after review and rejects any mutation. Version-pinned disposable exact-tree runs passed with Pi 0.84.4, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 did not reach review because its noninteractive process had no usable credential source, so that path remains unverified.
 
 For Pi, Autopilot checks the standard Pi package directory for `pi-subagents` 0.53.0 or newer. When present, it loads only that extension and Autopilot's bridge, delegates the item to the resolved `worker` role through the public structured delegation API, and keeps the worker in Autopilot's existing worktree. The read-only exact-tree review role runs directly and is not subjected to the worker-only subagent terminal envelope. Autopilot does not install or update the extension. An older or absent installation uses the direct Pi process and reports that fallback through `doctor` and adapter limitations.
 
@@ -40,6 +40,6 @@ Unit tests use controlled fake CLIs for command construction, changed-head denia
 - Late results from expired leases are quarantined.
 - Provider head changes block merge.
 - Review findings block the current attempt and enter the next deterministic attempt context as untrusted data.
-- Independent-review support remains unverified for every live harness version until a disposable exact-tree run passes.
+- Independent review remains version- and environment-specific; only the exact Pi, Codex, and OpenCode versions documented above have passed disposable exact-tree runs.
 
 No adapter may silently downgrade a completion predicate or create a waiver.

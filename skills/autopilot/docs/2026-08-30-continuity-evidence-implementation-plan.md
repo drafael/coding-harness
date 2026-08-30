@@ -1,6 +1,6 @@
 # Autopilot continuity, evidence, review, and supervision implementation plan
 
-- **Status:** Implemented through Phase 6A and packaged; Phase 6B notification wake and automatic orphan supervision remain separately evidence-gated
+- **Status:** Implemented through Phase 6A and packaged; Windows CI and exact-tree Codex/OpenCode review are validated; Phase 6B notification wake and automatic orphan supervision remain separately evidence-gated
 - **Date:** 2026-08-30
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Harness-agnostic Autopilot design](architecture.md)
@@ -65,7 +65,7 @@ The implementation began from this boundary:
 3. Reports listed receipt IDs but did not provide one evidence result for every acceptance predicate.
 4. The baseline package suite contained 111 passing Node tests.
 
-Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, an exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. The exact-tree review gate passed with Pi 0.84.4; other harness adapters and production notification wake remain unverified.
+Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, an exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. The exact-tree review gate passed with Pi 0.84.4, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 lacked a usable noninteractive credential source, and production notification wake remains unverified.
 
 ## Phase 0: Align documentation with executable support
 
@@ -411,7 +411,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 - `/autopilot resume` continues a paused run; it still refuses a stopped or successful run.
 - A stale-token pause request cannot affect a replacement coordinator.
 - Pause never widens authority or consumes an extra attempt solely because cancellation was operator-requested.
-- Windows process-group behavior remains unverified until exercised on Windows.
+- Windows process-tree cancellation is exercised in Node 24 CI, including an inherited descendant-handle fault case and a foreground coordinator stop.
 
 ## Phase 6: Add optional provider wake with heartbeat fallback
 
@@ -481,7 +481,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 135 passing Node tests and an 85-file package dry run.
+**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 136 passing Node tests on Ubuntu and Windows and an 85-file package dry run.
 
 ### Files
 
@@ -548,6 +548,10 @@ Validate modified Markdown links and balanced fences with the repository's estab
 
 `npm test` and `npm run build` recreate tracked `dist/`. Review source and generated changes together. Remove `.test-dist/` and other temporary output before finishing.
 
+### Windows validation evidence
+
+GitHub Actions run [33319142329](https://github.com/drafael/coding-harness/actions/runs/33319142329) passed the same Node 24 typecheck, lint, format check, and 136-test suite on both `ubuntu-latest` and `windows-latest` at runtime commit `41500fb`. The Windows runs exposed and then verified fixes for unsupported directory fsync, direct governed-hook execution, portable fake CLI fixtures, and descendant process-tree cancellation. Windows writes still do not claim POSIX-equivalent sudden-power-loss directory metadata durability because Node.js cannot fsync a Windows directory handle. Restart reattachment remains a separate unimplemented supervisor boundary.
+
 ## Cross-cutting test matrix
 
 | Boundary | Required cases |
@@ -560,6 +564,7 @@ Validate modified Markdown links and balanced fences with the repository's estab
 | Provider wake | duplicate, reordered, missed event, heartbeat, changed head, cancellation, restart |
 | Security | path escape, symlink escape, command injection, secret leakage, authority expansion |
 | Packaging | clean copy, no `node_modules`, executable `dist`, no temporary artifacts |
+| Windows | lock fencing, file sync and atomic replace, worktrees, Git hooks, fake provider CLIs, timeout/cancellation, descendant process tree |
 
 ## Delivery sequence
 

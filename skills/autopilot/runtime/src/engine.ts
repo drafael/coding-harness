@@ -1975,7 +1975,7 @@ export class AutopilotEngine {
       [
         `Harness behavior is verified only for the recorded ${manifest?.adapterName ?? "unloaded adapter"} ${manifest?.harnessVersion ?? "version"}.`,
         ...(manifest?.limitations ?? []),
-        "Windows locking and process-group cancellation are unverified.",
+        "Sudden-power-loss durability for Windows directory metadata is unverified.",
         "GitHub and GitLab organization policy behavior requires an explicitly authorized disposable repository run.",
       ],
     );

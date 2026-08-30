@@ -82,7 +82,6 @@ export async function runDoctor(): Promise<readonly DoctorCheck[]> {
     await authenticationCheck("github-auth", "gh", ["auth", "status"]),
     await authenticationCheck("gitlab-auth", "glab", ["auth", "status"]),
     await filesystemCheck(),
-    { name: "windows-locking", status: "unverified", detail: "requires the platform fault-injection suite before support is claimed" },
   );
   return checks;
 }
