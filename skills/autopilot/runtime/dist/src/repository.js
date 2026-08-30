@@ -381,10 +381,14 @@ export async function commitAcceptedWork(worktreePath, charter, item, attemptId,
     });
     return commit;
 }
+function comparableWorktreePath(path) {
+    const normalized = resolve(path).replaceAll("\\", "/");
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
 async function registeredWorktreeHead(repositoryRoot, worktreePath) {
     const fields = (await git(repositoryRoot, ["worktree", "list", "--porcelain", "-z"])).split(/[\0\n]/u);
-    const canonicalWorktreePath = join(await realpath(dirname(worktreePath)), basename(worktreePath));
-    const index = fields.findIndex((field) => field === `worktree ${canonicalWorktreePath}`);
+    const canonicalWorktreePath = comparableWorktreePath(join(await realpath(dirname(worktreePath)), basename(worktreePath)));
+    const index = fields.findIndex((field) => field.startsWith("worktree ") && comparableWorktreePath(field.slice("worktree ".length)) === canonicalWorktreePath);
     const head = index < 0 ? undefined : fields[index + 1];
     return head?.startsWith("HEAD ") === true ? head.slice("HEAD ".length) : undefined;
 }
