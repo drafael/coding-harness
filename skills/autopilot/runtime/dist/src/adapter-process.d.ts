@@ -9,7 +9,7 @@ export interface CliHarnessConfiguration {
     readonly cancellation: boolean;
     readonly limitations: readonly string[];
     readonly expectsJsonLines: boolean;
-    readonly validateResult?: (stdout: string) => string | undefined;
+    readonly validateResult?: (stdout: string, request: ExecutionRequest) => string | undefined;
     readonly displayStderrActivity?: boolean;
 }
 export declare function parseReviewResult(stdout: string): ReviewResult | undefined;

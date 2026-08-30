@@ -40,7 +40,7 @@ The completed first release must:
 
 ## Developer-preview evidence
 
-The implementation currently has 133 passing Node test cases and a clean-copy package smoke test. Generated attempt context, predicate-to-evidence reports, exact-tree independent review, intentional pause, and exact-subject provider waiting have controlled coverage; live harness review remains unverified. Disposable local single-objective runs completed through Pi 0.84.2 with pi-subagents 0.53.0, Codex 0.149.0, and OpenCode 1.18.21. Claude Code 2.1.210 reached its adapter and produced normalized diagnostics, but its local OAuth token was expired, so the edit flow remains unverified. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Authorized `drafael/autopilot-live-validation` PR #1 exercised GitHub PR creation and reconciliation, exact review-thread resolution, and exact-head merge with `gh` 2.98.0. Authorized private GitLab project `drafael/autopilot-live-validation` MR !1 exercised MR creation and reconciliation, exact discussion resolution, duplicate-status latest selection, and exact-head merge with `glab` 1.115.0. The complete review-feedback amendment workflow remains unverified on both providers.
+The implementation currently has 135 passing Node test cases and a clean-copy package smoke test. Generated attempt context, predicate-to-evidence reports, exact-tree independent review, intentional pause, and exact-subject provider waiting have controlled coverage. A direct exact-tree review passed with Pi 0.84.4, while exact-tree review through the other bundled harness adapters remains unverified. Disposable local single-objective runs completed through Pi with pi-subagents, Codex 0.149.0, and OpenCode 1.18.21; the latest Pi validation used Pi 0.84.4 with pi-subagents 0.60.0. Claude Code 2.1.210 reached its adapter and produced normalized diagnostics, but its local OAuth token was expired, so the edit flow remains unverified. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Authorized private GitHub project `drafael/autopilot-amendment-validation` PR #1 exercised immutable feedback capture, exact-head successor adoption, fast-forward update, exact thread resolution, merge, and amendment-chain wrap-up with `gh` 2.98.0. Authorized private GitLab project `drafael/autopilot-amendment-validation` MR !2 exercised the equivalent complete amendment workflow with `glab` 1.115.0.
 
 ## Planned package boundary
 
@@ -395,7 +395,7 @@ docs/prerequisites.md
 - The predecessor journal remains byte-for-byte unchanged.
 - Hook-created allowed files are included in the verified commit; changed hook content, out-of-scope files, ref changes, Git configuration changes, mutating gates, and unauthorized environment names are denied.
 - Interrupted commit confirmation and post-push provider failures reconcile without weakening branch identity.
-- Real GitHub and GitLab amendment mutation remains unverified until authorized disposable-provider runs pass.
+- Authorized private disposable-provider runs passed complete GitHub PR #1 and GitLab MR !2 amendment mutation, exact selected-thread resolution, and exact-head merge.
 
 ## Phase 10: Add merged-run wrap-up
 
@@ -413,7 +413,7 @@ docs/prerequisites.md
 - Open requests, dirty worktrees, changed heads, superseded runs, local-only runs, and ambiguous discovery fail without deletion.
 - Amendment wrap-up removes the validated predecessor chain only from the latest successful successor.
 - A legacy lease-path fixture proves cleanup of a provider-merged fast-forward descendant, and chat4j PR #69 provided an authorized real GitHub cleanup result.
-- Other real GitHub and GitLab cleanup behavior remains unverified until additional authorized disposable-provider runs pass.
+- Authorized private GitHub PR #1 and GitLab MR !2 amendment-chain wrap-up removed the exact remote branch, retained worktree, local branch, and predecessor state.
 
 ## Planned package checks
 

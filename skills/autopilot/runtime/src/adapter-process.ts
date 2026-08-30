@@ -25,7 +25,7 @@ export interface CliHarnessConfiguration {
   readonly cancellation: boolean;
   readonly limitations: readonly string[];
   readonly expectsJsonLines: boolean;
-  readonly validateResult?: (stdout: string) => string | undefined;
+  readonly validateResult?: (stdout: string, request: ExecutionRequest) => string | undefined;
   readonly displayStderrActivity?: boolean;
 }
 
@@ -226,7 +226,7 @@ export class CliHarnessAdapter implements HarnessPort {
       } : {}),
     }).then((result): ExecutionObservation => {
       const malformedJson = this.#configuration.expectsJsonLines ? validateJsonLines(result, request.maximumLineBytes) : undefined;
-      const malformed = malformedJson ?? this.#configuration.validateResult?.(result.stdout);
+      const malformed = malformedJson ?? this.#configuration.validateResult?.(result.stdout, request);
       const terminal = parseAdapterMessage(JSON.stringify({
         protocolVersion: 1,
         type: "terminal",

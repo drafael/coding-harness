@@ -184,7 +184,7 @@ export class CliHarnessAdapter {
             } : {}),
         }).then((result) => {
             const malformedJson = this.#configuration.expectsJsonLines ? validateJsonLines(result, request.maximumLineBytes) : undefined;
-            const malformed = malformedJson ?? this.#configuration.validateResult?.(result.stdout);
+            const malformed = malformedJson ?? this.#configuration.validateResult?.(result.stdout, request);
             const terminal = parseAdapterMessage(JSON.stringify({
                 protocolVersion: 1,
                 type: "terminal",

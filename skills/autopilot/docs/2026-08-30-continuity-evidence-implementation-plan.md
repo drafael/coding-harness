@@ -65,7 +65,7 @@ The implementation began from this boundary:
 3. Reports listed receipt IDs but did not provide one evidence result for every acceptance predicate.
 4. The baseline package suite contained 111 passing Node tests.
 
-Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, a fake-adapter-proven exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. Live harness review and production notification wake remain unverified.
+Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, an exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. The exact-tree review gate passed with Pi 0.84.4; other harness adapters and production notification wake remain unverified.
 
 ## Phase 0: Align documentation with executable support
 
@@ -481,7 +481,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 133 passing Node tests and an 85-file package dry run.
+**Result:** Implemented for Phases 0–6A. Phase 6B remains deferred until its provider evidence prerequisite is met. The current validation baseline is 135 passing Node tests and an 85-file package dry run.
 
 ### Files
 

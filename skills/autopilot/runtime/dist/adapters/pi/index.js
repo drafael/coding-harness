@@ -77,13 +77,14 @@ export function createPiAdapter() {
         limitations: [
             "Tool restrictions do not constrain commands executed through bash.",
             "Executions cannot be reattached after coordinator restart.",
-            "The direct exact-tree review role is implemented but has no version-pinned live verification.",
             usingSubagents
                 ? `Pi workers use the pi-subagents ${installation.version} structured delegation API.`
                 : "pi-subagents 0.53.0 or newer was not found; Pi workers run directly without subagent activity integration.",
         ],
         expectsJsonLines: true,
-        ...(usingSubagents ? { validateResult: validateSubagentResult } : {}),
+        ...(usingSubagents ? {
+            validateResult: (stdout, request) => request.role === "review" ? undefined : validateSubagentResult(stdout),
+        } : {}),
         displayStderrActivity: true,
     });
 }

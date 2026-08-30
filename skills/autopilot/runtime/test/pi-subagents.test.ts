@@ -17,10 +17,10 @@ async function fakeInstallation(root: string, version: string): Promise<string> 
   return extensionPath;
 }
 
-function request(): ExecutionRequest {
+function request(role: "implementation" | "review" = "implementation"): ExecutionRequest {
   return {
     protocolVersion: 1,
-    role: "implementation",
+    role,
     runId: "run-12345678",
     itemId: "item-1",
     attemptId: "attempt-1",
@@ -35,6 +35,7 @@ function request(): ExecutionRequest {
     idleTimeoutMs: 10_000,
     maximumLineBytes: 65_536,
     maximumOutputBytes: 262_144,
+    ...(role === "review" ? { reviewFocus: "Review the exact tree." } : {}),
   };
 }
 
@@ -141,6 +142,18 @@ if (args[0] === "--version") {
     assert.ok(arguments_.includes("--extension"));
     assert.ok(arguments_.some((argument) => typeof argument === "string" && argument.startsWith("/autopilot-worker ")));
 
+    const reviewScript = `#!/usr/bin/env node
+console.log(JSON.stringify({type:"message", message:{role:"assistant", content:[{type:"text", text:'AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[]}'}]}}));
+`;
+    await writeFile(join(bin, "pi"), reviewScript);
+    await chmod(join(bin, "pi"), 0o755);
+    const reviewHandle = await adapter.launch(request("review"));
+    const reviewObservation = await adapter.observe(reviewHandle);
+    assert.equal(reviewObservation.status, "completed");
+    assert.deepEqual(reviewObservation.reviewResult, { verdict: "clean", findings: [] });
+
+    await writeFile(join(bin, "pi"), script);
+    await chmod(join(bin, "pi"), 0o755);
     process.env.AUTOPILOT_PI_STATUS = "failed";
     const failedHandle = await adapter.launch(request());
     const failedObservation = await adapter.observe(failedHandle);

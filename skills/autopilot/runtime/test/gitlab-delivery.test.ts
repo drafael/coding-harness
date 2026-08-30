@@ -12,7 +12,11 @@ async function fakeGitLabCli(): Promise<{ readonly bin: string; readonly marker:
 import { writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 if (args[0] === "mr" && args[1] === "view") {
-  console.log(JSON.stringify({iid: 9, web_url: "https://example.invalid/mr/9", state: "opened", diff_refs: {head_sha: process.env.FAKE_HEAD}, target_branch: "main", approved: true}));
+  const head = process.env.FAKE_HEAD;
+  console.log(JSON.stringify({
+    iid: 9, web_url: "https://example.invalid/mr/9", state: "opened", sha: head, target_branch: "main", approved: true,
+    ...(process.env.FAKE_OMIT_DIFF_REFS === "true" ? {} : {diff_refs: {head_sha: process.env.FAKE_DIFF_HEAD ?? head}})
+  }));
 } else if (args[0] === "mr" && args[1] === "merge") {
   writeFileSync(process.env.FAKE_MARKER, args.join(" "));
 } else if (args[0] === "repo" && args[1] === "view") {
@@ -81,6 +85,46 @@ test("GitLab delivery selects the latest status for duplicate check names", asyn
     }]);
   } finally {
     process.env.PATH = priorPath;
+  }
+});
+
+test("GitLab delivery observes the source SHA while diff refs are not prepared", async () => {
+  const fake = await fakeGitLabCli();
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${fake.bin}${delimiter}${priorPath ?? ""}`;
+  process.env.FAKE_HEAD = "expected-head";
+  process.env.FAKE_OMIT_DIFF_REFS = "true";
+  try {
+    const observed = await new GitLabDeliveryAdapter().observeChangeRequest(fake.bin, {
+      provider: "gitlab",
+      id: "9",
+      url: "https://example.invalid/mr/9",
+    });
+
+    assert.equal(observed.headCommit, "expected-head");
+  } finally {
+    process.env.PATH = priorPath;
+    delete process.env.FAKE_HEAD;
+    delete process.env.FAKE_OMIT_DIFF_REFS;
+  }
+});
+
+test("GitLab delivery rejects conflicting source and diff head identities", async () => {
+  const fake = await fakeGitLabCli();
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${fake.bin}${delimiter}${priorPath ?? ""}`;
+  process.env.FAKE_HEAD = "source-head";
+  process.env.FAKE_DIFF_HEAD = "diff-head";
+  try {
+    await assert.rejects(new GitLabDeliveryAdapter().observeChangeRequest(fake.bin, {
+      provider: "gitlab",
+      id: "9",
+      url: "https://example.invalid/mr/9",
+    }), /head identities disagree/);
+  } finally {
+    process.env.PATH = priorPath;
+    delete process.env.FAKE_HEAD;
+    delete process.env.FAKE_DIFF_HEAD;
   }
 });
 
