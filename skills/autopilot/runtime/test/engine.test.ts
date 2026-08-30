@@ -700,9 +700,9 @@ import { spawnSync } from "node:child_process";
 const args = process.argv.slice(2);
 const head = () => spawnSync("git", ["ls-remote", "origin", "refs/heads/autopilot/*"], {encoding:"utf8"}).stdout.trim().split(/\\s+/)[0];
 if (args[0] === "--version") { console.log("gh version test"); process.exit(0); }
-if (args[0] === "pr" && args[1] === "list") {
+if (args[0] === "api" && args[1] === "repos/owner/repository/pulls") {
   appendFileSync(process.env.AUTOPILOT_GH_LIST_CALLS, "list\\n");
-  console.log(existsSync(process.env.AUTOPILOT_GH_CREATED) ? JSON.stringify([{number:1,url:"https://example.invalid/pull/1",body:"Autopilot-Run: run-provider-wait\\nAutopilot-Item: item-1"}]) : "[]"); process.exit(0);
+  console.log(existsSync(process.env.AUTOPILOT_GH_CREATED) ? JSON.stringify([{number:1,html_url:"https://example.invalid/pull/1",body:"Autopilot-Run: run-provider-wait\\nAutopilot-Item: item-1"}]) : "[]"); process.exit(0);
 }
 if (args[0] === "pr" && args[1] === "create") { writeFileSync(process.env.AUTOPILOT_GH_CREATED, "created\\n"); console.log("https://example.invalid/pull/1"); process.exit(0); }
 if (args[0] === "pr" && args[1] === "view") { console.log(JSON.stringify({number:1,url:"https://example.invalid/pull/1",state:existsSync(process.env.AUTOPILOT_GH_MERGED)?"MERGED":"OPEN",headRefOid:head(),baseRefName:"main",reviewDecision:"APPROVED"})); process.exit(0); }
