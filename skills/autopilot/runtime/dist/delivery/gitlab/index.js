@@ -17,6 +17,19 @@ function mergeRequestRef(value) {
     const id = expectInteger(object.iid ?? object.id, "GitLab merge request.iid", 1);
     return { provider: "gitlab", id: String(id), url: expectString(object.web_url, "GitLab merge request.web_url") };
 }
+function mergeRequestHead(object) {
+    const diffRefs = isRecord(object.diff_refs) ? object.diff_refs : undefined;
+    const diffHead = typeof diffRefs?.head_sha === "string" && diffRefs.head_sha.length > 0 ? diffRefs.head_sha : undefined;
+    const sourceHead = typeof object.sha === "string" && object.sha.length > 0 ? object.sha : undefined;
+    if (diffHead !== undefined && sourceHead !== undefined && diffHead !== sourceHead) {
+        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "GitLab merge request head identities disagree");
+    }
+    const head = diffHead ?? sourceHead;
+    if (head === undefined) {
+        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "GitLab merge request did not expose a head commit");
+    }
+    return head;
+}
 export class GitLabDeliveryAdapter {
     async describe() {
         const providerVersion = (await glab(process.cwd(), ["--version"])).split("\n")[0] ?? "unknown";
@@ -33,11 +46,10 @@ export class GitLabDeliveryAdapter {
     async observeChangeRequest(repositoryRoot, ref) {
         const object = expectRecord(parseJson(await glab(repositoryRoot, ["mr", "view", ref.id, "--output", "json"]), "glab mr view"), "GitLab merge request");
         const state = expectLiteral(expectString(object.state, "GitLab merge request.state").toLowerCase(), ["opened", "merged", "closed"], "GitLab merge request.state");
-        const head = expectRecord(object.diff_refs, "GitLab merge request.diff_refs");
         return {
             ref: mergeRequestRef(object),
             state: state === "merged" ? "merged" : state === "closed" ? "closed" : "open",
-            headCommit: expectString(head.head_sha, "GitLab merge request.diff_refs.head_sha"),
+            headCommit: mergeRequestHead(object),
             baseBranch: expectString(object.target_branch, "GitLab merge request.target_branch"),
             approved: object.approved === true || object.approvals_left === 0,
         };
