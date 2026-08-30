@@ -13,7 +13,9 @@ Use `mode: "ordered-stack"` for a linear sequence in which each accepted item is
 
 ## Execution
 
-The runtime exposes only the root frontier initially. After the root is verified and committed, its commit becomes the base of the next worktree. Rewritten code identities invalidate affected receipts; the current implementation avoids automatic restacks by serializing accepted topology.
+The runtime exposes only the root frontier initially. After the root is verified and committed, its commit becomes the base of the next worktree. Rewritten code identities invalidate affected receipts.
+
+A successful `change-request-ready` stack may be followed by an explicitly sealed restack successor after a non-leaf amendment. The successor snapshots the exact descendant authority and identities, creates conflict-free two-parent merge-forward candidates, reruns every sealed gate and exact-tree review, and advances local and remote branches only by compare-safe ordinary fast-forward updates. It never inherits authority implicitly, requests provider mutation authority, rebases, resets, cherry-picks, or force-pushes. Provider access is observation-only. Conflicts or identity drift block with retained evidence; already satisfied descendants remain confirmed, and the runtime does not advertise an invalid partial-suffix continuation.
 
 ## Example intent
 

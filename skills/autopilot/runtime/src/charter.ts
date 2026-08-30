@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { AutopilotError } from "./errors.js";
 import {
   assertKnownKeys,
@@ -20,6 +20,7 @@ export const GRANT_FAMILIES = [
   "credentials.use",
   "git.commit",
   "remote.push",
+  "change-request.observe",
   "change-request.open",
   "change-request.update",
   "review-thread.resolve",
@@ -123,6 +124,33 @@ export interface AmendmentReference {
   readonly itemId: string;
 }
 
+export interface RestackChangeRequestSnapshot {
+  readonly provider: "github" | "gitlab";
+  readonly id: string;
+  readonly url: string;
+  readonly baseBranch: string;
+}
+
+export interface RestackDescendantSnapshot {
+  readonly itemId: string;
+  readonly oldCommit: string;
+  readonly oldTreeIdentity: string;
+  readonly remote: string;
+  readonly remoteCommit: string;
+  readonly changeRequest: RestackChangeRequestSnapshot;
+  readonly worktreePath: string;
+  readonly gateIds: readonly string[];
+}
+
+export interface RestackSuccessor {
+  readonly schemaVersion: 1;
+  readonly predecessorRunId: string;
+  readonly predecessorCharterHash: string;
+  readonly amendedItemId: string;
+  readonly amendedCommit: string;
+  readonly descendants: readonly RestackDescendantSnapshot[];
+}
+
 export interface ReviewFeedbackThread {
   readonly threadId: string;
   readonly contentHash: string;
@@ -173,6 +201,7 @@ export interface ProposedRunCharter {
   readonly resolutionSources: Readonly<Record<string, ResolutionSource>>;
   readonly predecessorRunId?: string;
   readonly amends?: AmendmentReference;
+  readonly restack?: RestackSuccessor;
   readonly reviewFeedback?: ReviewFeedbackSnapshot;
   readonly commitPolicy?: CommitPolicy;
 }
@@ -364,6 +393,42 @@ function parseDeliveryTarget(value: unknown, path: string): DeliveryTarget {
   };
 }
 
+function parseRestack(value: unknown, path: string): RestackSuccessor {
+  const object = expectRecord(value, path);
+  assertKnownKeys(object, ["schemaVersion", "predecessorRunId", "predecessorCharterHash", "amendedItemId", "amendedCommit", "descendants"], path);
+  if (object.schemaVersion !== 1 || !Array.isArray(object.descendants)) {
+    throw new AutopilotError("CHARTER_INVALID", `${path} must use schemaVersion 1 with descendants`);
+  }
+  return {
+    schemaVersion: 1,
+    predecessorRunId: expectString(object.predecessorRunId, `${path}.predecessorRunId`),
+    predecessorCharterHash: expectString(object.predecessorCharterHash, `${path}.predecessorCharterHash`),
+    amendedItemId: expectString(object.amendedItemId, `${path}.amendedItemId`),
+    amendedCommit: expectString(object.amendedCommit, `${path}.amendedCommit`),
+    descendants: object.descendants.map((value, index) => {
+      const descendant = expectRecord(value, `${path}.descendants[${index}]`);
+      assertKnownKeys(descendant, ["itemId", "oldCommit", "oldTreeIdentity", "remote", "remoteCommit", "changeRequest", "worktreePath", "gateIds"], `${path}.descendants[${index}]`);
+      const changeRequest = expectRecord(descendant.changeRequest, `${path}.descendants[${index}].changeRequest`);
+      assertKnownKeys(changeRequest, ["provider", "id", "url", "baseBranch"], `${path}.descendants[${index}].changeRequest`);
+      return {
+        itemId: expectString(descendant.itemId, `${path}.descendants[${index}].itemId`),
+        oldCommit: expectString(descendant.oldCommit, `${path}.descendants[${index}].oldCommit`),
+        oldTreeIdentity: expectString(descendant.oldTreeIdentity, `${path}.descendants[${index}].oldTreeIdentity`),
+        remote: expectString(descendant.remote, `${path}.descendants[${index}].remote`),
+        remoteCommit: expectString(descendant.remoteCommit, `${path}.descendants[${index}].remoteCommit`),
+        changeRequest: {
+          provider: expectLiteral(changeRequest.provider, ["github", "gitlab"], `${path}.descendants[${index}].changeRequest.provider`),
+          id: expectString(changeRequest.id, `${path}.descendants[${index}].changeRequest.id`),
+          url: expectString(changeRequest.url, `${path}.descendants[${index}].changeRequest.url`),
+          baseBranch: expectString(changeRequest.baseBranch, `${path}.descendants[${index}].changeRequest.baseBranch`),
+        },
+        worktreePath: expectString(descendant.worktreePath, `${path}.descendants[${index}].worktreePath`),
+        gateIds: expectStringArray(descendant.gateIds, `${path}.descendants[${index}].gateIds`),
+      };
+    }),
+  };
+}
+
 function parseAmendment(value: unknown, path: string): AmendmentReference {
   const object = expectRecord(value, path);
   assertKnownKeys(object, ["runId", "itemId"], path);
@@ -400,7 +465,7 @@ function parseProposed(value: unknown, allowHash: boolean): ProposedRunCharter {
   const object = expectRecord(value, "charter");
   const keys = [
     "schemaVersion", "runId", "sourceText", "createdAt", "repository", "harnessAdapter", "mode", "work", "delivery", "deliveryTarget",
-    "providerCheckWait", "grants", "gates", "waivers", "limits", "assumptions", "minimumAssurance", "resolutionSources", "predecessorRunId", "amends", "reviewFeedback", "commitPolicy",
+    "providerCheckWait", "grants", "gates", "waivers", "limits", "assumptions", "minimumAssurance", "resolutionSources", "predecessorRunId", "amends", "restack", "reviewFeedback", "commitPolicy",
   ];
   assertKnownKeys(object, allowHash ? [...keys, "charterHash"] : keys, "charter");
   if (object.schemaVersion !== 1) {
@@ -432,6 +497,7 @@ function parseProposed(value: unknown, allowHash: boolean): ProposedRunCharter {
     resolutionSources: parseResolutionSources(object.resolutionSources, "charter.resolutionSources"),
     ...(object.predecessorRunId === undefined ? {} : { predecessorRunId: expectString(object.predecessorRunId, "charter.predecessorRunId") }),
     ...(object.amends === undefined ? {} : { amends: parseAmendment(object.amends, "charter.amends") }),
+    ...(object.restack === undefined ? {} : { restack: parseRestack(object.restack, "charter.restack") }),
     ...(object.reviewFeedback === undefined ? {} : { reviewFeedback: parseReviewFeedback(object.reviewFeedback, "charter.reviewFeedback") }),
     ...(object.commitPolicy === undefined ? {} : { commitPolicy: parseCommitPolicy(object.commitPolicy, "charter.commitPolicy") }),
   };
@@ -451,6 +517,118 @@ function relativeRootWithin(candidate: string, root: string): boolean {
   const normalizedCandidate = candidate.replaceAll("\\", "/").replace(/^\.\//, "");
   const normalizedRoot = root.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
   return normalizedRoot === "." || normalizedRoot === "" || normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`);
+}
+
+const GRANT_SCOPE_FIELDS = ["paths", "commands", "repositories", "remotes", "branchPrefixes", "environmentNames"] as const;
+
+function restackPathWithinRepository(path: string, repositoryRoot: string): boolean {
+  const relation = relative(resolve(repositoryRoot), resolve(repositoryRoot, path));
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
+}
+
+function restackGrantCoversPath(grant: CapabilityGrant, path: string): boolean {
+  return grant.paths?.some((root) => {
+    const relation = relative(resolve(root), resolve(path));
+    return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
+  }) === true;
+}
+
+export function restackGrantsAreValid(charter: ProposedRunCharter): boolean {
+  const applicableGates = charter.gates.filter(({ appliesTo }) =>
+    appliesTo.length === 0 || charter.work.some(({ id }) => appliesTo.includes(id))
+  );
+  const requiredReadPaths = charter.work.flatMap(({ acceptance }) => acceptance.flatMap((predicate) =>
+    predicate.type === "path-present" || predicate.type === "path-absent"
+      ? [resolve(charter.repository.root, predicate.path)]
+      : predicate.type === "search-count"
+        ? predicate.paths.map((path) => resolve(charter.repository.root, path))
+        : []
+  )).concat(applicableGates.flatMap((gate) =>
+    gate.type === "search" ? gate.paths.map((path) => resolve(charter.repository.root, path)) : []
+  ));
+  const commandGates = applicableGates.filter((gate): gate is CommandGate => gate.type === "command");
+  const hasReview = applicableGates.some(({ type }) => type === "review");
+  const allowed = new Set([
+    ...(requiredReadPaths.length > 0 ? ["files.read:runtime"] : []),
+    ...(hasReview ? ["files.read:worker"] : []),
+    ...(commandGates.length > 0 ? ["process.execute:runtime"] : []),
+    "network.access:runtime",
+    "network.access:adapter",
+    "network.access:delivery",
+    "credentials.use:runtime",
+    "credentials.use:adapter",
+    "credentials.use:delivery",
+    "git.commit:runtime",
+    "remote.push:runtime",
+    "change-request.observe:delivery",
+  ]);
+  const hasGrant = (family: GrantFamily, actor: EffectActor) =>
+    charter.grants.some((grant) => grant.family === family && grant.actor === actor);
+  const preflightGrantsPresent = (!hasReview || charter.grants.some((grant) =>
+    grant.family === "files.read" && grant.actor === "worker"
+      && restackGrantCoversPath(grant, charter.repository.root)
+  )) && requiredReadPaths.every((path) =>
+    charter.grants.some((grant) => grant.family === "files.read" && grant.actor === "runtime" && restackGrantCoversPath(grant, path))
+  ) && commandGates.every((gate) => charter.grants.some((grant) =>
+    grant.family === "process.execute" && grant.actor === "runtime" && grant.commands?.includes(gate.executable) === true
+      && gate.environmentNames.every((name) => grant.environmentNames?.includes(name) === true)
+  )) && commandGates.flatMap(({ environmentNames }) => environmentNames).every((name) => charter.grants.some((grant) =>
+    grant.family === "credentials.use" && grant.actor === "runtime" && grant.environmentNames?.includes(name) === true
+  ));
+  return preflightGrantsPresent && charter.grants.every((grant) => {
+    if (!allowed.has(`${grant.family}:${grant.actor}`)) {
+      return false;
+    }
+    const allowedScopes = grant.family === "files.read"
+      ? new Set(["paths"])
+      : grant.family === "process.execute"
+        ? new Set(["commands", "environmentNames"])
+        : grant.family === "credentials.use"
+          ? new Set(["environmentNames"])
+          : grant.family === "git.commit"
+            ? new Set(["repositories", "branchPrefixes"])
+            : grant.family === "remote.push"
+              ? new Set(["repositories", "remotes", "branchPrefixes"])
+              : grant.family === "change-request.observe"
+                ? new Set(["repositories"])
+                : new Set<string>();
+    if (!GRANT_SCOPE_FIELDS.every((field) => grant[field] === undefined || allowedScopes.has(field))) {
+      return false;
+    }
+    if (grant.family === "files.read") {
+      return grant.paths !== undefined && grant.paths.length > 0
+        && grant.paths.every((path) => restackPathWithinRepository(path, charter.repository.root));
+    }
+    if (grant.family === "process.execute") {
+      const executables = charter.gates.flatMap((gate) => gate.type === "command" ? [gate.executable] : []);
+      return grant.commands !== undefined && grant.commands.length > 0
+        && grant.commands.every((command) => executables.includes(command));
+    }
+    if (grant.family === "git.commit" || grant.family === "remote.push" || grant.family === "change-request.observe") {
+      return grant.repositories?.length === 1 && grant.repositories[0] === charter.repository.root;
+    }
+    return true;
+  }) && hasGrant("network.access", "adapter")
+    && hasGrant("credentials.use", "adapter")
+    && (charter.delivery === "local-commits" || (
+      hasGrant("network.access", "runtime")
+      && hasGrant("credentials.use", "runtime")
+      && hasGrant("network.access", "delivery")
+      && hasGrant("credentials.use", "delivery")
+      && charter.grants.some(({ family, actor, repositories }) =>
+        family === "change-request.observe" && actor === "delivery"
+          && repositories?.includes(charter.repository.root) === true)
+    ))
+    && charter.grants.some(({ family, actor, repositories, branchPrefixes }) =>
+    family === "git.commit" && actor === "runtime"
+      && repositories?.includes(charter.repository.root) === true
+      && charter.work.every(({ branchName }) => branchPrefixes?.some((prefix) => branchName.startsWith(prefix)) === true)
+  ) && (charter.delivery === "local-commits" || charter.grants.some(({ family, actor, repositories, remotes, branchPrefixes }) =>
+    family === "remote.push" && actor === "runtime"
+      && repositories?.includes(charter.repository.root) === true
+      && charter.restack?.descendants.every(({ remote }) => remotes?.includes(remote) === true) === true
+      && charter.work.every(({ branchName }) => branchPrefixes?.some((prefix) => branchName.startsWith(prefix)) === true)
+  ));
 }
 
 function validateCharterSemantics(charter: ProposedRunCharter): void {
@@ -561,6 +739,29 @@ function validateCharterSemantics(charter: ProposedRunCharter): void {
     }
     if (charter.predecessorRunId !== undefined && charter.predecessorRunId !== charter.amends.runId) {
       throw new AutopilotError("CHARTER_INVALID", "predecessorRunId must match amends.runId");
+    }
+    if (charter.restack !== undefined) {
+      throw new AutopilotError("CHARTER_INVALID", "restacks are separate successors and cannot amend work");
+    }
+  }
+  if (charter.restack !== undefined) {
+    const expectedItemIds = charter.restack.descendants.map(({ itemId }) => itemId);
+    const knownGates = new Set(charter.gates.map(({ id }) => id));
+    if (charter.mode !== "ordered-stack"
+      || !/^[a-f0-9]{64}$/u.test(charter.restack.predecessorCharterHash)
+      || charter.predecessorRunId !== charter.restack.predecessorRunId
+      || charter.repository.baseCommit !== charter.restack.amendedCommit
+      || canonicalJson(charter.work.map(({ id }) => id)) !== canonicalJson(expectedItemIds)
+      || new Set(expectedItemIds).size !== expectedItemIds.length
+      || !restackGrantsAreValid(charter)
+      || !charter.grants.some(({ family, actor, repositories }) =>
+        family === "change-request.observe" && actor === "delivery"
+          && repositories?.includes(charter.repository.root) === true)
+      || charter.grants.some(({ family }) => family === "change-request.open" || family === "change-request.update")
+      || charter.restack.descendants.some(({ changeRequest, gateIds }) =>
+        changeRequest.url.replace(/\/+$/u, "").split("/").at(-1) !== changeRequest.id
+        || gateIds.some((id) => !knownGates.has(id)))) {
+      throw new AutopilotError("CHARTER_INVALID", "restack successor must exactly seal its descendant work and amended base");
     }
   }
   if (charter.reviewFeedback !== undefined) {

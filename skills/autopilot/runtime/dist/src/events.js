@@ -5,7 +5,10 @@ const EVENT_TYPES = [
     "CHARTER_COMPILED", "RECONCILIATION_STARTED", "RECONCILIATION_COMPLETED", "RUN_PAUSE_REQUESTED", "RUN_WAITING", "RUN_WOKEN",
     "RUN_RESUMED", "RUN_VERIFYING", "RUN_SUCCEEDED", "RUN_STOPPED", "WRAP_UP_STARTED", "WORKTREE_ADOPTED", "ITEM_READY",
     "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED", "ITEM_VERIFIED", "ITEM_SATISFIED",
-    "ITEM_BLOCKED", "ITEM_ABANDONED", "EFFECT_INTENDED", "EFFECT_CONFIRMED", "RECEIPT_RECORDED", "PRE_COMMIT_HOOK_FINISHED", "DECISION_RECORDED",
+    "ITEM_BLOCKED", "ITEM_ABANDONED", "RESTACK_DESCENDANT_STARTED", "RESTACK_DESCENDANT_TREE_PREPARED",
+    "RESTACK_DESCENDANT_VERIFIED", "RESTACK_PROVIDER_HEAD_CONFIRMED", "RESTACK_DESCENDANT_SATISFIED",
+    "RESTACK_DESCENDANT_BLOCKED", "EFFECT_INTENDED",
+    "EFFECT_CONFIRMED", "RECEIPT_RECORDED", "PRE_COMMIT_HOOK_FINISHED", "DECISION_RECORDED",
 ];
 export function newEventId() {
     return randomUUID();
@@ -85,6 +88,60 @@ export function parseLifecycleEvent(value) {
         case "ITEM_READY":
         case "ITEM_ABANDONED":
             return { ...base, type, itemId: expectString(object.itemId, "event.itemId") };
+        case "RESTACK_DESCENDANT_STARTED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                oldCommit: expectString(object.oldCommit, "event.oldCommit"),
+                freshParentCommit: expectString(object.freshParentCommit, "event.freshParentCommit"),
+            };
+        case "RESTACK_DESCENDANT_TREE_PREPARED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                candidateCommit: expectString(object.candidateCommit, "event.candidateCommit"),
+                treeIdentity: expectString(object.treeIdentity, "event.treeIdentity"),
+                messageIdentity: expectString(object.messageIdentity, "event.messageIdentity"),
+                oldCommit: expectString(object.oldCommit, "event.oldCommit"),
+                freshParentCommit: expectString(object.freshParentCommit, "event.freshParentCommit"),
+                temporaryWorktreePath: expectString(object.temporaryWorktreePath, "event.temporaryWorktreePath"),
+            };
+        case "RESTACK_DESCENDANT_VERIFIED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                subject: expectString(object.subject, "event.subject"),
+                receiptIds: expectStringArray(object.receiptIds, "event.receiptIds"),
+            };
+        case "RESTACK_PROVIDER_HEAD_CONFIRMED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                provider: expectLiteral(object.provider, ["github", "gitlab"], "event.provider"),
+                changeRequestId: expectString(object.changeRequestId, "event.changeRequestId"),
+                changeRequestUrl: expectString(object.changeRequestUrl, "event.changeRequestUrl"),
+                headCommit: expectString(object.headCommit, "event.headCommit"),
+                baseBranch: expectString(object.baseBranch, "event.baseBranch"),
+                state: expectLiteral(object.state, ["open"], "event.state"),
+            };
+        case "RESTACK_DESCENDANT_SATISFIED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                subject: expectString(object.subject, "event.subject"),
+            };
+        case "RESTACK_DESCENDANT_BLOCKED":
+            return {
+                ...base,
+                type,
+                itemId: expectString(object.itemId, "event.itemId"),
+                errorCode: expectString(object.errorCode, "event.errorCode"),
+            };
         case "ATTEMPT_STARTED":
             return {
                 ...base,
@@ -206,6 +263,7 @@ export function parseLifecycleEvent(value) {
                 ...(object.receiptKind === undefined ? {} : {
                     receiptKind: expectLiteral(object.receiptKind, ["gate", "predicate", "review", "remote-checks"], "event.receiptKind"),
                 }),
+                ...(object.subject === undefined ? {} : { subject: expectString(object.subject, "event.subject") }),
                 status: expectLiteral(object.status, ["PASSED", "FAILED", "WAIVED", "UNVERIFIED"], "event.status"),
             };
         case "PRE_COMMIT_HOOK_FINISHED":

@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation-process reattachment is packaged, while notification wake is explicitly not promoted under the current no-receiver constraint and restack evidence remains incomplete
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation-process reattachment and controlled-fixture sealed restack successors are packaged, while notification wake is not promoted and live restack mutation remains unverified without renewed disposable-target authority
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)

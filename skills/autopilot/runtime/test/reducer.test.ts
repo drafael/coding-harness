@@ -28,6 +28,167 @@ test("reducer permits only the runtime verification path to success", async () =
   assert.throws(() => reduce(projection, { ...base("resume"), type: "RUN_RESUMED" }), /terminal run state/);
 });
 
+test("reducer owns ordered restack descendants without consuming attempts or terminalizing a blocked suffix", async () => {
+  const repository = await createRepository();
+  const proposed = proposedCharter(repository.root, repository.baseCommit, "ordered-stack", "restack-reducer");
+  const gates = [
+    ...proposed.gates,
+    { id: "alternative-search", type: "search" as const, query: "alternative", paths: ["result.txt"], expectedCount: 1, appliesTo: ["item-1"] },
+  ];
+  const charter = sealCharter({
+    ...proposed,
+    predecessorRunId: "amendment-run",
+    delivery: "change-request-ready",
+    deliveryTarget: { provider: "github", remote: "origin", baseBranch: "main" },
+    gates,
+    waivers: [{
+      gateId: "result-search",
+      failurePattern: "expected failure",
+      alternativeGateIds: ["alternative-search"],
+      reason: "sealed non-review waiver",
+    }],
+    grants: [
+      { family: "files.read", actor: "runtime", paths: [repository.root] },
+      { family: "network.access", actor: "runtime" },
+      { family: "network.access", actor: "adapter" },
+      { family: "network.access", actor: "delivery" },
+      { family: "credentials.use", actor: "runtime" },
+      { family: "credentials.use", actor: "adapter" },
+      { family: "credentials.use", actor: "delivery" },
+      {
+        family: "git.commit",
+        actor: "runtime",
+        repositories: [repository.root],
+        branchPrefixes: ["autopilot/"],
+      },
+      { family: "remote.push", actor: "runtime", repositories: [repository.root], remotes: ["origin"], branchPrefixes: ["autopilot/"] },
+      { family: "change-request.observe", actor: "delivery", repositories: [repository.root] },
+    ],
+    restack: {
+      schemaVersion: 1,
+      predecessorRunId: "amendment-run",
+      predecessorCharterHash: "a".repeat(64),
+      amendedItemId: "parent-item",
+      amendedCommit: repository.baseCommit,
+      descendants: proposed.work.map((item, index) => ({
+        itemId: item.id,
+        oldCommit: `${index + 1}`.repeat(40),
+        oldTreeIdentity: `${index + 3}`.repeat(40),
+        remote: "origin",
+        remoteCommit: `${index + 1}`.repeat(40),
+        changeRequest: {
+          provider: "github",
+          id: String(index + 1),
+          url: `https://example.invalid/pull/${index + 1}`,
+          baseBranch: index === 0 ? "parent" : proposed.work[index - 1]?.branchName ?? "parent",
+        },
+        worktreePath: `${repository.root}-restack-${index + 1}`,
+        gateIds: gates.filter(({ appliesTo }) => appliesTo.includes(item.id)).map(({ id }) => id),
+      })),
+    },
+  });
+  let projection = initialProjection(charter);
+  projection = reduce(projection, { ...base("reconcile"), type: "RECONCILIATION_STARTED" });
+  projection = reduce(projection, { ...base("running"), type: "RECONCILIATION_COMPLETED" });
+
+  assert.throws(() => reduce(projection, {
+    ...base("premature run verification"),
+    type: "RUN_VERIFYING",
+  }), /every restack descendant to be SATISFIED/);
+  assert.throws(() => reduce(projection, {
+    ...base("premature run success"),
+    type: "RUN_SUCCEEDED",
+    predicateSummary: "invalid",
+  }), /every restack descendant to be SATISFIED/);
+
+  assert.throws(() => reduce(projection, {
+    ...base("out of order"),
+    type: "RESTACK_DESCENDANT_STARTED",
+    itemId: "item-2",
+    oldCommit: "2".repeat(40),
+    freshParentCommit: "3".repeat(40),
+  }), /out of order/);
+
+  projection = reduce(projection, {
+    ...base("start first"),
+    type: "RESTACK_DESCENDANT_STARTED",
+    itemId: "item-1",
+    oldCommit: "1".repeat(40),
+    freshParentCommit: repository.baseCommit,
+  });
+  assert.throws(() => reduce(projection, {
+    ...base("ordinary item lifecycle"),
+    type: "ITEM_READY",
+    itemId: "item-1",
+  }), /ordinary ITEM_READY/);
+  projection = reduce(projection, {
+    ...base("tree prepared"),
+    type: "RESTACK_DESCENDANT_TREE_PREPARED",
+    itemId: "item-1",
+    candidateCommit: "4".repeat(40),
+    treeIdentity: "5".repeat(40),
+    messageIdentity: "6".repeat(64),
+    oldCommit: "1".repeat(40),
+    freshParentCommit: repository.baseCommit,
+    temporaryWorktreePath: `${repository.root}-candidate`,
+  });
+  assert.throws(() => reduce(projection, {
+    ...base("failed receipt"),
+    type: "RECEIPT_RECORDED",
+    itemId: "item-1",
+    attemptId: "restack-verification",
+    receiptId: "failed-receipt",
+    gateId: "result-search",
+    receiptKind: "gate",
+    subject: `tree:${"5".repeat(40)}`,
+    status: "FAILED",
+  }), /passing sealed gate or validated waiver/);
+  projection = reduce(projection, {
+    ...base("validated sealed waiver"),
+    type: "RECEIPT_RECORDED",
+    itemId: "item-1",
+    attemptId: "restack-verification",
+    receiptId: "waived-receipt",
+    gateId: "result-search",
+    receiptKind: "gate",
+    subject: `tree:${"5".repeat(40)}`,
+    status: "WAIVED",
+    evidence: ["receipts/waived-receipt.json"],
+  });
+  assert.ok(projection.restacks["item-1"]?.passingGateIds.includes("result-search"));
+  assert.throws(() => reduce(projection, {
+    ...base("unsealed waiver"),
+    type: "RECEIPT_RECORDED",
+    itemId: "item-1",
+    attemptId: "restack-verification",
+    receiptId: "unsealed-waiver",
+    gateId: "alternative-search",
+    receiptKind: "gate",
+    subject: `tree:${"5".repeat(40)}`,
+    status: "WAIVED",
+    evidence: ["receipts/unsealed-waiver.json"],
+  }), /validated waiver/);
+  assert.throws(() => reduce(projection, {
+    ...base("push before verification"),
+    type: "EFFECT_INTENDED",
+    itemId: "item-1",
+    effect: "restack.remote-push",
+    idempotencyKey: "push-too-early",
+    expectedState: "candidate",
+  }), /cannot follow unconfirmed/);
+  projection = reduce(projection, {
+    ...base("conflict"),
+    type: "RESTACK_DESCENDANT_BLOCKED",
+    itemId: "item-1",
+    errorCode: "RESTACK_CONFLICT",
+  });
+
+  assert.equal(projection.state, "RUNNING");
+  assert.equal(projection.restacks["item-1"]?.state, "BLOCKED");
+  assert.equal(projection.restacks["item-2"]?.state, "PENDING");
+  assert.equal(projection.items["item-1"]?.attempts.length, 0);
+});
+
 test("reducer prevents success from overtaking an accepted pause request", async () => {
   const repository = await createRepository();
   const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit));

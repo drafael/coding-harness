@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { sealCharter } from "../src/charter.js";
 import { runChecked } from "../src/process.js";
-import { assertWritablePaths, ensureWorktree, observeRepository, resolveWorktreePath } from "../src/repository.js";
+import {
+  assertWritablePaths,
+  ensureWorktree,
+  inspectCommit,
+  installRestackCandidate,
+  observeRepository,
+  prepareRestackCandidate,
+  resolveWorktreePath,
+} from "../src/repository.js";
 import { createRepository, proposedCharter } from "./helpers.js";
 
 test("worktree creation is idempotent for the same run item identity", async () => {
@@ -21,6 +29,88 @@ test("worktree creation is idempotent for the same run item identity", async () 
 
   assert.equal(first, expected);
   assert.equal(second, expected);
+});
+
+test("restack candidate merge-forwards and recreates an interrupted retained worktree", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit));
+  const item = charter.work[0];
+  assert.ok(item !== undefined);
+  const retainedWorktree = await ensureWorktree(charter, item);
+  await writeFile(join(repository.root, "parent.txt"), "parent\n");
+  await runChecked({ executable: "git", arguments: ["add", "parent.txt"], cwd: repository.root });
+  await runChecked({ executable: "git", arguments: ["commit", "-m", "advance parent"], cwd: repository.root });
+  const freshParent = (await runChecked({ executable: "git", arguments: ["rev-parse", "HEAD"], cwd: repository.root })).stdout.trim();
+
+  const candidate = await prepareRestackCandidate(
+    repository.root,
+    charter.runId,
+    item.id,
+    repository.baseCommit,
+    freshParent,
+    retainedWorktree,
+  );
+  const commit = await inspectCommit(repository.root, candidate.commit);
+  assert.ok(Buffer.byteLength(basename(candidate.temporaryWorktreePath)) <= 200);
+  assert.doesNotMatch(basename(candidate.temporaryWorktreePath), /[. ]$/u);
+  const maximumIdCandidate = await prepareRestackCandidate(
+    repository.root,
+    "r".repeat(128),
+    "i".repeat(128),
+    repository.baseCommit,
+    freshParent,
+    retainedWorktree,
+  );
+  assert.ok(Buffer.byteLength(basename(maximumIdCandidate.temporaryWorktreePath)) <= 200);
+  assert.doesNotMatch(basename(maximumIdCandidate.temporaryWorktreePath), /[. ]$/u);
+  await runChecked({
+    executable: "git",
+    arguments: ["worktree", "remove", maximumIdCandidate.temporaryWorktreePath],
+    cwd: repository.root,
+  });
+  await rm(candidate.temporaryWorktreePath, { recursive: true });
+  const recoveredCandidate = await prepareRestackCandidate(
+    repository.root,
+    charter.runId,
+    item.id,
+    repository.baseCommit,
+    freshParent,
+    retainedWorktree,
+  );
+  assert.deepEqual(recoveredCandidate, candidate);
+  await assert.rejects(
+    installRestackCandidate(
+      repository.root,
+      item.branchName,
+      retainedWorktree,
+      recoveredCandidate.temporaryWorktreePath,
+      repository.baseCommit,
+      candidate.commit,
+      candidate.treeIdentity,
+      () => {
+        throw new Error("local CAS fenced");
+      },
+    ),
+    /local CAS fenced/,
+  );
+  assert.equal((await observeRepository(retainedWorktree)).headCommit, repository.baseCommit);
+  await runChecked({
+    executable: "git",
+    arguments: ["worktree", "remove", retainedWorktree],
+    cwd: repository.root,
+  });
+  await installRestackCandidate(
+    repository.root,
+    item.branchName,
+    retainedWorktree,
+    recoveredCandidate.temporaryWorktreePath,
+    repository.baseCommit,
+    candidate.commit,
+    candidate.treeIdentity,
+  );
+
+  assert.deepEqual(commit.parents, [repository.baseCommit, freshParent]);
+  assert.equal((await observeRepository(retainedWorktree)).headCommit, candidate.commit);
 });
 
 test("repository observation stages a deterministic tree and rejects out-of-scope edits", async () => {

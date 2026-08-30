@@ -40,6 +40,164 @@ test("sealCharter accepts bounded provider-check waiting only for merge-verified
   }), /providerCheckWait/);
 });
 
+test("sealCharter accepts an explicit standalone restack successor", async () => {
+  const repository = await createRepository();
+  const proposed = proposedCharter(repository.root, repository.baseCommit, "ordered-stack", "restack-run");
+  const descendant = proposed.work[1];
+  assert.ok(descendant !== undefined);
+  const restack = {
+    ...proposed,
+    predecessorRunId: "amendment-run",
+    work: [{ ...descendant, dependsOn: [] }],
+    delivery: "change-request-ready" as const,
+    deliveryTarget: { provider: "github" as const, remote: "origin", baseBranch: "main" },
+    gates: [],
+    grants: [
+      { family: "files.read" as const, actor: "runtime" as const, paths: [repository.root] },
+      { family: "network.access" as const, actor: "runtime" as const },
+      { family: "network.access" as const, actor: "adapter" as const },
+      { family: "network.access" as const, actor: "delivery" as const },
+      { family: "credentials.use" as const, actor: "runtime" as const },
+      { family: "credentials.use" as const, actor: "adapter" as const },
+      { family: "credentials.use" as const, actor: "delivery" as const },
+      {
+        family: "git.commit" as const,
+        actor: "runtime" as const,
+        repositories: [repository.root],
+        branchPrefixes: ["autopilot/"],
+      },
+      { family: "remote.push" as const, actor: "runtime" as const, repositories: [repository.root], remotes: ["origin"], branchPrefixes: ["autopilot/"] },
+      { family: "change-request.observe" as const, actor: "delivery" as const, repositories: [repository.root] },
+    ],
+    restack: {
+      schemaVersion: 1 as const,
+      predecessorRunId: "amendment-run",
+      predecessorCharterHash: "a".repeat(64),
+      amendedItemId: "item-1",
+      amendedCommit: repository.baseCommit,
+      descendants: [{
+        itemId: descendant.id,
+        oldCommit: repository.baseCommit,
+        oldTreeIdentity: "b".repeat(40),
+        remote: "origin",
+        remoteCommit: repository.baseCommit,
+        changeRequest: { provider: "github" as const, id: "2", url: "https://example.invalid/pull/2", baseBranch: "item-1" },
+        worktreePath: `${repository.root}-managed-item-2`,
+        gateIds: [],
+      }],
+    },
+  };
+
+  const sealed = sealCharter(restack);
+
+  assert.equal(sealed.restack?.descendants[0]?.itemId, "item-2");
+  assert.throws(() => sealCharter({ ...restack, restack: { ...restack.restack, amendedCommit: "changed" } }), /restack successor/);
+  for (const forbidden of [
+    { family: "change-request.open" as const, actor: "delivery" as const },
+    { family: "merge.execute" as const, actor: "runtime" as const },
+    { family: "review-thread.resolve" as const, actor: "delivery" as const },
+    { family: "files.write" as const, actor: "worker" as const, paths: [repository.root] },
+  ]) {
+    assert.throws(() => sealCharter({
+      ...restack,
+      grants: [...restack.grants, forbidden],
+    }), /restack successor/);
+  }
+  assert.throws(() => sealCharter({
+    ...restack,
+    grants: restack.grants.filter(({ family }) => family !== "git.commit"),
+  }), /restack successor/);
+  assert.throws(() => sealCharter({
+    ...restack,
+    grants: restack.grants.filter(({ family }) => family !== "remote.push"),
+  }), /restack successor/);
+  for (const [family, actor] of [
+    ["files.read", "runtime"],
+    ["network.access", "adapter"],
+    ["credentials.use", "adapter"],
+    ["network.access", "runtime"],
+    ["credentials.use", "runtime"],
+    ["network.access", "delivery"],
+    ["credentials.use", "delivery"],
+    ["change-request.observe", "delivery"],
+  ] as const) {
+    assert.throws(() => sealCharter({
+      ...restack,
+      grants: restack.grants.filter((grant) => grant.family !== family || grant.actor !== actor),
+    }), /restack successor/);
+  }
+  const commandGate = {
+    id: "command-check",
+    type: "command" as const,
+    executable: "node",
+    arguments: ["--version"],
+    workingDirectory: ".",
+    environmentNames: ["RESTACK_TEST_TOKEN"],
+    appliesTo: [descendant.id],
+  };
+  const commandRestack = {
+    ...restack,
+    gates: [commandGate],
+    grants: [
+      ...restack.grants,
+      {
+        family: "process.execute" as const,
+        actor: "runtime" as const,
+        commands: ["node"],
+        environmentNames: ["RESTACK_TEST_TOKEN"],
+      },
+      {
+        family: "credentials.use" as const,
+        actor: "runtime" as const,
+        environmentNames: ["RESTACK_TEST_TOKEN"],
+      },
+    ],
+    restack: {
+      ...restack.restack,
+      descendants: restack.restack.descendants.map((snapshot) => ({ ...snapshot, gateIds: [commandGate.id] })),
+    },
+  };
+  sealCharter(commandRestack);
+  assert.throws(() => sealCharter({
+    ...commandRestack,
+    grants: commandRestack.grants.filter(({ family }) => family !== "process.execute"),
+  }), /restack successor/);
+  assert.throws(() => sealCharter({
+    ...commandRestack,
+    grants: commandRestack.grants.filter((grant) =>
+      grant.family !== "credentials.use" || grant.actor !== "runtime" || !("environmentNames" in grant)
+    ),
+  }), /restack successor/);
+  const reviewGate = { id: "review-check", type: "review" as const, focus: "Correctness", appliesTo: [descendant.id] };
+  const reviewRestack = {
+    ...restack,
+    gates: [reviewGate],
+    grants: [
+      ...restack.grants,
+      { family: "files.read" as const, actor: "worker" as const, paths: [repository.root] },
+    ],
+    restack: {
+      ...restack.restack,
+      descendants: restack.restack.descendants.map((snapshot) => ({ ...snapshot, gateIds: [reviewGate.id] })),
+    },
+  };
+  sealCharter(reviewRestack);
+  assert.throws(() => sealCharter({
+    ...reviewRestack,
+    grants: reviewRestack.grants.filter((grant) => grant.family !== "files.read" || grant.actor !== "worker"),
+  }), /restack successor/);
+  assert.throws(() => sealCharter({
+    ...restack,
+    restack: {
+      ...restack.restack,
+      descendants: restack.restack.descendants.map((snapshot) => ({
+        ...snapshot,
+        changeRequest: { ...snapshot.changeRequest, id: "different" },
+      })),
+    },
+  }), /restack successor/);
+});
+
 test("sealCharter accepts a single change-request amendment with explicit hook policy", async () => {
   const repository = await createRepository();
   const proposed = proposedCharter(repository.root, repository.baseCommit);

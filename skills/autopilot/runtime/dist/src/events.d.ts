@@ -128,6 +128,42 @@ export type LifecycleEvent = (EventBase & {
     readonly type: "ITEM_ABANDONED";
     readonly itemId: string;
 }) | (EventBase & {
+    readonly type: "RESTACK_DESCENDANT_STARTED";
+    readonly itemId: string;
+    readonly oldCommit: string;
+    readonly freshParentCommit: string;
+}) | (EventBase & {
+    readonly type: "RESTACK_DESCENDANT_TREE_PREPARED";
+    readonly itemId: string;
+    readonly candidateCommit: string;
+    readonly treeIdentity: string;
+    readonly messageIdentity: string;
+    readonly oldCommit: string;
+    readonly freshParentCommit: string;
+    readonly temporaryWorktreePath: string;
+}) | (EventBase & {
+    readonly type: "RESTACK_DESCENDANT_VERIFIED";
+    readonly itemId: string;
+    readonly subject: string;
+    readonly receiptIds: readonly string[];
+}) | (EventBase & {
+    readonly type: "RESTACK_PROVIDER_HEAD_CONFIRMED";
+    readonly itemId: string;
+    readonly provider: "github" | "gitlab";
+    readonly changeRequestId: string;
+    readonly changeRequestUrl: string;
+    readonly headCommit: string;
+    readonly baseBranch: string;
+    readonly state: "open";
+}) | (EventBase & {
+    readonly type: "RESTACK_DESCENDANT_SATISFIED";
+    readonly itemId: string;
+    readonly subject: string;
+}) | (EventBase & {
+    readonly type: "RESTACK_DESCENDANT_BLOCKED";
+    readonly itemId: string;
+    readonly errorCode: string;
+}) | (EventBase & {
     readonly type: "EFFECT_INTENDED";
     readonly effect: string;
     readonly idempotencyKey: string;
@@ -144,6 +180,7 @@ export type LifecycleEvent = (EventBase & {
     readonly receiptId: string;
     readonly gateId?: string;
     readonly receiptKind?: "gate" | "predicate" | "review" | "remote-checks";
+    readonly subject?: string;
     readonly status: "PASSED" | "FAILED" | "WAIVED" | "UNVERIFIED";
 }) | (EventBase & {
     readonly type: "PRE_COMMIT_HOOK_FINISHED";

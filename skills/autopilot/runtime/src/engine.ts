@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
   AttemptContext,
@@ -33,7 +33,10 @@ import {
   ensureWorktree,
   inspectCommit,
   inspectPreCommitHook,
+  inspectRepository,
+  installRestackCandidate,
   observeRepository,
+  prepareRestackCandidate,
   pushAmendmentBranch,
   pushBranch,
   remoteBranchCommit,
@@ -57,7 +60,7 @@ interface EngineOptions {
 const RUNTIME_CAPABILITIES: AdapterCapabilities = {
   families: [
     "files.read", "files.write", "process.execute", "network.access", "credentials.use", "git.commit", "remote.push",
-    "change-request.open", "change-request.update", "review-thread.resolve", "merge.execute",
+    "change-request.observe", "change-request.open", "change-request.update", "review-thread.resolve", "merge.execute",
   ],
   assurance: "enforced",
   maxConcurrency: 1,
@@ -87,7 +90,11 @@ function playbookRequests(charter: RunCharter): ReadonlySet<GrantFamily> {
   const requested = new Set<GrantFamily>(["files.read", "files.write", "process.execute", "network.access", "credentials.use", "git.commit"]);
   if (charter.delivery !== "local-commits") {
     requested.add("remote.push");
-    requested.add(charter.amends === undefined ? "change-request.open" : "change-request.update");
+    if (charter.restack === undefined) {
+      requested.add(charter.amends === undefined ? "change-request.open" : "change-request.update");
+    } else {
+      requested.add("change-request.observe");
+    }
   }
   if (charter.reviewFeedback?.threads.some(({ resolve: shouldResolve }) => shouldResolve) === true) {
     requested.add("review-thread.resolve");
@@ -307,13 +314,15 @@ export class AutopilotEngine {
         event.type === "WORKTREE_ADOPTED" && event.itemId === item.id
       )?.event;
       const confirmedCommit = this.#records.findLast(({ event }) =>
-        event.type === "EFFECT_CONFIRMED" && event.itemId === item.id && event.effect === "git.commit"
+        event.type === "EFFECT_CONFIRMED" && event.itemId === item.id
+          && (event.effect === "git.commit" || event.effect === "restack.local-ref")
       )?.event;
       const predecessorId = item.dependsOn.at(-1);
       const predecessorCommit = predecessorId === undefined
         ? undefined
         : this.#records.findLast(({ event }) =>
-          event.type === "EFFECT_CONFIRMED" && event.itemId === predecessorId && event.effect === "git.commit"
+          event.type === "EFFECT_CONFIRMED" && event.itemId === predecessorId
+            && (event.effect === "git.commit" || event.effect === "restack.local-ref")
         )?.event;
       const expectedCommit = confirmedCommit?.type === "EFFECT_CONFIRMED"
         ? confirmedCommit.observedState
@@ -516,10 +525,12 @@ export class AutopilotEngine {
       }
     }
     for (const item of this.#charter.work) {
-      for (const root of item.writableRoots) {
-        const absoluteRoot = resolve(this.#charter.repository.root, root);
-        this.#workerAuthorize("files.read", { path: absoluteRoot });
-        this.#workerAuthorize("files.write", { path: absoluteRoot });
+      if (this.#charter.restack === undefined) {
+        for (const root of item.writableRoots) {
+          const absoluteRoot = resolve(this.#charter.repository.root, root);
+          this.#workerAuthorize("files.read", { path: absoluteRoot });
+          this.#workerAuthorize("files.write", { path: absoluteRoot });
+        }
       }
       for (const predicate of item.acceptance) {
         if (predicate.type === "path-present" || predicate.type === "path-absent") {
@@ -529,11 +540,13 @@ export class AutopilotEngine {
         }
       }
     }
-    this.#workerAuthorize("process.execute");
+    if (this.#charter.restack === undefined) {
+      this.#workerAuthorize("process.execute");
+    }
     this.#adapterAuthorize("network.access");
     this.#adapterAuthorize("credentials.use");
     this.#runtimeAuthorize("git.commit", { repository: this.#charter.repository.root });
-    if (this.#charter.commitPolicy?.preCommitHook === "run") {
+    if (this.#charter.restack === undefined && this.#charter.commitPolicy?.preCommitHook === "run") {
       for (const root of this.#charter.commitPolicy.writableRoots) {
         const path = resolve(this.#charter.repository.root, root);
         this.#runtimeAuthorize("files.read", { path });
@@ -564,10 +577,14 @@ export class AutopilotEngine {
       this.#runtimeAuthorize("credentials.use");
       this.#deliveryAuthorize("network.access");
       this.#deliveryAuthorize("credentials.use");
-      this.#deliveryAuthorize(
-        this.#amendment === undefined ? "change-request.open" : "change-request.update",
-        { repository: this.#charter.repository.root },
-      );
+      if (this.#charter.restack === undefined) {
+        this.#deliveryAuthorize(
+          this.#amendment === undefined ? "change-request.open" : "change-request.update",
+          { repository: this.#charter.repository.root },
+        );
+      } else {
+        this.#deliveryAuthorize("change-request.observe", { repository: this.#charter.repository.root });
+      }
       if (this.#charter.reviewFeedback?.threads.some(({ resolve: shouldResolve }) => shouldResolve) === true) {
         this.#deliveryAuthorize("review-thread.resolve", { repository: this.#charter.repository.root });
       }
@@ -891,7 +908,8 @@ export class AutopilotEngine {
     )?.event).filter((event): event is Extract<LifecycleEvent, { readonly type: "RECEIPT_RECORDED" }> =>
       event?.type === "RECEIPT_RECORDED"
     );
-    const requiredGateIds = new Set(item.acceptance.flatMap((predicate) =>
+    const restackGateIds = this.#charter.restack?.descendants.find(({ itemId }) => itemId === item.id)?.gateIds;
+    const requiredGateIds = new Set(restackGateIds ?? item.acceptance.flatMap((predicate) =>
       predicate.type === "gate-passed" ? [predicate.gateId] : []
     ));
     const requiredGates = this.#charter.gates.filter(({ id }) => requiredGateIds.has(id));
@@ -918,6 +936,7 @@ export class AutopilotEngine {
       const { receiptId: _receiptId, ...payload } = value;
       if (sha256(canonicalJson(payload)) !== receiptEvent.receiptId
         || value.runId !== this.#charter.runId || value.itemId !== item.id
+        || receiptEvent.subject !== checkpoint.subject
         || value.subject !== checkpoint.subject || value.status !== receiptEvent.status) {
         throw new AutopilotError("RECEIPT_STALE", "verified checkpoint receipt no longer matches its exact subject");
       }
@@ -937,9 +956,16 @@ export class AutopilotEngine {
         continue;
       }
       const gate = requiredGates.find(({ id }) => id === receiptEvent.gateId);
-      const statusAccepted = gate?.type === "review"
-        ? receiptEvent.status === "PASSED"
-        : receiptEvent.status === "PASSED" || receiptEvent.status === "WAIVED";
+      const waiver = receiptEvent.status === "WAIVED"
+        ? this.#charter.waivers.find(({ gateId }) => gateId === receiptEvent.gateId)
+        : undefined;
+      const waiverValid = waiver !== undefined && gate?.type !== "review"
+        && value.waiverReason === waiver.reason && `${value.stdout}\n${value.stderr}`.includes(waiver.failurePattern)
+        && (receiptEvent.evidence?.length ?? 0) > 0
+        && waiver.alternativeGateIds.every((alternativeGateId) => receiptEvents.some((event) =>
+          event.gateId === alternativeGateId && event.status === "PASSED"
+        ));
+      const statusAccepted = receiptEvent.status === "PASSED" || waiverValid;
       if (gate === undefined || !statusAccepted || value.gateId !== gate.id
         || value.gateDefinitionHash !== sha256(canonicalJson(gate))) {
         throw new AutopilotError("RECEIPT_STALE", "verified checkpoint gate evidence does not match the sealed passing gate");
@@ -1494,8 +1520,9 @@ export class AutopilotEngine {
       throw new AutopilotError("ADAPTER_UNSUPPORTED", "adapter capabilities have not been loaded");
     }
     const attempt = this.#projection.items[item.id]?.attempts.at(-1);
-    if (attempt === undefined) {
-      throw new AutopilotError("JOURNAL_CORRUPT", "review gate has no active attempt identity");
+    const restack = this.#projection.restacks[item.id];
+    if (attempt === undefined && restack?.state !== "VERIFYING") {
+      throw new AutopilotError("JOURNAL_CORRUPT", "review gate has no active verification identity");
     }
     const predicateEvidence = await projectPredicateEvidence(
       this.#runDirectory,
@@ -1508,7 +1535,7 @@ export class AutopilotEngine {
       charter: this.#charter,
       item,
       attemptId,
-      leaseEpoch: attempt.leaseEpoch,
+      leaseEpoch: attempt?.leaseEpoch ?? 0,
       observation,
       records: this.#records,
       projection: this.#projection,
@@ -1586,6 +1613,7 @@ export class AutopilotEngine {
       receiptId: receipt.receiptId,
       gateId: gate.id,
       receiptKind: "review",
+      subject: receipt.subject,
       status: receipt.status,
       evidence: [contextPath, reviewObservationPath, receiptPath],
     });
@@ -1641,6 +1669,7 @@ export class AutopilotEngine {
         receiptId: receipt.receiptId,
         gateId: receipt.gateId,
         receiptKind: "gate",
+        subject: receipt.subject,
         status: receipt.status,
         evidence: [path],
       });
@@ -1655,10 +1684,435 @@ export class AutopilotEngine {
       attemptId,
       receiptId: predicateReceipt.receiptId,
       receiptKind: "predicate",
+      subject: predicateReceipt.subject,
       status: predicateReceipt.status,
       evidence: [predicateReceiptPath],
     });
     return { subject, met: evaluation.outcome === "met", reasons: evaluation.reasons };
+  }
+
+  #restackCheckpoint(item: WorkItem): VerifiedCheckpoint {
+    const restack = this.#projection.restacks[item.id];
+    if (restack?.candidateCommit === undefined || restack.treeIdentity === undefined
+      || restack.subject === undefined || restack.temporaryWorktreePath === undefined) {
+      throw new AutopilotError("JOURNAL_CORRUPT", `restack checkpoint is incomplete for ${item.id}`);
+    }
+    return {
+      attemptId: `restack-${sha256(`${this.#charter.runId}\0${item.id}\0${restack.candidateCommit}`).slice(0, 24)}`,
+      subject: restack.subject,
+      headCommit: restack.candidateCommit,
+      treeIdentity: restack.treeIdentity,
+      auxiliaryRefIdentity: "restack-owned",
+      configurationIdentity: "restack-owned",
+      commitRequired: false,
+      receiptIds: restack.receiptIds,
+    };
+  }
+
+  async #completeVerifiedRestackItem(item: WorkItem): Promise<void> {
+    const checkpoint = this.#restackCheckpoint(item);
+    await this.#validateVerifiedCheckpointEvidence(item, checkpoint);
+    const descendant = this.#charter.restack?.descendants.find(({ itemId }) => itemId === item.id);
+    if (descendant === undefined) {
+      throw new AutopilotError("CHARTER_INVALID", `restack snapshot is missing ${item.id}`);
+    }
+    const retainedWorktreePath = descendant.worktreePath;
+    const temporaryWorktreePath = this.#projection.restacks[item.id]?.temporaryWorktreePath;
+    if (temporaryWorktreePath === undefined) {
+      throw new AutopilotError("JOURNAL_CORRUPT", `restack candidate path is missing for ${item.id}`);
+    }
+    const localKeyPrefix = `restack:${this.#charter.runId}:${item.id}:${descendant.oldCommit}`;
+    const localKey = `${localKeyPrefix}:local-ref`;
+    const [localCommit, remoteCommit] = await Promise.all([
+      resolveCommit(this.#charter.repository.root, item.branchName),
+      remoteBranchCommit(this.#charter.repository.root, descendant.remote, item.branchName),
+    ]);
+    if ((localCommit !== descendant.oldCommit && localCommit !== checkpoint.headCommit)
+      || (remoteCommit !== descendant.remoteCommit && remoteCommit !== checkpoint.headCommit)
+      || (localCommit === descendant.oldCommit && remoteCommit !== descendant.remoteCommit)) {
+      throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack refs changed for ${item.id}`);
+    }
+    this.#adapterAuthorize("network.access");
+    const delivery = createDeliveryAdapter(descendant.changeRequest.provider);
+    const ref: ChangeRequestRef = {
+      provider: descendant.changeRequest.provider,
+      id: descendant.changeRequest.id,
+      url: descendant.changeRequest.url,
+    };
+    const beforeProvider = await delivery.observeChangeRequest(this.#charter.repository.root, ref);
+    const beforeProviderHeadAccepted = beforeProvider.headCommit === remoteCommit
+      || (remoteCommit === checkpoint.headCommit && beforeProvider.headCommit === descendant.remoteCommit);
+    if (beforeProvider.ref.provider !== ref.provider || beforeProvider.ref.id !== ref.id || beforeProvider.ref.url !== ref.url
+      || !beforeProviderHeadAccepted
+      || beforeProvider.baseBranch !== descendant.changeRequest.baseBranch || beforeProvider.state !== "open") {
+      throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack provider identity changed for ${item.id}`);
+    }
+    if (this.#stopRequested || this.#pauseRequested) {
+      return;
+    }
+    this.#runtimeAuthorize("git.commit", { branch: item.branchName });
+    if (this.#effectIntent(localKey) === undefined) {
+      const retainedBeforeIntent = await inspectRepository(retainedWorktreePath);
+      const retainedCommitBeforeIntent = await inspectCommit(retainedWorktreePath, retainedBeforeIntent.headCommit);
+      if (!retainedBeforeIntent.clean || retainedBeforeIntent.headCommit !== descendant.oldCommit
+        || retainedCommitBeforeIntent.treeIdentity !== descendant.oldTreeIdentity) {
+        throw new AutopilotError("BRANCH_COLLISION", `restack retained worktree changed before local intent for ${item.id}`);
+      }
+      await this.#record({
+        ...eventBase("Verified restack local ref movement intended"),
+        type: "EFFECT_INTENDED",
+        itemId: item.id,
+        effect: "restack.local-ref",
+        idempotencyKey: localKey,
+        expectedState: canonicalJson({ oldCommit: descendant.oldCommit, candidateCommit: checkpoint.headCommit }),
+      });
+    }
+    if (this.#stopRequested || this.#pauseRequested) {
+      return;
+    }
+    if (localCommit === descendant.oldCommit) {
+      await this.#withRepositoryLock(async () => {
+        if (this.#stopRequested || this.#pauseRequested) {
+          return;
+        }
+        await installRestackCandidate(
+          this.#charter.repository.root,
+          item.branchName,
+          retainedWorktreePath,
+          temporaryWorktreePath,
+          descendant.oldCommit,
+          checkpoint.headCommit,
+          checkpoint.treeIdentity,
+          () => {
+            if (this.#stopRequested || this.#pauseRequested) {
+              throw new AutopilotError("CAPABILITY_DENIED", "restack local CAS fenced by operator control");
+            }
+          },
+        );
+      });
+    } else {
+      try {
+        await access(retainedWorktreePath);
+        const retained = await inspectRepository(retainedWorktreePath);
+        const retainedCommit = await inspectCommit(retainedWorktreePath, retained.headCommit);
+        if (!retained.clean || retained.headCommit !== checkpoint.headCommit
+          || retainedCommit.treeIdentity !== checkpoint.treeIdentity) {
+          throw new AutopilotError("BRANCH_COLLISION", `restack retained worktree changed for ${item.id}`);
+        }
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+          throw error;
+        }
+        await this.#withRepositoryLock(async () => {
+          if (this.#stopRequested || this.#pauseRequested) {
+            return;
+          }
+          await installRestackCandidate(
+            this.#charter.repository.root,
+            item.branchName,
+            retainedWorktreePath,
+            temporaryWorktreePath,
+            descendant.oldCommit,
+            checkpoint.headCommit,
+            checkpoint.treeIdentity,
+            () => {
+              if (this.#stopRequested || this.#pauseRequested) {
+                throw new AutopilotError("CAPABILITY_DENIED", "restack worktree recreation fenced by operator control");
+              }
+            },
+          );
+        });
+      }
+    }
+    if (this.#stopRequested || this.#pauseRequested) {
+      return;
+    }
+    if (this.#effectConfirmation(localKey) === undefined) {
+      await this.#record({
+        ...eventBase("Restack local ref and retained worktree confirmed", "reconciler"),
+        type: "EFFECT_CONFIRMED",
+        itemId: item.id,
+        effect: "restack.local-ref",
+        idempotencyKey: localKey,
+        observedState: checkpoint.headCommit,
+      });
+    }
+    if (this.#stopRequested || this.#pauseRequested) {
+      return;
+    }
+    const remoteBeforePush = await remoteBranchCommit(this.#charter.repository.root, descendant.remote, item.branchName);
+    const providerBeforePush = await delivery.observeChangeRequest(this.#charter.repository.root, ref);
+    const providerBeforePushHeadAccepted = providerBeforePush.headCommit === remoteBeforePush
+      || (remoteBeforePush === checkpoint.headCommit && providerBeforePush.headCommit === descendant.remoteCommit);
+    if ((remoteBeforePush !== descendant.remoteCommit && remoteBeforePush !== checkpoint.headCommit)
+      || providerBeforePush.ref.provider !== ref.provider || providerBeforePush.ref.id !== ref.id
+      || providerBeforePush.ref.url !== ref.url || !providerBeforePushHeadAccepted
+      || providerBeforePush.baseBranch !== descendant.changeRequest.baseBranch || providerBeforePush.state !== "open") {
+      throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack remote or provider changed before push for ${item.id}`);
+    }
+    if (this.#stopRequested || this.#pauseRequested) {
+      return;
+    }
+    this.#runtimeAuthorize("remote.push", { branch: item.branchName, remote: descendant.remote });
+    const pushKey = `${localKeyPrefix}:remote-push`;
+    if (this.#effectIntent(pushKey) === undefined) {
+      await this.#record({
+        ...eventBase("Verified restack ordinary push intended"),
+        type: "EFFECT_INTENDED",
+        itemId: item.id,
+        effect: "restack.remote-push",
+        idempotencyKey: pushKey,
+        expectedState: canonicalJson({ oldCommit: descendant.remoteCommit, candidateCommit: checkpoint.headCommit }),
+      });
+    }
+    if (this.#stopRequested || this.#pauseRequested) {
+      return;
+    }
+    await pushAmendmentBranch(
+      retainedWorktreePath,
+      descendant.remote,
+      item.branchName,
+      descendant.remoteCommit,
+      checkpoint.headCommit,
+      () => {
+        if (this.#stopRequested || this.#pauseRequested) {
+          throw new AutopilotError("CAPABILITY_DENIED", "restack push fenced by operator control");
+        }
+      },
+    );
+    if (this.#effectConfirmation(pushKey) === undefined) {
+      await this.#record({
+        ...eventBase("Restack remote fast-forward confirmed", "reconciler"),
+        type: "EFFECT_CONFIRMED",
+        itemId: item.id,
+        effect: "restack.remote-push",
+        idempotencyKey: pushKey,
+        observedState: checkpoint.headCommit,
+      });
+    }
+    if (this.#stopRequested || this.#pauseRequested) {
+      return;
+    }
+    const provider = await delivery.observeChangeRequest(this.#charter.repository.root, ref);
+    if (provider.ref.provider !== ref.provider || provider.ref.id !== ref.id || provider.ref.url !== ref.url
+      || provider.baseBranch !== descendant.changeRequest.baseBranch || provider.state !== "open"
+      || (provider.headCommit !== checkpoint.headCommit && provider.headCommit !== descendant.remoteCommit)) {
+      throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack provider identity changed for ${item.id}`);
+    }
+    if (provider.headCommit === descendant.remoteCommit) {
+      return;
+    }
+    await this.#record({
+      ...eventBase("Restack provider head confirmed at the candidate"),
+      type: "RESTACK_PROVIDER_HEAD_CONFIRMED",
+      itemId: item.id,
+      provider: provider.ref.provider,
+      changeRequestId: provider.ref.id,
+      changeRequestUrl: provider.ref.url,
+      headCommit: provider.headCommit,
+      baseBranch: provider.baseBranch,
+      state: "open",
+    });
+    await this.#record({
+      ...eventBase("Restack descendant provider head confirmed"),
+      type: "RESTACK_DESCENDANT_SATISFIED",
+      itemId: item.id,
+      subject: checkpoint.subject,
+    });
+  }
+
+  async #runRestackItem(item: WorkItem): Promise<void> {
+    const restack = this.#charter.restack;
+    const descendant = restack?.descendants.find(({ itemId }) => itemId === item.id);
+    if (restack === undefined || descendant === undefined) {
+      throw new AutopilotError("CHARTER_INVALID", `restack snapshot is missing ${item.id}`);
+    }
+    let projected = this.#projection.restacks[item.id];
+    if (projected === undefined) {
+      throw new AutopilotError("JOURNAL_CORRUPT", `restack projection is missing ${item.id}`);
+    }
+    const index = restack.descendants.findIndex(({ itemId }) => itemId === item.id);
+    const freshParentCommit = index === 0
+      ? restack.amendedCommit
+      : this.#projection.restacks[restack.descendants[index - 1]?.itemId ?? ""]?.candidateCommit;
+    if (freshParentCommit === undefined) {
+      throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack predecessor is not confirmed for ${item.id}`);
+    }
+    if (projected.state === "PENDING") {
+      const [localCommit, remoteCommit] = await Promise.all([
+        resolveCommit(this.#charter.repository.root, item.branchName),
+        remoteBranchCommit(this.#charter.repository.root, descendant.remote, item.branchName),
+      ]);
+      if (localCommit !== descendant.oldCommit || remoteCommit !== descendant.remoteCommit) {
+        throw new AutopilotError("BRANCH_COLLISION", `restack source changed for ${item.id}`);
+      }
+      this.#adapterAuthorize("network.access");
+      const delivery = createDeliveryAdapter(descendant.changeRequest.provider);
+      const ref: ChangeRequestRef = {
+        provider: descendant.changeRequest.provider,
+        id: descendant.changeRequest.id,
+        url: descendant.changeRequest.url,
+      };
+      const provider = await delivery.observeChangeRequest(this.#charter.repository.root, ref);
+      if (provider.ref.provider !== ref.provider || provider.ref.id !== ref.id || provider.ref.url !== ref.url
+        || provider.headCommit !== descendant.remoteCommit
+        || provider.baseBranch !== descendant.changeRequest.baseBranch || provider.state !== "open") {
+        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack provider identity changed for ${item.id}`);
+      }
+      if (this.#stopRequested || this.#pauseRequested) {
+        return;
+      }
+      const retained = await inspectRepository(descendant.worktreePath);
+      const retainedCommit = await inspectCommit(descendant.worktreePath, retained.headCommit);
+      if (!retained.clean || retained.headCommit !== descendant.oldCommit
+        || retainedCommit.treeIdentity !== descendant.oldTreeIdentity) {
+        throw new AutopilotError("BRANCH_COLLISION", `restack retained worktree changed for ${item.id}`);
+      }
+      await this.#record({
+        ...eventBase("Sealed restack descendant started"),
+        type: "RESTACK_DESCENDANT_STARTED",
+        itemId: item.id,
+        oldCommit: descendant.oldCommit,
+        freshParentCommit,
+      });
+      projected = this.#projection.restacks[item.id];
+      if (projected === undefined) {
+        throw new AutopilotError("JOURNAL_CORRUPT", `restack projection disappeared for ${item.id}`);
+      }
+    }
+    if (projected.state === "PREPARING") {
+      if (this.#stopRequested || this.#pauseRequested) {
+        return;
+      }
+      const candidate = await this.#withRepositoryLock(async () => {
+        if (this.#stopRequested || this.#pauseRequested) {
+          return undefined;
+        }
+        return await prepareRestackCandidate(
+          this.#charter.repository.root,
+          this.#charter.runId,
+          item.id,
+          descendant.oldCommit,
+          freshParentCommit,
+          descendant.worktreePath,
+        );
+      });
+      if (candidate === undefined) {
+        return;
+      }
+      await this.#record({
+        ...eventBase("Runtime-owned restack tree prepared"),
+        type: "RESTACK_DESCENDANT_TREE_PREPARED",
+        itemId: item.id,
+        candidateCommit: candidate.commit,
+        treeIdentity: candidate.treeIdentity,
+        messageIdentity: candidate.messageIdentity,
+        oldCommit: descendant.oldCommit,
+        freshParentCommit,
+        temporaryWorktreePath: candidate.temporaryWorktreePath,
+      });
+      projected = this.#projection.restacks[item.id];
+      if (projected === undefined) {
+        throw new AutopilotError("JOURNAL_CORRUPT", `restack projection disappeared for ${item.id}`);
+      }
+    }
+    if (projected.state === "VERIFYING") {
+      if (projected.temporaryWorktreePath === undefined || projected.candidateCommit === undefined
+        || projected.treeIdentity === undefined) {
+        throw new AutopilotError("JOURNAL_CORRUPT", `restack prepared tree is incomplete for ${item.id}`);
+      }
+      try {
+        await access(projected.temporaryWorktreePath);
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+          throw error;
+        }
+        const recovered = await this.#withRepositoryLock(async () => await prepareRestackCandidate(
+          this.#charter.repository.root,
+          this.#charter.runId,
+          item.id,
+          descendant.oldCommit,
+          freshParentCommit,
+          descendant.worktreePath,
+        ));
+        if (recovered.commit !== projected.candidateCommit || recovered.treeIdentity !== projected.treeIdentity
+          || recovered.messageIdentity !== projected.messageIdentity
+          || recovered.temporaryWorktreePath !== projected.temporaryWorktreePath) {
+          throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack candidate recovery changed identity for ${item.id}`);
+        }
+      }
+      const observation = await this.#observeRepository(projected.temporaryWorktreePath);
+      if (!observation.clean || observation.headCommit !== projected.candidateCommit
+        || observation.treeIdentity !== projected.treeIdentity) {
+        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", `restack candidate changed for ${item.id}`);
+      }
+      const verificationId = `restack-${sha256(`${this.#charter.runId}\0${item.id}\0${projected.candidateCommit}`).slice(0, 24)}`;
+      const verification = await this.#verifyItem(item, projected.temporaryWorktreePath, verificationId, observation);
+      if (!verification.met) {
+        throw new AutopilotError("PREDICATE_NOT_MET", verification.reasons.join("; ") || "Restack predicates are not met");
+      }
+      const receiptIds = [...new Set(this.#records.flatMap(({ event }) =>
+        event.type === "RECEIPT_RECORDED" && event.itemId === item.id && event.attemptId === verificationId
+          ? [event.receiptId]
+          : []
+      ))];
+      await this.#record({
+        ...eventBase("Restack candidate exact tree and evidence verified"),
+        type: "RESTACK_DESCENDANT_VERIFIED",
+        itemId: item.id,
+        subject: verification.subject,
+        receiptIds,
+      });
+    }
+    await this.#completeVerifiedRestackItem(item);
+  }
+
+  async #runRestackLifecycle(): Promise<void> {
+    const restack = this.#charter.restack;
+    if (restack === undefined) {
+      return;
+    }
+    for (const descendant of restack.descendants) {
+      const projected = this.#projection.restacks[descendant.itemId];
+      if (projected?.state === "SATISFIED") {
+        continue;
+      }
+      if (projected?.state === "BLOCKED") {
+        return;
+      }
+      const item = this.#charter.work.find(({ id }) => id === descendant.itemId);
+      if (item === undefined) {
+        throw new AutopilotError("CHARTER_INVALID", `restack work item is missing ${descendant.itemId}`);
+      }
+      try {
+        if (["VERIFIED", "COMMITTING", "PUSHING"].includes(projected?.state ?? "")) {
+          await this.#completeVerifiedRestackItem(item);
+        } else {
+          await this.#runRestackItem(item);
+        }
+      } catch (error) {
+        if (!this.#pauseRequested && !this.#stopRequested) {
+          await this.#record({
+            ...eventBase(error instanceof Error ? error.message : String(error)),
+            type: "RESTACK_DESCENDANT_BLOCKED",
+            itemId: item.id,
+            errorCode: error instanceof AutopilotError ? error.code : "UNKNOWN_FAILURE",
+          });
+        }
+        return;
+      }
+      if (this.#pauseRequested || this.#stopRequested) {
+        return;
+      }
+    }
+    if (Object.values(this.#projection.restacks).every(({ state }) => state === "SATISFIED")) {
+      await this.#record({ ...eventBase("Evaluating the complete restack successor"), type: "RUN_VERIFYING" });
+      await this.#record({
+        ...eventBase("Every sealed restack descendant is satisfied"),
+        type: "RUN_SUCCEEDED",
+        predicateSummary: "All restack descendants are SATISFIED with fresh candidate-tree receipts.",
+      });
+    }
   }
 
   async #runItem(item: WorkItem): Promise<void> {
@@ -2076,6 +2530,15 @@ export class AutopilotEngine {
     await this.#reconcileInterruptedItems();
     await this.#record({ ...eventBase("Reconciliation completed", "reconciler"), type: "RECONCILIATION_COMPLETED" });
     if (await this.#waitForUnknownExecution()) {
+      return await this.#writeReport();
+    }
+    if (this.#charter.restack !== undefined) {
+      await this.#runRestackLifecycle();
+      if (this.#stopRequested) {
+        await this.#stopRunIfRequested();
+      } else if (this.#pauseRequested) {
+        await this.#settlePauseIfRequested();
+      }
       return await this.#writeReport();
     }
 

@@ -1,4 +1,4 @@
-export declare const GRANT_FAMILIES: readonly ["files.read", "files.write", "process.execute", "network.access", "credentials.use", "git.commit", "remote.push", "change-request.open", "change-request.update", "review-thread.resolve", "merge.execute"];
+export declare const GRANT_FAMILIES: readonly ["files.read", "files.write", "process.execute", "network.access", "credentials.use", "git.commit", "remote.push", "change-request.observe", "change-request.open", "change-request.update", "review-thread.resolve", "merge.execute"];
 export type GrantFamily = (typeof GRANT_FAMILIES)[number];
 export type EffectActor = "worker" | "runtime" | "adapter" | "delivery";
 export type RunMode = "single" | "independent-queue" | "ordered-stack";
@@ -92,6 +92,30 @@ export interface AmendmentReference {
     readonly runId: string;
     readonly itemId: string;
 }
+export interface RestackChangeRequestSnapshot {
+    readonly provider: "github" | "gitlab";
+    readonly id: string;
+    readonly url: string;
+    readonly baseBranch: string;
+}
+export interface RestackDescendantSnapshot {
+    readonly itemId: string;
+    readonly oldCommit: string;
+    readonly oldTreeIdentity: string;
+    readonly remote: string;
+    readonly remoteCommit: string;
+    readonly changeRequest: RestackChangeRequestSnapshot;
+    readonly worktreePath: string;
+    readonly gateIds: readonly string[];
+}
+export interface RestackSuccessor {
+    readonly schemaVersion: 1;
+    readonly predecessorRunId: string;
+    readonly predecessorCharterHash: string;
+    readonly amendedItemId: string;
+    readonly amendedCommit: string;
+    readonly descendants: readonly RestackDescendantSnapshot[];
+}
 export interface ReviewFeedbackThread {
     readonly threadId: string;
     readonly contentHash: string;
@@ -138,12 +162,14 @@ export interface ProposedRunCharter {
     readonly resolutionSources: Readonly<Record<string, ResolutionSource>>;
     readonly predecessorRunId?: string;
     readonly amends?: AmendmentReference;
+    readonly restack?: RestackSuccessor;
     readonly reviewFeedback?: ReviewFeedbackSnapshot;
     readonly commitPolicy?: CommitPolicy;
 }
 export interface RunCharter extends ProposedRunCharter {
     readonly charterHash: string;
 }
+export declare function restackGrantsAreValid(charter: ProposedRunCharter): boolean;
 export declare function parseProposedCharter(value: unknown): ProposedRunCharter;
 export declare function sealCharter(value: unknown): RunCharter;
 export declare function parseSealedCharter(value: unknown): RunCharter;

@@ -20,7 +20,7 @@ import { buildAttemptContext, attemptContextHash } from "../src/attempt-context.
 import { canonicalJson, isRecord, sha256 } from "../src/json.js";
 import { rebuildProjection } from "../src/projection.js";
 import { runChecked } from "../src/process.js";
-import { ensureWorktree, observeRepository } from "../src/repository.js";
+import { ensureWorktree, inspectCommit, observeRepository } from "../src/repository.js";
 import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
 
 function event(reason: string) {
@@ -818,6 +818,178 @@ test("engine retries a durably finished attempt instead of treating it as an orp
   assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
     lifecycleEvent.type === "ITEM_BLOCKED" && lifecycleEvent.errorCode === "EXECUTION_STATE_UNKNOWN"
   ), false);
+});
+
+test("engine merge-forwards a sealed restack descendant through fake gh and glab", async () => {
+  for (const provider of ["github", "gitlab"] as const) {
+  const repository = await createRepository();
+  const remote = await mkdtemp(join(tmpdir(), `autopilot-engine-restack-${provider}-remote-`));
+  await runChecked({ executable: "git", arguments: ["init", "--bare"], cwd: remote });
+  await runChecked({ executable: "git", arguments: ["remote", "add", "origin", remote], cwd: repository.root });
+  const source = sealCharter(proposedCharter(repository.root, repository.baseCommit, "single", "source-restack"));
+  const sourceItem = source.work[0];
+  assert.ok(sourceItem !== undefined);
+  const retainedWorktree = await ensureWorktree(source, sourceItem);
+  await writeFile(join(retainedWorktree, "result.txt"), "done\n");
+  await runChecked({ executable: "git", arguments: ["add", "result.txt"], cwd: retainedWorktree });
+  await runChecked({ executable: "git", arguments: ["commit", "-m", "descendant"], cwd: retainedWorktree });
+  const oldCommit = (await runChecked({ executable: "git", arguments: ["rev-parse", "HEAD"], cwd: retainedWorktree })).stdout.trim();
+  const oldTreeIdentity = (await inspectCommit(repository.root, oldCommit)).treeIdentity;
+  await runChecked({ executable: "git", arguments: ["push", "origin", `${oldCommit}:refs/heads/${sourceItem.branchName}`], cwd: repository.root });
+  await writeFile(join(repository.root, "parent.txt"), "amended\n");
+  await runChecked({ executable: "git", arguments: ["add", "parent.txt"], cwd: repository.root });
+  await runChecked({ executable: "git", arguments: ["commit", "-m", "amend parent"], cwd: repository.root });
+  const amendedCommit = (await runChecked({ executable: "git", arguments: ["rev-parse", "HEAD"], cwd: repository.root })).stdout.trim();
+  const proposal = proposedCharter(repository.root, amendedCommit, "single", "restack-successor");
+  const proposalItem = proposal.work[0];
+  assert.ok(proposalItem !== undefined);
+  const charter = sealCharter({
+    ...proposal,
+    predecessorRunId: "amendment-run",
+    mode: "ordered-stack",
+    delivery: "change-request-ready",
+    deliveryTarget: { provider, remote: "origin", baseBranch: "main" },
+    work: [{
+      ...proposalItem,
+      branchName: sourceItem.branchName,
+      acceptance: [{ type: "path-present", path: "result.txt" }],
+    }],
+    grants: [
+      { family: "files.read", actor: "runtime", paths: [repository.root] },
+      { family: "network.access", actor: "runtime" },
+      { family: "network.access", actor: "adapter" },
+      { family: "network.access", actor: "delivery" },
+      { family: "credentials.use", actor: "runtime" },
+      { family: "credentials.use", actor: "adapter" },
+      { family: "credentials.use", actor: "delivery" },
+      {
+        family: "git.commit",
+        actor: "runtime",
+        repositories: [repository.root],
+        branchPrefixes: ["autopilot/"],
+      },
+      { family: "remote.push", actor: "runtime", repositories: [repository.root], remotes: ["origin"], branchPrefixes: ["autopilot/"] },
+      { family: "change-request.observe", actor: "delivery", repositories: [repository.root] },
+    ],
+    restack: {
+      schemaVersion: 1,
+      predecessorRunId: "amendment-run",
+      predecessorCharterHash: "a".repeat(64),
+      amendedItemId: "parent-item",
+      amendedCommit,
+      descendants: [{
+        itemId: sourceItem.id,
+        oldCommit,
+        oldTreeIdentity,
+        remote: "origin",
+        remoteCommit: oldCommit,
+        changeRequest: {
+          provider,
+          id: "1",
+          url: provider === "github" ? "https://example.invalid/pull/1" : "https://example.invalid/merge_requests/1",
+          baseBranch: "main",
+        },
+        worktreePath: retainedWorktree,
+        gateIds: ["result-search"],
+      }],
+    },
+  });
+  const stateRoot = await mkdtemp(join(tmpdir(), "autopilot-engine-restack-state-"));
+  const runDirectory = join(stateRoot, "runs", charter.runId);
+  await mkdir(join(runDirectory, "receipts"), { recursive: true });
+  await writeImmutableJson(join(runDirectory, "charter.json"), charter);
+  await appendEvent(join(runDirectory, "events.jsonl"), {
+    ...event("compiled"),
+    type: "CHARTER_COMPILED",
+  });
+  const journal = await readJournal(join(runDirectory, "events.jsonl"));
+  const bin = await mkdtemp(join(tmpdir(), `autopilot-engine-restack-${provider}-cli-`));
+  const providerLag = join(bin, "provider-lag-observed");
+  const executable = provider === "github" ? "gh" : "glab";
+  const providerScript = provider === "github" ? `#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "--version") {
+  console.log("gh version fake");
+} else if (args[0] === "pr" && args[1] === "view") {
+  const output = execFileSync("git", ["ls-remote", "origin", "refs/heads/${sourceItem.branchName}"], { encoding: "utf8" });
+  const remoteHead = output.trim().split(/\\s+/u)[0];
+  let headRefOid = remoteHead;
+  if (remoteHead !== ${JSON.stringify(oldCommit)} && !existsSync(${JSON.stringify(providerLag)})) {
+    writeFileSync(${JSON.stringify(providerLag)}, "pending\\n");
+    headRefOid = ${JSON.stringify(oldCommit)};
+  }
+  console.log(JSON.stringify({ number: 1, url: "https://example.invalid/pull/1", state: "OPEN", headRefOid, baseRefName: "main", reviewDecision: "APPROVED" }));
+} else {
+  console.log("{}");
+}
+` : `#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "--version") {
+  console.log("glab version fake");
+} else if (args[0] === "mr" && args[1] === "view") {
+  const output = execFileSync("git", ["ls-remote", "origin", "refs/heads/${sourceItem.branchName}"], { encoding: "utf8" });
+  const remoteHead = output.trim().split(/\\s+/u)[0];
+  let head = remoteHead;
+  if (remoteHead !== ${JSON.stringify(oldCommit)} && !existsSync(${JSON.stringify(providerLag)})) {
+    writeFileSync(${JSON.stringify(providerLag)}, "pending\\n");
+    head = ${JSON.stringify(oldCommit)};
+  }
+  console.log(JSON.stringify({ iid: 1, web_url: "https://example.invalid/merge_requests/1", state: "opened", sha: head, diff_refs: { head_sha: head }, target_branch: "main", approved: true }));
+} else {
+  console.log("{}");
+}
+`;
+  await writeNodeExecutable(bin, executable, providerScript);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+  try {
+    const firstEngine = new AutopilotEngine({
+      stateRoot,
+      runDirectory,
+      charter,
+      adapter: new FakeAdapter(),
+      records: journal.records,
+      projection: rebuildProjection(charter, journal.records),
+    });
+    const pendingReport = await firstEngine.run();
+    const pendingJournal = await readJournal(join(runDirectory, "events.jsonl"));
+    assert.equal(pendingReport.state, "RUNNING");
+    assert.equal(pendingReport.restacks[0]?.state, "PUSHING");
+    const resumedEngine = new AutopilotEngine({
+      stateRoot,
+      runDirectory,
+      charter,
+      adapter: new FakeAdapter(),
+      records: pendingJournal.records,
+      projection: rebuildProjection(charter, pendingJournal.records),
+    });
+    const report = await resumedEngine.run();
+    const finalJournal = await readJournal(join(runDirectory, "events.jsonl"));
+    const installedCommit = (await observeRepository(retainedWorktree)).headCommit;
+    const installed = await inspectCommit(repository.root, installedCommit);
+
+    assert.equal(report.state, "SUCCEEDED");
+    assert.equal(report.items.length, 0);
+    assert.equal(report.restacks[0]?.state, "SATISFIED");
+    assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) => lifecycleEvent.type === "ATTEMPT_STARTED"), false);
+    assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
+      lifecycleEvent.type === "RESTACK_DESCENDANT_VERIFIED"
+    ), true);
+    assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
+      lifecycleEvent.type === "RESTACK_PROVIDER_HEAD_CONFIRMED"
+        && lifecycleEvent.changeRequestId === "1"
+        && lifecycleEvent.headCommit === installedCommit
+    ), true);
+    assert.deepEqual(installed.parents, [oldCommit, amendedCommit]);
+    assert.equal(await readFile(join(retainedWorktree, "parent.txt"), "utf8"), "amended\n");
+  } finally {
+    process.env.PATH = previousPath;
+  }
+  }
 });
 
 test("engine stop after push prevents later change-request mutation", async () => {
