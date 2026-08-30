@@ -111,6 +111,18 @@ export async function appendEvent(path: string, event: LifecycleEvent): Promise<
   return record;
 }
 
+async function syncParentDirectory(path: string): Promise<void> {
+  if (process.platform === "win32") {
+    return;
+  }
+  const directory = await open(dirname(path), "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+
 export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const file = await open(temporaryPath, "wx", 0o600);
@@ -121,12 +133,7 @@ export async function writeJsonAtomic(path: string, value: unknown): Promise<voi
     await file.close();
   }
   await rename(temporaryPath, path);
-  const directory = await open(dirname(path), "r");
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
-  }
+  await syncParentDirectory(path);
 }
 
 export async function writeImmutableJson(path: string, value: unknown): Promise<void> {
@@ -137,10 +144,5 @@ export async function writeImmutableJson(path: string, value: unknown): Promise<
   } finally {
     await file.close();
   }
-  const directory = await open(dirname(path), "r");
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
-  }
+  await syncParentDirectory(path);
 }
