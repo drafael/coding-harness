@@ -28,14 +28,14 @@ export async function writeNodeExecutable(directory: string, name: string, scrip
   }
   await writeFile(bootstrap, `
 const { spawnSync } = require("node:child_process");
-const { basename, dirname, join } = require("node:path");
-if (process.execPath !== process.env.AUTOPILOT_TEST_NODE_EXECUTABLE) {
-  const name = basename(process.execPath, ".exe");
+const { basename, join } = require("node:path");
+const name = basename(process.argv0).replace(/\\.exe$/i, "");
+if (name.toLowerCase() !== "node") {
   const environment = { ...process.env };
   const originalNodeOptions = environment.AUTOPILOT_TEST_ORIGINAL_NODE_OPTIONS;
   if (originalNodeOptions) environment.NODE_OPTIONS = originalNodeOptions;
   else delete environment.NODE_OPTIONS;
-  const result = spawnSync(environment.AUTOPILOT_TEST_NODE_EXECUTABLE, [join(dirname(process.execPath), name + ".mjs"), ...process.argv.slice(1)], {
+  const result = spawnSync(environment.AUTOPILOT_TEST_NODE_EXECUTABLE, [join(__dirname, name + ".mjs"), ...process.argv.slice(1)], {
     cwd: process.cwd(), env: environment, stdio: "inherit"
   });
   process.exit(result.status ?? 1);

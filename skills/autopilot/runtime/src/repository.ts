@@ -365,7 +365,15 @@ export async function runPreCommitHook(
     return { status: "NOT_CONFIGURED" };
   }
   try {
-    const result = await runVerificationCommand(observedHook.path, [], worktreePath, environmentNames, timeoutMs, maximumOutputBytes);
+    let executable = observedHook.path;
+    let arguments_: readonly string[] = [];
+    if (process.platform === "win32") {
+      const gitExecutablePath = await git(worktreePath, ["--exec-path"]);
+      executable = resolve(gitExecutablePath, "../../../usr/bin/sh.exe");
+      await access(executable, constants.X_OK);
+      arguments_ = ["-c", 'exec "$1"', "autopilot-pre-commit", observedHook.path];
+    }
+    const result = await runVerificationCommand(executable, arguments_, worktreePath, environmentNames, timeoutMs, maximumOutputBytes);
     return { status: result.exitCode === 0 ? "PASSED" : "FAILED", path: observedHook.path, result };
   } catch (error) {
     return {
