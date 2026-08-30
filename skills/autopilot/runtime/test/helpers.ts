@@ -1,4 +1,4 @@
-import { chmod, copyFile, link, mkdtemp, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AttemptContext } from "../src/adapter-protocol.js";
@@ -15,35 +15,51 @@ export async function writeNodeExecutable(directory: string, name: string, scrip
 
   const scriptPath = join(directory, `${name}.mjs`);
   const executable = join(directory, `${name}.exe`);
-  const bootstrap = join(directory, "autopilot-node-launcher.cjs");
+  const launcher = join(directory, "autopilot-node-launcher.exe");
   await writeFile(scriptPath, script);
   try {
-    await link(process.execPath, executable);
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
-      // Rewriting the adjacent script updates an existing launcher.
-    } else {
-      await copyFile(process.execPath, executable);
+    await access(launcher);
+  } catch {
+    const source = join(directory, "autopilot-node-launcher.cs");
+    await writeFile(source, `
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+
+public static class AutopilotNodeLauncher {
+  private static string Quote(string value) {
+    if (value.Length > 0 && value.IndexOfAny(new[] { ' ', '\\t', '\\n', '\\v', '"' }) < 0) return value;
+    var result = new StringBuilder("\\\"");
+    var backslashes = 0;
+    foreach (var character in value) {
+      if (character == '\\\\') { backslashes += 1; continue; }
+      if (character == '"') result.Append('\\\\', backslashes * 2 + 1);
+      else result.Append('\\\\', backslashes);
+      result.Append(character);
+      backslashes = 0;
     }
+    result.Append('\\\\', backslashes * 2).Append('"');
+    return result.ToString();
   }
-  await writeFile(bootstrap, `
-const { spawnSync } = require("node:child_process");
-const { basename, join } = require("node:path");
-const name = basename(process.argv0).replace(/\\.exe$/i, "");
-if (name.toLowerCase() !== "node") {
-  const environment = { ...process.env };
-  const originalNodeOptions = environment.AUTOPILOT_TEST_ORIGINAL_NODE_OPTIONS;
-  if (originalNodeOptions) environment.NODE_OPTIONS = originalNodeOptions;
-  else delete environment.NODE_OPTIONS;
-  const result = spawnSync(environment.AUTOPILOT_TEST_NODE_EXECUTABLE, [join(__dirname, name + ".mjs"), ...process.argv.slice(1)], {
-    cwd: process.cwd(), env: environment, stdio: "inherit"
-  });
-  process.exit(result.status ?? 1);
+
+  public static int Main(string[] arguments) {
+    var executable = Environment.GetEnvironmentVariable("AUTOPILOT_TEST_NODE_EXECUTABLE") ?? "node";
+    var script = Path.ChangeExtension(Process.GetCurrentProcess().MainModule.FileName, ".mjs");
+    var command = new StringBuilder(Quote(script));
+    foreach (var argument in arguments) command.Append(' ').Append(Quote(argument));
+    var process = Process.Start(new ProcessStartInfo(executable, command.ToString()) { UseShellExecute = false });
+    process.WaitForExit();
+    return process.ExitCode;
+  }
 }
 `);
+    const windowsDirectory = process.env.WINDIR ?? "C:\\Windows";
+    const compiler = join(windowsDirectory, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
+    await runChecked({ executable: compiler, arguments: ["/nologo", "/target:exe", `/out:${launcher}`, source], cwd: directory });
+  }
+  await copyFile(launcher, executable);
   process.env.AUTOPILOT_TEST_NODE_EXECUTABLE = process.execPath;
-  process.env.AUTOPILOT_TEST_ORIGINAL_NODE_OPTIONS ??= process.env.NODE_OPTIONS ?? "";
-  process.env.NODE_OPTIONS = `${process.env.AUTOPILOT_TEST_ORIGINAL_NODE_OPTIONS} --require ${JSON.stringify(bootstrap)}`.trim();
   return executable;
 }
 
