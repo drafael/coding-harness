@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; live independent review, end-to-end GitHub amendments, GitLab mutation, Windows, provider notification wake, restart reattachment, and restack evidence remain incomplete
+- **Status:** Developer-preview implementation available; live independent review, end-to-end provider amendments, Windows, provider notification wake, restart reattachment, and restack evidence remain incomplete
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
