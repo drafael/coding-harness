@@ -1,9 +1,67 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AttemptContext } from "../src/adapter-protocol.js";
 import type { ProposedRunCharter, RunMode } from "../src/charter.js";
 import { runChecked } from "../src/process.js";
+
+export async function writeNodeExecutable(directory: string, name: string, script: string): Promise<string> {
+  if (process.platform !== "win32") {
+    const executable = join(directory, name);
+    await writeFile(executable, script);
+    await chmod(executable, 0o755);
+    return executable;
+  }
+
+  const scriptPath = join(directory, `${name}.mjs`);
+  const executable = join(directory, `${name}.exe`);
+  const launcher = join(directory, "autopilot-node-launcher.exe");
+  await writeFile(scriptPath, script);
+  try {
+    await access(launcher);
+  } catch {
+    const source = join(directory, "autopilot-node-launcher.cs");
+    await writeFile(source, `
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+
+public static class AutopilotNodeLauncher {
+  private static string Quote(string value) {
+    if (value.Length > 0 && value.IndexOfAny(new[] { ' ', '\\t', '\\n', '\\v', '"' }) < 0) return value;
+    var result = new StringBuilder("\\\"");
+    var backslashes = 0;
+    foreach (var character in value) {
+      if (character == '\\\\') { backslashes += 1; continue; }
+      if (character == '"') result.Append('\\\\', backslashes * 2 + 1);
+      else result.Append('\\\\', backslashes);
+      result.Append(character);
+      backslashes = 0;
+    }
+    result.Append('\\\\', backslashes * 2).Append('"');
+    return result.ToString();
+  }
+
+  public static int Main(string[] arguments) {
+    var executable = Environment.GetEnvironmentVariable("AUTOPILOT_TEST_NODE_EXECUTABLE") ?? "node";
+    var script = Path.ChangeExtension(Process.GetCurrentProcess().MainModule.FileName, ".mjs");
+    var command = new StringBuilder(Quote(script));
+    foreach (var argument in arguments) command.Append(' ').Append(Quote(argument));
+    var process = Process.Start(new ProcessStartInfo(executable, command.ToString()) { UseShellExecute = false });
+    process.WaitForExit();
+    return process.ExitCode;
+  }
+}
+`);
+    const windowsDirectory = process.env.WINDIR ?? "C:\\Windows";
+    const compiler = join(windowsDirectory, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
+    await runChecked({ executable: compiler, arguments: ["/nologo", "/target:exe", `/out:${launcher}`, source], cwd: directory });
+  }
+  await copyFile(launcher, executable);
+  process.env.AUTOPILOT_TEST_NODE_EXECUTABLE = process.execPath;
+  return executable;
+}
 
 export function attemptContextFixture(attemptId = "attempt"): AttemptContext {
   return {

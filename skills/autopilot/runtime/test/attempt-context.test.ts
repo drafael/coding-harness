@@ -35,6 +35,7 @@ test("attempt context is deterministic and changes with observed identity", asyn
       clean: true,
       refIdentity: "refs",
       auxiliaryRefIdentity: "auxiliary-refs",
+      externalRefIdentity: "external-refs",
       configurationIdentity: "configuration",
     },
     records: journal.records,

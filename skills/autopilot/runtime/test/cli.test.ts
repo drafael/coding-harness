@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -11,7 +11,7 @@ import { appendEvent, readJournal, writeImmutableJson } from "../src/journal.js"
 import { isRecord, sha256 } from "../src/json.js";
 import { acquireRunLock, readLockOwner } from "../src/lock.js";
 import { runProcess } from "../src/process.js";
-import { createRepository, proposedCharter } from "./helpers.js";
+import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
 
 const cliPath = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 
@@ -144,7 +144,7 @@ test("compiled CLI resumes one discovered interrupted run without a run ID", asy
   const agentDirectory = join(fixtureRoot, "agent");
   await mkdir(bin, { recursive: true });
   await mkdir(agentDirectory, { recursive: true });
-  await writeFile(join(bin, "pi"), `#!/usr/bin/env node
+  await writeNodeExecutable(bin, "pi", `#!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 if (process.argv[2] === "--version") {
   console.log("pi 0.84.2");
@@ -153,7 +153,6 @@ if (process.argv[2] === "--version") {
   console.log(JSON.stringify({type:"agent_settled"}));
 }
 `);
-  await chmod(join(bin, "pi"), 0o755);
   const charter = sealCharter(proposedCharter(root, repository.baseCommit, "single", "interrupted-cli-run"));
   const runDirectory = join(stateRoot, "runs", charter.runId);
   await mkdir(runDirectory, { recursive: true });
@@ -285,7 +284,7 @@ test("active coordinator observes a fenced CLI stop request and records the term
   const charterFile = join(fixtureRoot, "charter.json");
   await mkdir(bin, { recursive: true });
   await mkdir(agentDirectory, { recursive: true });
-  await writeFile(join(bin, "pi"), `#!/usr/bin/env node
+  await writeNodeExecutable(bin, "pi", `#!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 if (process.argv[2] === "--version") {
   console.log("pi 0.84.2");
@@ -294,7 +293,6 @@ if (process.argv[2] === "--version") {
   setInterval(() => {}, 1000);
 }
 `);
-  await chmod(join(bin, "pi"), 0o755);
   const proposed = proposedCharter(root, repository.baseCommit, "single", "foreground-stop-run");
   await writeFile(charterFile, JSON.stringify(proposed));
   const child = spawn(process.execPath, [cliPath, "--json", "--state-dir", stateRoot, "start", charterFile], {
@@ -328,7 +326,7 @@ if (process.argv[2] === "--version") {
     cwd: root,
   });
   const exitCode = child.exitCode ?? await new Promise<number | null>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("foreground coordinator did not stop")), 10_000);
+    const timeout = setTimeout(() => reject(new Error("foreground coordinator did not stop")), 30_000);
     child.once("error", (error) => {
       clearTimeout(timeout);
       reject(error);

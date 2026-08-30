@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -27,7 +27,7 @@ import {
   remoteBranchCommit,
 } from "../src/repository.js";
 import { runChecked, runProcess } from "../src/process.js";
-import { createRepository, proposedCharter } from "./helpers.js";
+import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
 
 type EventInput<T> = T extends LifecycleEvent
   ? Omit<T, "eventId" | "timestamp" | "source" | "reason">
@@ -352,8 +352,7 @@ test("engine adopts the predecessor worktree, updates its change request, and re
   await appendEvent(join(runDirectory, "events.jsonl"), event({ type: "CHARTER_COMPILED" }));
   const journal = await readJournal(join(runDirectory, "events.jsonl"));
   const bin = await mkdtemp(join(tmpdir(), "autopilot-fake-gh-"));
-  const gh = join(bin, "gh");
-  await writeFile(gh, `#!/usr/bin/env node
+  await writeNodeExecutable(bin, "gh", `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
@@ -387,7 +386,6 @@ if (args[0] === "pr" && args[1] === "view") {
 }
 console.error(JSON.stringify(args)); process.exit(2);
 `);
-  await chmod(gh, 0o755);
   const previousPath = process.env.PATH;
   const previousFailureMarker = process.env.AUTOPILOT_GH_FAIL_ONCE;
   const previousPredecessor = process.env.AUTOPILOT_GH_PREDECESSOR;

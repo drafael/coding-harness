@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
@@ -8,7 +8,7 @@ import { sealCharter } from "../src/charter.js";
 import { newEventId, type LifecycleEvent } from "../src/events.js";
 import { appendEvent, writeImmutableJson } from "../src/journal.js";
 import { observeReviewFeedback } from "../src/review-feedback.js";
-import { createRepository, proposedCharter } from "./helpers.js";
+import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
 
 function event(type: "CHARTER_COMPILED"): LifecycleEvent {
   return { eventId: newEventId(), timestamp: new Date().toISOString(), source: "runtime", reason: "test", type };
@@ -55,7 +55,7 @@ test("review feedback discovers the successful leaf and returns content-bound un
     grants: [...proposed.grants, { family: "remote.push", actor: "runtime", remotes: ["origin"] }, { family: "change-request.open", actor: "delivery" }],
   });
   const bin = await mkdtemp(join(tmpdir(), "autopilot-review-feedback-gh-"));
-  await writeFile(join(bin, "gh"), `#!/usr/bin/env node
+  await writeNodeExecutable(bin, "gh", `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args[0] === "--version") console.log("gh fake");
 else if (args[0] === "pr" && args[1] === "view") console.log(JSON.stringify({number:7,url:"https://example.invalid/pull/7",state:"OPEN",headRefOid:process.env.FAKE_HEAD,baseRefName:"main",reviewDecision:""}));
@@ -64,7 +64,6 @@ else if (args[0] === "api" && args[1] === "graphql") console.log(JSON.stringify(
 else if (args[0] === "api" && args[1].includes("/issues/")) console.log(JSON.stringify([{id:11,user:{login:"reviewer"},body:"Handle null",html_url:"https://example.invalid/pull/7#issuecomment-11",created_at:"2026-08-23T00:00:00Z"}]));
 else console.log("[]");
 `);
-  await chmod(join(bin, "gh"), 0o755);
   const previousPath = process.env.PATH;
   const previousHead = process.env.FAKE_HEAD;
   process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;

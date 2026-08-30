@@ -20,7 +20,7 @@ import { canonicalJson, isRecord, sha256 } from "../src/json.js";
 import { rebuildProjection } from "../src/projection.js";
 import { runChecked } from "../src/process.js";
 import { observeRepository } from "../src/repository.js";
-import { createRepository, proposedCharter } from "./helpers.js";
+import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
 
 function event(reason: string) {
   return { eventId: newEventId(), timestamp: new Date().toISOString(), source: "runtime" as const, reason };
@@ -595,7 +595,7 @@ test("engine stop after push prevents later change-request mutation", async () =
   const bin = await mkdtemp(join(tmpdir(), "autopilot-engine-stop-gh-"));
   const described = join(bin, "described");
   const created = join(bin, "created");
-  await writeFile(join(bin, "gh"), `#!/usr/bin/env node
+  await writeNodeExecutable(bin, "gh", `#!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
@@ -610,7 +610,6 @@ if (args[0] === "--version") {
   console.log("{}");
 }
 `);
-  await chmod(join(bin, "gh"), 0o755);
   const previousPath = process.env.PATH;
   const previousDescribed = process.env.AUTOPILOT_GH_DESCRIBED;
   const previousCreated = process.env.AUTOPILOT_GH_CREATED;
@@ -687,14 +686,13 @@ test("engine expires a bounded exact-head check wait and resumes without rerunni
   await appendEvent(journalPath, { ...event("compiled"), type: "CHARTER_COMPILED" });
   const journal = await readJournal(journalPath);
   const bin = await mkdtemp(join(tmpdir(), "autopilot-engine-provider-wait-gh-"));
-  const gh = join(bin, "gh");
   const created = join(bin, "created");
   const merged = join(bin, "merged");
   const checks = join(bin, "checks");
   const observedSubject = join(bin, "observed-subject");
   const allowPass = join(bin, "allow-pass");
   const listCalls = join(bin, "list-calls");
-  await writeFile(gh, `#!/usr/bin/env node
+  await writeNodeExecutable(bin, "gh", `#!/usr/bin/env node
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 const args = process.argv.slice(2);
@@ -719,7 +717,6 @@ if (args[0] === "api" && args[1].includes("/check-runs")) {
 if (args[0] === "pr" && args[1] === "merge") { writeFileSync(process.env.AUTOPILOT_GH_MERGED, "merged\\n"); process.exit(0); }
 console.error(JSON.stringify(args)); process.exit(2);
 `);
-  await chmod(gh, 0o755);
   const previousEnvironment = {
     path: process.env.PATH,
     created: process.env.AUTOPILOT_GH_CREATED,
@@ -1003,7 +1000,7 @@ test("engine preserves independent queue siblings and ordered stack ancestry", a
   const queue = await runMode("independent-queue");
   const stack = await runMode("ordered-stack");
 
-  assert.equal(queue.report.state, "SUCCEEDED");
+  assert.equal(queue.report.state, "SUCCEEDED", JSON.stringify(queue.report, null, 2));
   assert.equal(queue.report.items.filter(({ state }) => state === "SATISFIED").length, 2);
   assert.equal(stack.report.state, "SUCCEEDED");
   const first = stack.charter.work[0]?.branchName ?? "";

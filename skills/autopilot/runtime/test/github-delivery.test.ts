@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { GitHubDeliveryAdapter } from "../delivery/github/index.js";
+import { writeNodeExecutable } from "./helpers.js";
 
 async function fakeGitHubCli(): Promise<{ readonly bin: string; readonly createMarker: string; readonly marker: string }> {
   const bin = await mkdtemp(join(tmpdir(), "autopilot-fake-gh-"));
@@ -39,8 +40,7 @@ if (args[0] === "pr" && args[1] === "view") {
   console.log("[]");
 }
 `;
-  await writeFile(join(bin, "gh"), script);
-  await chmod(join(bin, "gh"), 0o755);
+  await writeNodeExecutable(bin, "gh", script);
   return { bin, createMarker, marker };
 }
 

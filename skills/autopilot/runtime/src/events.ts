@@ -60,6 +60,7 @@ export type LifecycleEvent =
       readonly expectedBaseCommit: string;
       readonly expectedTreeIdentity?: string;
       readonly expectedRefIdentity?: string;
+      readonly expectedExternalRefIdentity?: string;
       readonly expectedConfigurationIdentity?: string;
       readonly expectedHookIdentity?: string;
       readonly expectedHookPath?: string;
@@ -91,6 +92,7 @@ export type LifecycleEvent =
       readonly headCommit: string;
       readonly treeIdentity: string;
       readonly auxiliaryRefIdentity: string;
+      readonly externalRefIdentity?: string;
       readonly configurationIdentity: string;
       readonly hookIdentity?: string;
       readonly hookPath?: string;
@@ -107,6 +109,7 @@ export type LifecycleEvent =
       readonly idempotencyKey: string;
       readonly observedState: string;
       readonly repositoryAuxiliaryRefIdentity?: string;
+      readonly repositoryExternalRefIdentity?: string;
     })
   | (EventBase & {
       readonly type: "RECEIPT_RECORDED";
@@ -227,6 +230,9 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         ...(object.expectedRefIdentity === undefined ? {} : {
           expectedRefIdentity: expectString(object.expectedRefIdentity, "event.expectedRefIdentity"),
         }),
+        ...(object.expectedExternalRefIdentity === undefined ? {} : {
+          expectedExternalRefIdentity: expectString(object.expectedExternalRefIdentity, "event.expectedExternalRefIdentity"),
+        }),
         ...(object.expectedConfigurationIdentity === undefined ? {} : {
           expectedConfigurationIdentity: expectString(object.expectedConfigurationIdentity, "event.expectedConfigurationIdentity"),
         }),
@@ -278,6 +284,9 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         headCommit: expectString(object.headCommit, "event.headCommit"),
         treeIdentity: expectString(object.treeIdentity, "event.treeIdentity"),
         auxiliaryRefIdentity: expectString(object.auxiliaryRefIdentity, "event.auxiliaryRefIdentity"),
+        ...(object.externalRefIdentity === undefined ? {} : {
+          externalRefIdentity: expectString(object.externalRefIdentity, "event.externalRefIdentity"),
+        }),
         configurationIdentity: expectString(object.configurationIdentity, "event.configurationIdentity"),
         ...(object.hookIdentity === undefined ? {} : { hookIdentity: expectString(object.hookIdentity, "event.hookIdentity") }),
         ...(object.hookPath === undefined ? {} : { hookPath: expectString(object.hookPath, "event.hookPath") }),
@@ -313,6 +322,12 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
           repositoryAuxiliaryRefIdentity: expectString(
             object.repositoryAuxiliaryRefIdentity,
             "event.repositoryAuxiliaryRefIdentity",
+          ),
+        }),
+        ...(object.repositoryExternalRefIdentity === undefined ? {} : {
+          repositoryExternalRefIdentity: expectString(
+            object.repositoryExternalRefIdentity,
+            "event.repositoryExternalRefIdentity",
           ),
         }),
       };

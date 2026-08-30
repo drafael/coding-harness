@@ -37,6 +37,32 @@ test("repository observation stages a deterministic tree and rejects out-of-scop
   await assert.rejects(assertWritablePaths(worktree, observation.changedPaths, item.writableRoots), /outside writable roots/);
 });
 
+test("repository observation normalizes only exact expected managed branch state", async () => {
+  const repository = await createRepository();
+  const managedBranch = "autopilot/run/item";
+  const optionalExpectation = [{ branchName: managedBranch, expectedCommit: repository.baseCommit, required: false }];
+  const requiredExpectation = [{ branchName: managedBranch, expectedCommit: repository.baseCommit, required: true }];
+  const before = await observeRepository(repository.root, optionalExpectation);
+
+  await runChecked({ executable: "git", arguments: ["branch", managedBranch], cwd: repository.root });
+  const afterExpectedBranch = await observeRepository(repository.root, requiredExpectation);
+  const tree = (await runChecked({ executable: "git", arguments: ["rev-parse", "HEAD^{tree}"], cwd: repository.root })).stdout.trim();
+  const unexpectedCommit = (await runChecked({
+    executable: "git",
+    arguments: ["commit-tree", tree, "-p", repository.baseCommit, "-m", "unexpected"],
+    cwd: repository.root,
+  })).stdout.trim();
+  await runChecked({ executable: "git", arguments: ["branch", "--force", managedBranch, unexpectedCommit], cwd: repository.root });
+  const afterMovedBranch = await observeRepository(repository.root, requiredExpectation);
+  await runChecked({ executable: "git", arguments: ["branch", "--delete", "--force", managedBranch], cwd: repository.root });
+  const afterDeletedBranch = await observeRepository(repository.root, requiredExpectation);
+
+  assert.notEqual(afterExpectedBranch.refIdentity, before.refIdentity);
+  assert.equal(afterExpectedBranch.externalRefIdentity, before.externalRefIdentity);
+  assert.notEqual(afterMovedBranch.externalRefIdentity, before.externalRefIdentity);
+  assert.notEqual(afterDeletedBranch.externalRefIdentity, before.externalRefIdentity);
+});
+
 test("long sibling worktree names are bounded and identity-specific", async () => {
   const repository = await createRepository();
   const proposal = proposedCharter(repository.root, repository.baseCommit, "single", "r".repeat(128));

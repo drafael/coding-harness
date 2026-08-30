@@ -11,6 +11,7 @@ export interface AttemptProjection {
   readonly expectedBaseCommit: string;
   readonly expectedTreeIdentity?: string;
   readonly expectedRefIdentity?: string;
+  readonly expectedExternalRefIdentity?: string;
   readonly expectedConfigurationIdentity?: string;
   readonly expectedHookIdentity?: string;
   readonly expectedHookPath?: string;
@@ -30,6 +31,7 @@ export interface VerifiedCheckpoint {
   readonly headCommit: string;
   readonly treeIdentity: string;
   readonly auxiliaryRefIdentity: string;
+  readonly externalRefIdentity?: string;
   readonly configurationIdentity: string;
   readonly hookIdentity?: string;
   readonly hookPath?: string;
@@ -162,6 +164,9 @@ function transitionItem(item: ItemProjection, event: LifecycleEvent): ItemProjec
             expectedBaseCommit: event.expectedBaseCommit,
             ...(event.expectedTreeIdentity === undefined ? {} : { expectedTreeIdentity: event.expectedTreeIdentity }),
             ...(event.expectedRefIdentity === undefined ? {} : { expectedRefIdentity: event.expectedRefIdentity }),
+            ...(event.expectedExternalRefIdentity === undefined ? {} : {
+              expectedExternalRefIdentity: event.expectedExternalRefIdentity,
+            }),
             ...(event.expectedConfigurationIdentity === undefined ? {} : {
               expectedConfigurationIdentity: event.expectedConfigurationIdentity,
             }),
@@ -228,6 +233,7 @@ function transitionItem(item: ItemProjection, event: LifecycleEvent): ItemProjec
           headCommit: event.headCommit,
           treeIdentity: event.treeIdentity,
           auxiliaryRefIdentity: event.auxiliaryRefIdentity,
+          ...(event.externalRefIdentity === undefined ? {} : { externalRefIdentity: event.externalRefIdentity }),
           configurationIdentity: event.configurationIdentity,
           ...(event.hookIdentity === undefined ? {} : { hookIdentity: event.hookIdentity }),
           ...(event.hookPath === undefined ? {} : { hookPath: event.hookPath }),

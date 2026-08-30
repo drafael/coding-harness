@@ -96,6 +96,18 @@ export async function appendEvent(path, event) {
     }
     return record;
 }
+async function syncParentDirectory(path) {
+    if (process.platform === "win32") {
+        return;
+    }
+    const directory = await open(dirname(path), "r");
+    try {
+        await directory.sync();
+    }
+    finally {
+        await directory.close();
+    }
+}
 export async function writeJsonAtomic(path, value) {
     const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
     const file = await open(temporaryPath, "wx", 0o600);
@@ -107,13 +119,7 @@ export async function writeJsonAtomic(path, value) {
         await file.close();
     }
     await rename(temporaryPath, path);
-    const directory = await open(dirname(path), "r");
-    try {
-        await directory.sync();
-    }
-    finally {
-        await directory.close();
-    }
+    await syncParentDirectory(path);
 }
 export async function writeImmutableJson(path, value) {
     const file = await open(path, "wx", 0o600);
@@ -124,11 +130,5 @@ export async function writeImmutableJson(path, value) {
     finally {
         await file.close();
     }
-    const directory = await open(dirname(path), "r");
-    try {
-        await directory.sync();
-    }
-    finally {
-        await directory.close();
-    }
+    await syncParentDirectory(path);
 }

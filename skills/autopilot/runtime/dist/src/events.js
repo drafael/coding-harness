@@ -99,6 +99,9 @@ export function parseLifecycleEvent(value) {
                 ...(object.expectedRefIdentity === undefined ? {} : {
                     expectedRefIdentity: expectString(object.expectedRefIdentity, "event.expectedRefIdentity"),
                 }),
+                ...(object.expectedExternalRefIdentity === undefined ? {} : {
+                    expectedExternalRefIdentity: expectString(object.expectedExternalRefIdentity, "event.expectedExternalRefIdentity"),
+                }),
                 ...(object.expectedConfigurationIdentity === undefined ? {} : {
                     expectedConfigurationIdentity: expectString(object.expectedConfigurationIdentity, "event.expectedConfigurationIdentity"),
                 }),
@@ -150,6 +153,9 @@ export function parseLifecycleEvent(value) {
                 headCommit: expectString(object.headCommit, "event.headCommit"),
                 treeIdentity: expectString(object.treeIdentity, "event.treeIdentity"),
                 auxiliaryRefIdentity: expectString(object.auxiliaryRefIdentity, "event.auxiliaryRefIdentity"),
+                ...(object.externalRefIdentity === undefined ? {} : {
+                    externalRefIdentity: expectString(object.externalRefIdentity, "event.externalRefIdentity"),
+                }),
                 configurationIdentity: expectString(object.configurationIdentity, "event.configurationIdentity"),
                 ...(object.hookIdentity === undefined ? {} : { hookIdentity: expectString(object.hookIdentity, "event.hookIdentity") }),
                 ...(object.hookPath === undefined ? {} : { hookPath: expectString(object.hookPath, "event.hookPath") }),
@@ -183,6 +189,9 @@ export function parseLifecycleEvent(value) {
                 observedState: expectString(object.observedState, "event.observedState"),
                 ...(object.repositoryAuxiliaryRefIdentity === undefined ? {} : {
                     repositoryAuxiliaryRefIdentity: expectString(object.repositoryAuxiliaryRefIdentity, "event.repositoryAuxiliaryRefIdentity"),
+                }),
+                ...(object.repositoryExternalRefIdentity === undefined ? {} : {
+                    repositoryExternalRefIdentity: expectString(object.repositoryExternalRefIdentity, "event.repositoryExternalRefIdentity"),
                 }),
             };
         case "RECEIPT_RECORDED":

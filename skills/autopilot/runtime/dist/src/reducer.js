@@ -99,6 +99,9 @@ function transitionItem(item, event) {
                         expectedBaseCommit: event.expectedBaseCommit,
                         ...(event.expectedTreeIdentity === undefined ? {} : { expectedTreeIdentity: event.expectedTreeIdentity }),
                         ...(event.expectedRefIdentity === undefined ? {} : { expectedRefIdentity: event.expectedRefIdentity }),
+                        ...(event.expectedExternalRefIdentity === undefined ? {} : {
+                            expectedExternalRefIdentity: event.expectedExternalRefIdentity,
+                        }),
                         ...(event.expectedConfigurationIdentity === undefined ? {} : {
                             expectedConfigurationIdentity: event.expectedConfigurationIdentity,
                         }),
@@ -163,6 +166,7 @@ function transitionItem(item, event) {
                     headCommit: event.headCommit,
                     treeIdentity: event.treeIdentity,
                     auxiliaryRefIdentity: event.auxiliaryRefIdentity,
+                    ...(event.externalRefIdentity === undefined ? {} : { externalRefIdentity: event.externalRefIdentity }),
                     configurationIdentity: event.configurationIdentity,
                     ...(event.hookIdentity === undefined ? {} : { hookIdentity: event.hookIdentity }),
                     ...(event.hookPath === undefined ? {} : { hookPath: event.hookPath }),

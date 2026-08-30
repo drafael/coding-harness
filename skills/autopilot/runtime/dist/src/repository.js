@@ -182,7 +182,7 @@ export async function assertWritablePaths(worktreePath, changed, writableRoots) 
         }
     }
 }
-export async function observeRepository(worktreePath) {
+export async function observeRepository(worktreePath, managedBranches = []) {
     const [headCommit, branchName, refState, configurationState] = await Promise.all([
         git(worktreePath, ["rev-parse", "HEAD"]),
         currentBranch(worktreePath),
@@ -190,7 +190,23 @@ export async function observeRepository(worktreePath) {
         git(worktreePath, ["config", "--show-origin", "--null", "--list"]),
     ]);
     const refIdentity = sha256(refState);
-    const auxiliaryRefIdentity = sha256(refState.split("\n").filter((line) => !line.startsWith(`refs/heads/${branchName}\t`)).join("\n"));
+    const refLines = refState.split("\n");
+    const auxiliaryRefIdentity = sha256(refLines.filter((line) => !line.startsWith(`refs/heads/${branchName}\t`)).join("\n"));
+    const refs = new Map(refLines.filter(Boolean).map((line) => {
+        const [refName, objectName] = line.split("\t", 2);
+        return [refName ?? "", objectName ?? ""];
+    }));
+    const expectedManagedRefs = new Map(managedBranches.map((expectation) => [
+        `refs/heads/${expectation.branchName}`,
+        expectation,
+    ]));
+    const unexpectedRefs = refLines.filter((line) => {
+        const [refName, objectName] = line.split("\t", 2);
+        const expectation = expectedManagedRefs.get(refName ?? "");
+        return expectation === undefined || expectation.expectedCommit !== objectName;
+    });
+    const missingManagedRefs = [...expectedManagedRefs].flatMap(([refName, expectation]) => expectation.required && !refs.has(refName) ? [`${refName}\t<missing>`] : []);
+    const externalRefIdentity = sha256([...unexpectedRefs, ...missingManagedRefs].sort().join("\n"));
     const configurationIdentity = sha256(configurationState);
     const changed = await changedPaths(worktreePath);
     let treeIdentity = await git(worktreePath, ["rev-parse", "HEAD^{tree}"]);
@@ -205,6 +221,7 @@ export async function observeRepository(worktreePath) {
         clean: changed.length === 0,
         refIdentity,
         auxiliaryRefIdentity,
+        externalRefIdentity,
         configurationIdentity,
     };
 }
@@ -301,7 +318,15 @@ export async function runPreCommitHook(worktreePath, expectedHook, environmentNa
         return { status: "NOT_CONFIGURED" };
     }
     try {
-        const result = await runVerificationCommand(observedHook.path, [], worktreePath, environmentNames, timeoutMs, maximumOutputBytes);
+        let executable = observedHook.path;
+        let arguments_ = [];
+        if (process.platform === "win32") {
+            const gitExecutablePath = await git(worktreePath, ["--exec-path"]);
+            executable = resolve(gitExecutablePath, "../../../usr/bin/sh.exe");
+            await access(executable, constants.X_OK);
+            arguments_ = ["-c", 'exec "$1"', "autopilot-pre-commit", observedHook.path];
+        }
+        const result = await runVerificationCommand(executable, arguments_, worktreePath, environmentNames, timeoutMs, maximumOutputBytes);
         return { status: result.exitCode === 0 ? "PASSED" : "FAILED", path: observedHook.path, result };
     }
     catch (error) {

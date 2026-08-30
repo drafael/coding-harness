@@ -6,6 +6,12 @@ import { AutopilotError } from "./errors.js";
 import { sha256 } from "./json.js";
 import { runChecked, runProcess, type ProcessResult } from "./process.js";
 
+export interface ManagedBranchExpectation {
+  readonly branchName: string;
+  readonly expectedCommit: string;
+  readonly required: boolean;
+}
+
 export interface RepositoryObservation {
   readonly headCommit: string;
   readonly treeIdentity: string;
@@ -13,6 +19,7 @@ export interface RepositoryObservation {
   readonly clean: boolean;
   readonly refIdentity: string;
   readonly auxiliaryRefIdentity: string;
+  readonly externalRefIdentity: string;
   readonly configurationIdentity: string;
 }
 
@@ -214,7 +221,10 @@ export async function assertWritablePaths(worktreePath: string, changed: readonl
   }
 }
 
-export async function observeRepository(worktreePath: string): Promise<RepositoryObservation> {
+export async function observeRepository(
+  worktreePath: string,
+  managedBranches: readonly ManagedBranchExpectation[] = [],
+): Promise<RepositoryObservation> {
   const [headCommit, branchName, refState, configurationState] = await Promise.all([
     git(worktreePath, ["rev-parse", "HEAD"]),
     currentBranch(worktreePath),
@@ -222,7 +232,25 @@ export async function observeRepository(worktreePath: string): Promise<Repositor
     git(worktreePath, ["config", "--show-origin", "--null", "--list"]),
   ]);
   const refIdentity = sha256(refState);
-  const auxiliaryRefIdentity = sha256(refState.split("\n").filter((line) => !line.startsWith(`refs/heads/${branchName}\t`)).join("\n"));
+  const refLines = refState.split("\n");
+  const auxiliaryRefIdentity = sha256(refLines.filter((line) => !line.startsWith(`refs/heads/${branchName}\t`)).join("\n"));
+  const refs = new Map(refLines.filter(Boolean).map((line) => {
+    const [refName, objectName] = line.split("\t", 2);
+    return [refName ?? "", objectName ?? ""] as const;
+  }));
+  const expectedManagedRefs = new Map(managedBranches.map((expectation) => [
+    `refs/heads/${expectation.branchName}`,
+    expectation,
+  ]));
+  const unexpectedRefs = refLines.filter((line) => {
+    const [refName, objectName] = line.split("\t", 2);
+    const expectation = expectedManagedRefs.get(refName ?? "");
+    return expectation === undefined || expectation.expectedCommit !== objectName;
+  });
+  const missingManagedRefs = [...expectedManagedRefs].flatMap(([refName, expectation]) =>
+    expectation.required && !refs.has(refName) ? [`${refName}\t<missing>`] : []
+  );
+  const externalRefIdentity = sha256([...unexpectedRefs, ...missingManagedRefs].sort().join("\n"));
   const configurationIdentity = sha256(configurationState);
   const changed = await changedPaths(worktreePath);
   let treeIdentity = await git(worktreePath, ["rev-parse", "HEAD^{tree}"]);
@@ -237,6 +265,7 @@ export async function observeRepository(worktreePath: string): Promise<Repositor
     clean: changed.length === 0,
     refIdentity,
     auxiliaryRefIdentity,
+    externalRefIdentity,
     configurationIdentity,
   };
 }
@@ -365,7 +394,15 @@ export async function runPreCommitHook(
     return { status: "NOT_CONFIGURED" };
   }
   try {
-    const result = await runVerificationCommand(observedHook.path, [], worktreePath, environmentNames, timeoutMs, maximumOutputBytes);
+    let executable = observedHook.path;
+    let arguments_: readonly string[] = [];
+    if (process.platform === "win32") {
+      const gitExecutablePath = await git(worktreePath, ["--exec-path"]);
+      executable = resolve(gitExecutablePath, "../../../usr/bin/sh.exe");
+      await access(executable, constants.X_OK);
+      arguments_ = ["-c", 'exec "$1"', "autopilot-pre-commit", observedHook.path];
+    }
+    const result = await runVerificationCommand(executable, arguments_, worktreePath, environmentNames, timeoutMs, maximumOutputBytes);
     return { status: result.exitCode === 0 ? "PASSED" : "FAILED", path: observedHook.path, result };
   } catch (error) {
     return {
