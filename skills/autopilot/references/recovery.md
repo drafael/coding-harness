@@ -109,7 +109,7 @@ A missing or non-executable pre-commit hook is recorded as `NOT_CONFIGURED`. A f
 
 ## Locks
 
-`run.lock` is an atomic directory containing owner host, PID, start time, and token. A second live coordinator is denied. A dead same-host PID can be replaced through an atomic stale-lock rename. Node 24 CI exercises same-host live ownership, release, relocation, and control fencing on Windows. Dead-owner replacement and cross-host replacement remain unverified.
+`run.lock` is an atomic directory containing owner host, PID, start time, and token. A second live coordinator is denied. A dead same-host PID can be replaced through an atomic stale-lock rename. Node 24 CI exercises same-host live ownership, release, relocation, and control fencing on Windows. Dead same-host owner replacement remains unverified in Windows CI. Cross-host stale-owner replacement is unsupported and requires manual recovery after proving the former coordinator is quiescent.
 
 ## Reports
 

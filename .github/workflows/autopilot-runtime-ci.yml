@@ -53,4 +53,6 @@ jobs:
       - name: Run test suite
         run: npm test
       - name: Verify generated runtime artifacts
-        run: git diff --exit-code -- dist
+        run: |
+          git add --intent-to-add -- dist
+          git diff --exit-code -- dist

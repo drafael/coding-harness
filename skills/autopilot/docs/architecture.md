@@ -307,7 +307,7 @@ One fresh worktree and branch serve one inseparable outcome. The runtime dispatc
 
 ### Independent queue
 
-Each item receives an exclusive branch, worktree, lease, acceptance predicates, and delivery state. Items may run concurrently up to the lower of the charter limit and adapter capability. Repository observations check the item's own HEAD and all refs outside the charter's sealed managed branches, so an exact runtime-owned sibling commit is not misattributed to a worker while unexpected external ref changes still fail closed. One blocked item does not stop unrelated work unless the charter defines all-or-nothing completion.
+Each item receives an exclusive branch, worktree, lease, acceptance predicates, and delivery state. Items may run concurrently up to the lower of the charter limit and adapter capability. Repository observations check the item's own HEAD and normalize only exact charter-managed branch states justified by the topology and durable runtime events. Missing or moved required branches and all unmanaged ref changes still fail closed, while an exact runtime-owned sibling transition is not misattributed to a worker. One blocked item does not stop unrelated work unless the charter defines all-or-nothing completion.
 
 ### Ordered stack
 

@@ -60,11 +60,10 @@ export class AutopilotEngine {
     #charter;
     #adapter;
     #requested;
-    #managedBranches;
     #records;
     #projection;
     #appendQueue = Promise.resolve();
-    #worktreeMutationQueue = Promise.resolve();
+    #repositoryQueue = Promise.resolve();
     #manifest;
     #amendment;
     #stopRequested = false;
@@ -84,7 +83,6 @@ export class AutopilotEngine {
             && options.projection.waiting?.kind !== "operator-pause";
         this.#pauseRequestId = options.projection.pauseRequestId;
         this.#requested = playbookRequests(options.charter);
-        this.#managedBranches = options.charter.work.map(({ branchName }) => branchName);
     }
     async requestStop() {
         if (this.#stopRequested) {
@@ -232,8 +230,46 @@ export class AutopilotEngine {
             throw failure;
         }
     }
+    async #withRepositoryLock(action) {
+        const previous = this.#repositoryQueue;
+        let release = () => undefined;
+        this.#repositoryQueue = new Promise((resolve) => {
+            release = resolve;
+        });
+        await previous;
+        try {
+            return await action();
+        }
+        finally {
+            release();
+        }
+    }
+    #managedBranchExpectations() {
+        return this.#charter.work.map((item) => {
+            const attempts = this.#records.flatMap(({ event }) => event.type === "ATTEMPT_STARTED" && event.itemId === item.id ? [event] : []);
+            const adopted = this.#records.findLast(({ event }) => event.type === "WORKTREE_ADOPTED" && event.itemId === item.id)?.event;
+            const confirmedCommit = this.#records.findLast(({ event }) => event.type === "EFFECT_CONFIRMED" && event.itemId === item.id && event.effect === "git.commit")?.event;
+            const predecessorId = item.dependsOn.at(-1);
+            const predecessorCommit = predecessorId === undefined
+                ? undefined
+                : this.#records.findLast(({ event }) => event.type === "EFFECT_CONFIRMED" && event.itemId === predecessorId && event.effect === "git.commit")?.event;
+            const expectedCommit = confirmedCommit?.type === "EFFECT_CONFIRMED"
+                ? confirmedCommit.observedState
+                : adopted?.type === "WORKTREE_ADOPTED"
+                    ? adopted.acceptedCommit
+                    : attempts.at(-1)?.expectedBaseCommit
+                        ?? (predecessorCommit?.type === "EFFECT_CONFIRMED"
+                            ? predecessorCommit.observedState
+                            : this.#charter.repository.baseCommit);
+            return {
+                branchName: item.branchName,
+                expectedCommit,
+                required: attempts.length > 0 || adopted?.type === "WORKTREE_ADOPTED",
+            };
+        });
+    }
     async #observeRepository(worktreePath) {
-        return await observeRepository(worktreePath, this.#managedBranches);
+        return await this.#withRepositoryLock(async () => await observeRepository(worktreePath, this.#managedBranchExpectations()));
     }
     #runtimeAuthorize(family, details = {}) {
         authorizeEffect({ family, actor: "runtime", ...details }, this.#requested, this.#charter.grants, RUNTIME_CAPABILITIES);
@@ -695,34 +731,38 @@ export class AutopilotEngine {
                     });
                 }
                 observation = await this.#observeRepository(worktreePath);
-                if (observation.headCommit === checkpoint.headCommit) {
-                    if (observation.treeIdentity !== checkpoint.treeIdentity) {
-                        throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "verified tree changed before commit reconciliation");
+                acceptedCommit = await this.#withRepositoryLock(async () => {
+                    let observedCommit;
+                    if (observation.headCommit === checkpoint.headCommit) {
+                        if (observation.treeIdentity !== checkpoint.treeIdentity) {
+                            throw new AutopilotError("EFFECT_RECONCILIATION_FAILED", "verified tree changed before commit reconciliation");
+                        }
+                        observedCommit = await commitAcceptedWork(worktreePath, this.#charter, item, checkpoint.attemptId, checkpoint.treeIdentity, checkpoint.headCommit);
                     }
-                    acceptedCommit = await commitAcceptedWork(worktreePath, this.#charter, item, checkpoint.attemptId, checkpoint.treeIdentity, checkpoint.headCommit);
-                }
-                else {
-                    const commit = await inspectCommit(worktreePath, observation.headCommit);
-                    const expectedTrailers = [
-                        `Autopilot-Run: ${this.#charter.runId}`,
-                        `Autopilot-Item: ${item.id}`,
-                        `Autopilot-Attempt: ${checkpoint.attemptId}`,
-                    ];
-                    if (commit.parents.length !== 1 || commit.parents[0] !== checkpoint.headCommit
-                        || commit.treeIdentity !== checkpoint.treeIdentity
-                        || expectedTrailers.some((trailer) => !commit.message.includes(trailer))) {
-                        throw new AutopilotError("BRANCH_COLLISION", "unconfirmed commit intent does not match the verified item");
+                    else {
+                        const commit = await inspectCommit(worktreePath, observation.headCommit);
+                        const expectedTrailers = [
+                            `Autopilot-Run: ${this.#charter.runId}`,
+                            `Autopilot-Item: ${item.id}`,
+                            `Autopilot-Attempt: ${checkpoint.attemptId}`,
+                        ];
+                        if (commit.parents.length !== 1 || commit.parents[0] !== checkpoint.headCommit
+                            || commit.treeIdentity !== checkpoint.treeIdentity
+                            || expectedTrailers.some((trailer) => !commit.message.includes(trailer))) {
+                            throw new AutopilotError("BRANCH_COLLISION", "unconfirmed commit intent does not match the verified item");
+                        }
+                        observedCommit = observation.headCommit;
                     }
-                    acceptedCommit = observation.headCommit;
-                }
-                await this.#record({
-                    ...eventBase("Verified commit observed"),
-                    type: "EFFECT_CONFIRMED",
-                    itemId: item.id,
-                    attemptId: checkpoint.attemptId,
-                    effect: "git.commit",
-                    idempotencyKey: key,
-                    observedState: acceptedCommit,
+                    await this.#record({
+                        ...eventBase("Verified commit observed"),
+                        type: "EFFECT_CONFIRMED",
+                        itemId: item.id,
+                        attemptId: checkpoint.attemptId,
+                        effect: "git.commit",
+                        idempotencyKey: key,
+                        observedState: observedCommit,
+                    });
+                    return observedCommit;
                 });
             }
             observation = await this.#observeRepository(worktreePath);
@@ -1297,18 +1337,7 @@ export class AutopilotEngine {
             : []);
         let worktreePath = this.#amendment?.worktreePath;
         if (worktreePath === undefined) {
-            const previousMutation = this.#worktreeMutationQueue;
-            let releaseMutation = () => undefined;
-            this.#worktreeMutationQueue = new Promise((resolveMutation) => {
-                releaseMutation = resolveMutation;
-            });
-            await previousMutation;
-            try {
-                worktreePath = await ensureWorktree(this.#charter, item, baseCommit, ownedCommits);
-            }
-            finally {
-                releaseMutation();
-            }
+            worktreePath = await this.#withRepositoryLock(async () => await ensureWorktree(this.#charter, item, baseCommit, ownedCommits));
         }
         const before = await this.#observeRepository(worktreePath);
         const hookSnapshot = this.#charter.commitPolicy?.preCommitHook === "run"

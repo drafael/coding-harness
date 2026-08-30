@@ -6,6 +6,12 @@ import { AutopilotError } from "./errors.js";
 import { sha256 } from "./json.js";
 import { runChecked, runProcess, type ProcessResult } from "./process.js";
 
+export interface ManagedBranchExpectation {
+  readonly branchName: string;
+  readonly expectedCommit: string;
+  readonly required: boolean;
+}
+
 export interface RepositoryObservation {
   readonly headCommit: string;
   readonly treeIdentity: string;
@@ -215,7 +221,10 @@ export async function assertWritablePaths(worktreePath: string, changed: readonl
   }
 }
 
-export async function observeRepository(worktreePath: string, managedBranches: readonly string[] = []): Promise<RepositoryObservation> {
+export async function observeRepository(
+  worktreePath: string,
+  managedBranches: readonly ManagedBranchExpectation[] = [],
+): Promise<RepositoryObservation> {
   const [headCommit, branchName, refState, configurationState] = await Promise.all([
     git(worktreePath, ["rev-parse", "HEAD"]),
     currentBranch(worktreePath),
@@ -225,8 +234,23 @@ export async function observeRepository(worktreePath: string, managedBranches: r
   const refIdentity = sha256(refState);
   const refLines = refState.split("\n");
   const auxiliaryRefIdentity = sha256(refLines.filter((line) => !line.startsWith(`refs/heads/${branchName}\t`)).join("\n"));
-  const managedRefs = new Set(managedBranches.map((managedBranch) => `refs/heads/${managedBranch}`));
-  const externalRefIdentity = sha256(refLines.filter((line) => !managedRefs.has(line.split("\t", 1)[0] ?? "")).join("\n"));
+  const refs = new Map(refLines.filter(Boolean).map((line) => {
+    const [refName, objectName] = line.split("\t", 2);
+    return [refName ?? "", objectName ?? ""] as const;
+  }));
+  const expectedManagedRefs = new Map(managedBranches.map((expectation) => [
+    `refs/heads/${expectation.branchName}`,
+    expectation,
+  ]));
+  const unexpectedRefs = refLines.filter((line) => {
+    const [refName, objectName] = line.split("\t", 2);
+    const expectation = expectedManagedRefs.get(refName ?? "");
+    return expectation === undefined || expectation.expectedCommit !== objectName;
+  });
+  const missingManagedRefs = [...expectedManagedRefs].flatMap(([refName, expectation]) =>
+    expectation.required && !refs.has(refName) ? [`${refName}\t<missing>`] : []
+  );
+  const externalRefIdentity = sha256([...unexpectedRefs, ...missingManagedRefs].sort().join("\n"));
   const configurationIdentity = sha256(configurationState);
   const changed = await changedPaths(worktreePath);
   let treeIdentity = await git(worktreePath, ["rev-parse", "HEAD^{tree}"]);
