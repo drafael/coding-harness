@@ -3,17 +3,47 @@ import { parseAdapterMessage, } from "./adapter-protocol.js";
 import { renderAttemptContext, renderReviewContext } from "./attempt-context.js";
 import { AutopilotError } from "./errors.js";
 import { isRecord } from "./json.js";
-import { runProcess } from "./process.js";
+import { cancelSupervisedProcess, launchSupervisedProcess, observeSupervisedProcess, reattachSupervisedProcess, supervisedExecutionId, supervisorDirectory, } from "./process-supervisor.js";
+import { boundUtf8, runProcess } from "./process.js";
+function adapterCredentialNames(request) {
+    return [...new Set(request.grants
+            .filter(({ actor, family }) => actor === "adapter" && family === "credentials.use")
+            .flatMap(({ environmentNames }) => environmentNames ?? []))].sort();
+}
 function adapterEnvironment(request) {
-    const allowedCredentialNames = new Set(request.grants
-        .filter(({ actor, family }) => actor === "adapter" && family === "credentials.use")
-        .flatMap(({ environmentNames }) => environmentNames ?? []));
+    const allowedCredentialNames = new Set(adapterCredentialNames(request));
     return Object.fromEntries(Object.entries(process.env).filter(([name]) => !/(TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH)/i.test(name) || allowedCredentialNames.has(name)));
 }
 function executionPrompt(request) {
     return request.role === "review"
         ? renderReviewContext(request.context, request.reviewFocus ?? "Review the exact subject for actionable correctness defects.")
         : renderAttemptContext(request.context);
+}
+function supervisedRequest(configuration, request, environment) {
+    if (request.supervisionDirectory === undefined || process.platform === "win32") {
+        return undefined;
+    }
+    const executionId = supervisedExecutionId(request.runId, request.itemId, request.attemptId, request.role, request.contextHash);
+    return {
+        directory: supervisorDirectory(request.supervisionDirectory, executionId),
+        request: {
+            schemaVersion: 1,
+            executionId,
+            runId: request.runId,
+            itemId: request.itemId,
+            attemptId: request.attemptId,
+            contextHash: request.contextHash,
+            executable: configuration.executable,
+            arguments: configuration.buildArguments(request, executionPrompt(request)),
+            cwd: request.worktreePath,
+            environmentNames: Object.keys(environment).sort(),
+            credentialEnvironmentNames: adapterCredentialNames(request),
+            deadline: request.deadline,
+            idleTimeoutMs: request.idleTimeoutMs,
+            maximumOutputBytes: request.maximumOutputBytes,
+            displayStderrActivity: configuration.displayStderrActivity === true,
+        },
+    };
 }
 function stringValues(value) {
     if (typeof value === "string") {
@@ -93,9 +123,22 @@ export function parseReviewResult(stdout) {
     const unique = new Map(parsed.map((result) => [JSON.stringify(result), result]));
     return unique.size === 1 ? [...unique.values()][0] : undefined;
 }
-function redactSecrets(text) {
+function redactionValues(credentialEnvironmentNames) {
+    const credentialNames = new Set(credentialEnvironmentNames);
+    return Object.entries(process.env).flatMap(([name, value]) => {
+        const explicitlyGranted = credentialNames.has(name);
+        return value === undefined || value.length === 0
+            || (!explicitlyGranted && (value.length < 4 || !/(TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH)/i.test(name)))
+            ? []
+            : [value];
+    });
+}
+function redactSecrets(text, credentialEnvironmentNames = []) {
+    const credentialNames = new Set(credentialEnvironmentNames);
     return Object.entries(process.env).reduce((current, [name, value]) => {
-        if (value === undefined || value.length < 4 || !/(TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH)/i.test(name)) {
+        const explicitlyGranted = credentialNames.has(name);
+        if (value === undefined || value.length === 0
+            || (!explicitlyGranted && (value.length < 4 || !/(TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH)/i.test(name)))) {
             return current;
         }
         return current.replaceAll(value, "****");
@@ -122,6 +165,7 @@ export class CliHarnessAdapter {
     #configuration;
     #executions = new Map();
     #cancelledExecutions = new Set();
+    #requests = new Map();
     constructor(configuration) {
         this.#configuration = configuration;
     }
@@ -147,7 +191,7 @@ export class CliHarnessAdapter {
             maxConcurrency: this.#configuration.maxConcurrency,
             eventStreaming: this.#configuration.expectsJsonLines,
             cancellation: this.#configuration.cancellation,
-            restartReattachment: false,
+            restartReattachment: process.platform !== "win32",
             restrictions: this.#configuration.assurance,
             limitations: [
                 ...this.#configuration.limitations,
@@ -160,63 +204,79 @@ export class CliHarnessAdapter {
         }
         return normalized.manifest;
     }
+    #normalizeResult(adapterExecutionId, request, result, statusHint) {
+        const malformedJson = this.#configuration.expectsJsonLines ? validateJsonLines(result, request.maximumLineBytes) : undefined;
+        const malformed = malformedJson ?? this.#configuration.validateResult?.(result.stdout, request);
+        const status = statusHint ?? (this.#cancelledExecutions.has(adapterExecutionId)
+            ? "cancelled"
+            : result.exitCode === 0 && malformed === undefined ? "completed" : "failed");
+        const terminal = parseAdapterMessage(JSON.stringify({
+            protocolVersion: 1,
+            type: "terminal",
+            executionId: adapterExecutionId,
+            status: malformed === undefined ? status : "failed",
+            exitCode: result.exitCode,
+        }), request.maximumLineBytes);
+        if (terminal.type !== "terminal") {
+            throw new AutopilotError("ADAPTER_MALFORMED", "adapter terminal normalization failed");
+        }
+        const stdout = boundUtf8(redactSecrets(result.stdout, adapterCredentialNames(request)), request.maximumOutputBytes);
+        const stderr = boundUtf8(redactSecrets(malformed === undefined ? result.stderr : `${result.stderr}\n${malformed}`.trim(), adapterCredentialNames(request)), request.maximumOutputBytes);
+        const parsedReviewResult = request.role === "review" ? parseReviewResult(stdout.value) : undefined;
+        const reviewResult = parsedReviewResult === undefined ? undefined : {
+            ...parsedReviewResult,
+            findings: parsedReviewResult.findings.map((finding) => ({
+                ...finding,
+                message: redactSecrets(finding.message, adapterCredentialNames(request)),
+            })),
+        };
+        return {
+            protocolVersion: 1,
+            adapterExecutionId,
+            status: terminal.status,
+            exitCode: terminal.exitCode,
+            completedAt: new Date().toISOString(),
+            stdout: stdout.value,
+            stderr: stderr.value,
+            truncated: result.truncated || stdout.truncated || stderr.truncated,
+            ...(reviewResult === undefined ? {} : { reviewResult }),
+        };
+    }
     async launch(request) {
         if (request.protocolVersion !== 1) {
             throw new AutopilotError("ADAPTER_UNSUPPORTED", "execution request protocol version is not supported");
         }
+        const environment = adapterEnvironment(request);
+        const supervised = supervisedRequest(this.#configuration, request, environment);
+        if (supervised !== undefined) {
+            const handle = await launchSupervisedProcess(supervised.directory, supervised.request, environment);
+            this.#requests.set(handle.executionId, request);
+            return {
+                protocolVersion: 1,
+                adapterExecutionId: handle.executionId,
+                startedAt: handle.startedAt,
+                supervisor: { schemaVersion: 1, directory: handle.directory, requestHash: handle.requestHash },
+            };
+        }
         const adapterExecutionId = randomUUID();
         const startedAt = new Date().toISOString();
         const controller = new AbortController();
-        const timeoutMs = Math.max(1, Date.parse(request.deadline) - Date.now());
         const promise = runProcess({
             executable: this.#configuration.executable,
             arguments: this.#configuration.buildArguments(request, executionPrompt(request)),
             cwd: request.worktreePath,
-            environment: adapterEnvironment(request),
-            timeoutMs,
+            environment,
+            timeoutMs: Math.max(1, Date.parse(request.deadline) - Date.now()),
             idleTimeoutMs: request.idleTimeoutMs,
             maxOutputBytes: request.maximumOutputBytes,
+            redactValues: redactionValues(adapterCredentialNames(request)),
             signal: controller.signal,
             ...(this.#configuration.displayStderrActivity === true ? {
                 onStderrLine: (line) => {
-                    process.stderr.write(`${redactSecrets(line)}\n`);
+                    process.stderr.write(`${redactSecrets(line, adapterCredentialNames(request))}\n`);
                 },
             } : {}),
-        }).then((result) => {
-            const malformedJson = this.#configuration.expectsJsonLines ? validateJsonLines(result, request.maximumLineBytes) : undefined;
-            const malformed = malformedJson ?? this.#configuration.validateResult?.(result.stdout, request);
-            const terminal = parseAdapterMessage(JSON.stringify({
-                protocolVersion: 1,
-                type: "terminal",
-                executionId: adapterExecutionId,
-                status: this.#cancelledExecutions.has(adapterExecutionId)
-                    ? "cancelled"
-                    : result.exitCode === 0 && malformed === undefined ? "completed" : "failed",
-                exitCode: result.exitCode,
-            }), request.maximumLineBytes);
-            if (terminal.type !== "terminal") {
-                throw new AutopilotError("ADAPTER_MALFORMED", "adapter terminal normalization failed");
-            }
-            const parsedReviewResult = request.role === "review" ? parseReviewResult(result.stdout) : undefined;
-            const reviewResult = parsedReviewResult === undefined ? undefined : {
-                ...parsedReviewResult,
-                findings: parsedReviewResult.findings.map((finding) => ({
-                    ...finding,
-                    message: redactSecrets(finding.message),
-                })),
-            };
-            return {
-                protocolVersion: 1,
-                adapterExecutionId,
-                status: terminal.status,
-                exitCode: terminal.exitCode,
-                completedAt: new Date().toISOString(),
-                stdout: redactSecrets(result.stdout),
-                stderr: redactSecrets(malformed === undefined ? result.stderr : `${result.stderr}\n${malformed}`.trim()),
-                truncated: result.truncated,
-                ...(reviewResult === undefined ? {} : { reviewResult }),
-            };
-        }).catch((error) => ({
+        }).then((result) => this.#normalizeResult(adapterExecutionId, request, result)).catch((error) => ({
             protocolVersion: 1,
             adapterExecutionId,
             status: this.#cancelledExecutions.has(adapterExecutionId)
@@ -229,9 +289,54 @@ export class CliHarnessAdapter {
             truncated: false,
         }));
         this.#executions.set(adapterExecutionId, { controller, promise });
+        this.#requests.set(adapterExecutionId, request);
         return { protocolVersion: 1, adapterExecutionId, startedAt };
     }
+    async reattach(request) {
+        const environment = adapterEnvironment(request);
+        const supervised = supervisedRequest(this.#configuration, request, environment);
+        if (supervised === undefined) {
+            return undefined;
+        }
+        const handle = await reattachSupervisedProcess(supervised.directory, supervised.request);
+        if (handle === undefined) {
+            return undefined;
+        }
+        this.#requests.set(handle.executionId, request);
+        return {
+            protocolVersion: 1,
+            adapterExecutionId: handle.executionId,
+            startedAt: handle.startedAt,
+            supervisor: { schemaVersion: 1, directory: handle.directory, requestHash: handle.requestHash },
+        };
+    }
     async observe(handle) {
+        const request = this.#requests.get(handle.adapterExecutionId);
+        if (handle.supervisor !== undefined) {
+            if (request === undefined) {
+                throw new AutopilotError("ADAPTER_UNSUPPORTED", `supervised execution request is not attached: ${handle.adapterExecutionId}`);
+            }
+            try {
+                const observed = await observeSupervisedProcess({
+                    schemaVersion: 1,
+                    executionId: handle.adapterExecutionId,
+                    directory: handle.supervisor.directory,
+                    requestHash: handle.supervisor.requestHash,
+                    startedAt: handle.startedAt,
+                }, this.#configuration.displayStderrActivity === true
+                    ? (line) => {
+                        process.stderr.write(`${line}\n`);
+                    }
+                    : undefined);
+                const status = observed.state === "cancelled"
+                    ? "cancelled"
+                    : observed.state === "timed-out" ? "timed-out" : undefined;
+                return this.#normalizeResult(handle.adapterExecutionId, request, observed.result, status);
+            }
+            finally {
+                this.#requests.delete(handle.adapterExecutionId);
+            }
+        }
         const execution = this.#executions.get(handle.adapterExecutionId);
         if (execution === undefined) {
             throw new AutopilotError("ADAPTER_UNSUPPORTED", `execution is not attached: ${handle.adapterExecutionId}`);
@@ -242,11 +347,25 @@ export class CliHarnessAdapter {
         finally {
             this.#executions.delete(handle.adapterExecutionId);
             this.#cancelledExecutions.delete(handle.adapterExecutionId);
+            this.#requests.delete(handle.adapterExecutionId);
         }
     }
     async cancel(handle) {
+        if (!this.#configuration.cancellation) {
+            return { protocolVersion: 1, accepted: false };
+        }
+        if (handle.supervisor !== undefined) {
+            await cancelSupervisedProcess({
+                schemaVersion: 1,
+                executionId: handle.adapterExecutionId,
+                directory: handle.supervisor.directory,
+                requestHash: handle.supervisor.requestHash,
+                startedAt: handle.startedAt,
+            });
+            return { protocolVersion: 1, accepted: true };
+        }
         const execution = this.#executions.get(handle.adapterExecutionId);
-        if (execution === undefined || !this.#configuration.cancellation) {
+        if (execution === undefined) {
             return { protocolVersion: 1, accepted: false };
         }
         this.#cancelledExecutions.add(handle.adapterExecutionId);

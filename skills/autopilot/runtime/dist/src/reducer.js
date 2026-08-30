@@ -109,6 +109,7 @@ function transitionItem(item, event) {
                         ...(event.expectedHookPath === undefined ? {} : { expectedHookPath: event.expectedHookPath }),
                         ...(event.contextHash === undefined ? {} : { contextHash: event.contextHash }),
                         ...(event.contextJournalSequence === undefined ? {} : { contextJournalSequence: event.contextJournalSequence }),
+                        ...(event.executionSupervised === undefined ? {} : { executionSupervised: event.executionSupervised }),
                         deadline: event.deadline,
                         idempotencyKey: event.idempotencyKey,
                     },

@@ -66,6 +66,7 @@ export type LifecycleEvent =
       readonly expectedHookPath?: string;
       readonly contextHash?: string;
       readonly contextJournalSequence?: number;
+      readonly executionSupervised?: boolean;
       readonly deadline: string;
       readonly idempotencyKey: string;
     })
@@ -247,6 +248,9 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         }),
         ...(object.contextJournalSequence === undefined ? {} : {
           contextJournalSequence: expectInteger(object.contextJournalSequence, "event.contextJournalSequence"),
+        }),
+        ...(object.executionSupervised === undefined ? {} : {
+          executionSupervised: expectBoolean(object.executionSupervised, "event.executionSupervised"),
         }),
         deadline: expectString(object.deadline, "event.deadline"),
         idempotencyKey: expectString(object.idempotencyKey, "event.idempotencyKey"),

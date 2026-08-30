@@ -44,7 +44,7 @@ If no coordinator owns the run, `pause` acquires the run lock and reconciles the
 
 If no coordinator owns the run, `stop` acquires the run lock and records the terminal stop. If a foreground coordinator is active, `stop` uses the same fenced request path. The owner cancels active adapter work and records `RUN_STOPPED`. A success recorded before either request wins remains successful.
 
-`stop` is terminal. A stopped or successful run requires a sealed successor for changed work. Pause cannot recover an executor whose process state became unknown after coordinator loss: with the current non-reattachable adapters, Autopilot records `EXECUTION_STATE_UNKNOWN` and refuses a replacement launch.
+`stop` is terminal. A stopped or successful run requires a sealed successor for changed work. On supported POSIX hosts, built-in adapters reattach supervised implementation executions after coordinator loss and wait for terminal process-tree evidence before retrying. Legacy attempts, review executions, and incomplete or mismatched supervisor artifacts record `EXECUTION_STATE_UNKNOWN` and refuse a replacement launch.
 
 ## Journal repair
 

@@ -117,6 +117,9 @@ export function parseLifecycleEvent(value) {
                 ...(object.contextJournalSequence === undefined ? {} : {
                     contextJournalSequence: expectInteger(object.contextJournalSequence, "event.contextJournalSequence"),
                 }),
+                ...(object.executionSupervised === undefined ? {} : {
+                    executionSupervised: expectBoolean(object.executionSupervised, "event.executionSupervised"),
+                }),
                 deadline: expectString(object.deadline, "event.deadline"),
                 idempotencyKey: expectString(object.idempotencyKey, "event.idempotencyKey"),
             };

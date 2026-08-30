@@ -1,0 +1,200 @@
+import assert from "node:assert/strict";
+import { access, mkdtemp, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import {
+  cancelSupervisedProcess,
+  launchSupervisedProcess,
+  observeSupervisedProcess,
+  reattachSupervisedProcess,
+  supervisedExecutionId,
+  supervisorDirectory,
+  type SupervisedProcessRequest,
+} from "../src/process-supervisor.js";
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw new Error(`timed out waiting for ${path}`);
+}
+
+function requestFor(root: string, script: string, deadlineMs = 10_000): SupervisedProcessRequest {
+  const executionId = supervisedExecutionId("run-1", "item-1", "attempt-1", "implementation", "context-hash");
+  return {
+    schemaVersion: 1,
+    executionId,
+    runId: "run-1",
+    itemId: "item-1",
+    attemptId: "attempt-1",
+    contextHash: "context-hash",
+    executable: process.execPath,
+    arguments: [script],
+    cwd: root,
+    environmentNames: Object.keys(process.env).sort(),
+    credentialEnvironmentNames: [],
+    deadline: new Date(Date.now() + deadlineMs).toISOString(),
+    idleTimeoutMs: deadlineMs,
+    maximumOutputBytes: 65_536,
+    displayStderrActivity: false,
+  };
+}
+
+test("supervised process survives client replacement and returns its durable result", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-"));
+  const script = join(root, "child.mjs");
+  const journal = join(root, "events.jsonl");
+  await writeFile(script, "setTimeout(() => console.log(JSON.stringify({done:true})), 250);\n");
+  await writeFile(journal, "canonical-journal\n");
+  const request = requestFor(root, script);
+  const directory = supervisorDirectory(root, request.executionId);
+
+  await launchSupervisedProcess(directory, request, process.env);
+  const reattached = await reattachSupervisedProcess(directory, request);
+  assert.ok(reattached !== undefined);
+  const observed = await observeSupervisedProcess(reattached);
+
+  assert.equal(observed.state, "completed");
+  assert.equal(observed.result.exitCode, 0);
+  assert.equal(observed.result.stdout, "{\"done\":true}\n");
+  assert.equal(await readFile(journal, "utf8"), "canonical-journal\n");
+});
+
+test("supervised process request identity is immutable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-identity-"));
+  const script = join(root, "child.mjs");
+  await writeFile(script, "console.log('done');\n");
+  const request = requestFor(root, script);
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+
+  assert.ok(await reattachSupervisedProcess(directory, {
+    ...request,
+    environmentNames: [...request.environmentNames, "INNOCUOUS_RESTART_VARIABLE"],
+  }));
+  await assert.rejects(
+    reattachSupervisedProcess(directory, { ...request, contextHash: "changed" }),
+    /request changed/u,
+  );
+  await observeSupervisedProcess(handle);
+});
+
+test("watchdog terminates the supervisor process group without child identity", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-watchdog-"));
+  const script = join(root, "child.mjs");
+  const marker = join(root, "orphan-survived");
+  await writeFile(script, `import { writeFileSync } from "node:fs"; setTimeout(() => writeFileSync(${JSON.stringify(marker)}, "survived"), 2000); setInterval(() => {}, 1000);\n`);
+  const request = requestFor(root, script, 30_000);
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+  await waitForFile(join(directory, "watchdog-ready.json"));
+  await waitForFile(join(directory, "child.json"));
+  await unlink(join(directory, "child.json"));
+  const status = JSON.parse(await readFile(join(directory, "status.json"), "utf8")) as { supervisorPid: number };
+
+  process.kill(status.supervisorPid, "SIGKILL");
+  const observed = await observeSupervisedProcess(handle);
+  await new Promise((resolve) => setTimeout(resolve, 2_250));
+
+  assert.equal(observed.state, "failed");
+  await assert.rejects(readFile(marker), /ENOENT/);
+});
+
+test("successful harness completion quiesces inherited-group descendants", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-completion-"));
+  const script = join(root, "child.mjs");
+  const marker = join(root, "descendant-survived");
+  await writeFile(script, `import { spawn } from "node:child_process"; spawn(process.execPath, ["-e", ${JSON.stringify(`setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "survived"), 500); setTimeout(() => {}, 10000);`)}], { stdio: "ignore", detached: false }).unref();\n`);
+  const request = requestFor(root, script);
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+
+  const observed = await observeSupervisedProcess(handle);
+  await new Promise((resolve) => setTimeout(resolve, 750));
+
+  assert.equal(observed.state, "completed");
+  await assert.rejects(readFile(marker), /ENOENT/);
+});
+
+test("watchdog prefers an earlier cancellation over later harness completion", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-cancel-race-"));
+  const script = join(root, "child.mjs");
+  await writeFile(script, "setTimeout(() => {}, 200);\n");
+  const request = requestFor(root, script);
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+  await waitForFile(join(directory, "child.json"));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await cancelSupervisedProcess(handle);
+  const observed = await observeSupervisedProcess(handle);
+
+  assert.equal(observed.state, "cancelled");
+});
+
+test("watchdog prefers an earlier deadline over later harness completion", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-deadline-race-"));
+  const script = join(root, "child.mjs");
+  await writeFile(script, "setTimeout(() => {}, 250);\n");
+  const request = requestFor(root, script, 150);
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+
+  const observed = await observeSupervisedProcess(handle);
+
+  assert.equal(observed.state, "timed-out");
+});
+
+test("watchdog enforces the supervised harness idle deadline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-idle-"));
+  const script = join(root, "child.mjs");
+  await writeFile(script, "setInterval(() => {}, 1000);\n");
+  const base = requestFor(root, script);
+  const request = { ...base, idleTimeoutMs: 100 };
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+
+  const observed = await observeSupervisedProcess(handle);
+
+  assert.equal(observed.state, "timed-out");
+});
+
+test("supervisor bounds retained stderr activity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-activity-"));
+  const script = join(root, "child.mjs");
+  await writeFile(script, "for (let i = 0; i < 1000; i += 1) console.error('activity-' + i);\n");
+  const base = requestFor(root, script);
+  const request = { ...base, maximumOutputBytes: 512, displayStderrActivity: true };
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+
+  await observeSupervisedProcess(handle);
+
+  assert.ok((await stat(join(directory, "stderr-activity.log"))).size <= 512);
+});
+
+test("supervised cancellation waits for a terminal process-tree observation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-cancel-"));
+  const script = join(root, "child.mjs");
+  await writeFile(script, "setInterval(() => {}, 1000);\n");
+  const request = requestFor(root, script, 30_000);
+  const directory = supervisorDirectory(root, request.executionId);
+  const handle = await launchSupervisedProcess(directory, request, process.env);
+
+  await cancelSupervisedProcess(handle);
+  const observed = await observeSupervisedProcess(handle);
+
+  assert.equal(observed.state, "cancelled");
+  assert.equal(observed.result.exitCode, 124);
+});

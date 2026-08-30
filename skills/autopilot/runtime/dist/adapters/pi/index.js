@@ -76,7 +76,7 @@ export function createPiAdapter() {
         cancellation: true,
         limitations: [
             "Tool restrictions do not constrain commands executed through bash.",
-            "Executions cannot be reattached after coordinator restart.",
+            "Implementation executions use the attempt-scoped supervisor for restart reattachment; review executions remain session-scoped.",
             usingSubagents
                 ? `Pi workers use the pi-subagents ${installation.version} structured delegation API.`
                 : "pi-subagents 0.53.0 or newer was not found; Pi workers run directly without subagent activity integration.",
