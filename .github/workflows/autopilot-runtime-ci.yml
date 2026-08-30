@@ -52,3 +52,5 @@ jobs:
         run: npm run format:check
       - name: Run test suite
         run: npm test
+      - name: Verify generated runtime artifacts
+        run: git diff --exit-code -- dist

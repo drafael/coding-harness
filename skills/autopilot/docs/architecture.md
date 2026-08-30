@@ -234,7 +234,7 @@ run.lock                 single-coordinator lock
 
 `events.jsonl` is canonical. Each event carries a sequence number, previous-event hash, run and item identities, attempt identity where applicable, timestamp, reason, and evidence pointers. `snapshot.json` is a cache and may be discarded and rebuilt.
 
-The runtime fsyncs written files before publishing them. POSIX hosts also fsync the parent directory after immutable creation or atomic replacement. Node.js directory handles reject fsync on Windows, so the Windows path relies on the completed file sync plus same-volume rename and does not claim equivalent sudden-power-loss metadata persistence. Node 24 CI on `windows-latest` exercises locks, atomic writes, worktrees, governed hooks through Git for Windows, provider fixtures, cancellation, and descendant process-tree termination.
+Canonical journal appends and the immutable or atomic JSON helpers fsync written files before publication. POSIX hosts also fsync the parent directory after immutable creation or atomic replacement. Node.js directory handles reject fsync on Windows, so the Windows path relies on the completed file sync plus same-volume rename and does not claim equivalent sudden-power-loss metadata persistence. Node 24 CI on `windows-latest` exercises locks, atomic writes, worktrees, governed hooks through Git for Windows, provider fixtures, cancellation, and descendant process-tree termination.
 
 Git objects remain authoritative for commits, trees, and refs. Verification receipts remain authoritative for observed gate results. Material decisions are journal events. `decisions.tsv` is a generated review projection, not a second mutable source of truth.
 

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parseAdapterMessage, type ExecutionRequest } from "../src/adapter-protocol.js";
 import { CliHarnessAdapter, parseReviewResult } from "../src/adapter-process.js";
@@ -46,20 +49,22 @@ test("silent adapter process reaches the idle deadline", async () => {
   }), /exceeded its deadline/);
 });
 
-test("process deadlines terminate inherited descendant handles", async () => {
-  const startedAt = Date.now();
+test("process deadlines terminate descendants before reporting completion", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autopilot-process-tree-"));
+  const marker = join(directory, "descendant-survived");
+  const descendant = `setTimeout(() => require("node:fs").writeFileSync(process.argv[1], "survived"), 300); setTimeout(() => {}, 1000);`;
+  const parent = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}, ${JSON.stringify(marker)}], { stdio: "ignore" }); setTimeout(() => {}, 10000);`;
+
   await assert.rejects(runProcess({
     executable: process.execPath,
-    arguments: [
-      "-e",
-      `require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { stdio: "inherit" }); setTimeout(() => {}, 10000);`,
-    ],
+    arguments: ["-e", parent],
     cwd: process.cwd(),
     idleTimeoutMs: 20,
     timeoutMs: 5_000,
   }), /exceeded its deadline/);
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
-  assert.ok(Date.now() - startedAt < 5_000);
+  await assert.rejects(readFile(marker), /ENOENT/);
 });
 
 test("adapter observation redacts credential-like environment values", async () => {

@@ -48,20 +48,58 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
     let truncated = false;
     let timedOut = false;
     let forceTimer: NodeJS.Timeout | undefined;
+    let windowsTermination: Promise<void> | undefined;
     const signalProcess = (signal: NodeJS.Signals): void => {
       if (process.platform === "win32") {
+        if (windowsTermination !== undefined) {
+          return;
+        }
         const pid = child.pid;
         if (pid === undefined) {
           child.kill(signal);
+          rejectPromise(new AutopilotError(
+            "EXECUTION_STATE_UNKNOWN",
+            `cannot prove that ${request.executable} descendants stopped because the process ID is unavailable`,
+          ));
           return;
         }
-        const terminator = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
-          detached: false,
-          stdio: "ignore",
-          windowsHide: true,
+        windowsTermination = new Promise((resolveTermination, rejectTermination) => {
+          const terminator = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+            detached: false,
+            stdio: "ignore",
+            windowsHide: true,
+          });
+          const terminatorTimer = setTimeout(() => {
+            terminator.kill();
+            rejectTermination(new AutopilotError(
+              "EXECUTION_STATE_UNKNOWN",
+              `taskkill did not confirm that ${request.executable} descendants stopped within five seconds`,
+              { pid },
+            ));
+          }, 5_000);
+          terminator.once("error", (error) => {
+            clearTimeout(terminatorTimer);
+            child.kill(signal);
+            rejectTermination(new AutopilotError(
+              "EXECUTION_STATE_UNKNOWN",
+              `cannot prove that ${request.executable} descendants stopped`,
+              { cause: String(error), pid },
+            ));
+          });
+          terminator.once("close", (code) => {
+            clearTimeout(terminatorTimer);
+            if (code === 0) {
+              resolveTermination();
+            } else {
+              rejectTermination(new AutopilotError(
+                "EXECUTION_STATE_UNKNOWN",
+                `taskkill could not confirm that ${request.executable} descendants stopped`,
+                { exitCode: code, pid },
+              ));
+            }
+          });
         });
-        terminator.once("error", () => child.kill(signal));
-        terminator.unref();
+        void windowsTermination.catch(rejectPromise);
         return;
       }
       const pid = child.pid;
@@ -130,32 +168,40 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
     request.signal?.addEventListener("abort", abort, { once: true });
 
     child.once("close", (code, signal) => {
-      if (timer !== undefined) {
-        clearTimeout(timer);
-      }
-      if (idleTimer !== undefined) {
-        clearTimeout(idleTimer);
-      }
-      if (forceTimer !== undefined) {
-        clearTimeout(forceTimer);
-      }
-      request.signal?.removeEventListener("abort", abort);
-      if (request.onStderrLine !== undefined) {
-        stderrLineBuffer += stderrDecoder.end();
-        if (stderrLineBuffer !== "") {
-          request.onStderrLine(stderrLineBuffer.replace(/\r$/u, ""));
+      void (async () => {
+        if (timer !== undefined) {
+          clearTimeout(timer);
         }
-      }
-      if (timedOut) {
-        rejectPromise(new AutopilotError("ADAPTER_TIMEOUT", `${request.executable} exceeded its deadline`, { signal }));
-        return;
-      }
-      resolvePromise({
-        exitCode: code ?? 128,
-        stdout: stdout.toString("utf8"),
-        stderr: stderr.toString("utf8"),
-        truncated,
-      });
+        if (idleTimer !== undefined) {
+          clearTimeout(idleTimer);
+        }
+        if (forceTimer !== undefined) {
+          clearTimeout(forceTimer);
+        }
+        request.signal?.removeEventListener("abort", abort);
+        if (request.onStderrLine !== undefined) {
+          stderrLineBuffer += stderrDecoder.end();
+          if (stderrLineBuffer !== "") {
+            request.onStderrLine(stderrLineBuffer.replace(/\r$/u, ""));
+          }
+        }
+        try {
+          await windowsTermination;
+        } catch (error) {
+          rejectPromise(error);
+          return;
+        }
+        if (timedOut) {
+          rejectPromise(new AutopilotError("ADAPTER_TIMEOUT", `${request.executable} exceeded its deadline`, { signal }));
+          return;
+        }
+        resolvePromise({
+          exitCode: code ?? 128,
+          stdout: stdout.toString("utf8"),
+          stderr: stderr.toString("utf8"),
+          truncated,
+        });
+      })().catch(rejectPromise);
     });
 
     if (request.stdin === undefined) {
