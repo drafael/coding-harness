@@ -3,11 +3,11 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { isRecord } from "../src/json.js";
 import { runProcess } from "../src/process.js";
-import { resolveWindowsCommand, verifyWindowsJobHelper } from "../src/windows-job.js";
+import { verifyWindowsJobHelper } from "../src/windows-job.js";
 
 const checkedWindowsHelper = join(process.cwd(), "native", "bin", "win32-x64", "job-helper.exe");
 
@@ -46,11 +46,15 @@ test("package contains exactly one verified win32-x64 Job Object helper", {
   assert.ok((await readFile(sourceManifest, "utf8")).includes(createHash("sha256").update(source).digest("hex")));
 
   const npmArguments = ["pack", "--dry-run", "--json"];
-  const npmCommand = process.platform === "win32"
-    ? await resolveWindowsCommand("npm", npmArguments, process.cwd(), process.env)
-    : { executable: "npm", arguments: npmArguments };
+  const npmCli = process.env.npm_execpath ?? (process.platform === "win32"
+    ? join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")
+    : undefined);
+  if (process.platform === "win32") {
+    assert.ok(npmCli !== undefined && existsSync(npmCli), "setup-node npm CLI entry point is unavailable");
+  }
   const packed = await runProcess({
-    ...npmCommand,
+    executable: npmCli === undefined ? "npm" : process.execPath,
+    arguments: npmCli === undefined ? npmArguments : [npmCli, ...npmArguments],
     cwd: process.cwd(),
     timeoutMs: 60_000,
   });
