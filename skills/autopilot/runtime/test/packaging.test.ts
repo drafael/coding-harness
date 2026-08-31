@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { isRecord } from "../src/json.js";
 import { runProcess } from "../src/process.js";
-import { verifyWindowsJobHelper } from "../src/windows-job.js";
+import { resolveWindowsCommand, verifyWindowsJobHelper } from "../src/windows-job.js";
 
 const checkedWindowsHelper = join(process.cwd(), "native", "bin", "win32-x64", "job-helper.exe");
 
@@ -45,11 +45,12 @@ test("package contains exactly one verified win32-x64 Job Object helper", {
   });
   assert.ok((await readFile(sourceManifest, "utf8")).includes(createHash("sha256").update(source).digest("hex")));
 
-  const npmCli = process.env.npm_execpath;
-  assert.ok(npmCli);
+  const npmArguments = ["pack", "--dry-run", "--json"];
+  const npmCommand = process.platform === "win32"
+    ? await resolveWindowsCommand("npm", npmArguments, process.cwd(), process.env)
+    : { executable: "npm", arguments: npmArguments };
   const packed = await runProcess({
-    executable: process.execPath,
-    arguments: [npmCli, "pack", "--dry-run", "--json"],
+    ...npmCommand,
     cwd: process.cwd(),
     timeoutMs: 60_000,
   });
