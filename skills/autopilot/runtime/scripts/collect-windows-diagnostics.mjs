@@ -8,6 +8,7 @@ const diagnosticFiles = new Set([
   "completion.json",
   "result.json",
   "status.json",
+  "watchdog-error.json",
   "watchdog-ready.json",
 ]);
 
@@ -163,6 +164,14 @@ function sanitizeDiagnostic(name, value) {
         ...integer(source, "processGroupId", 1),
         ...integer(source, "supervisorPid", 1),
         ...scalar(source, "startedAt", "string"),
+      };
+    case "watchdog-error.json":
+      return {
+        ...integer(source, "schemaVersion", 1),
+        ...scalar(source, "executionId", "string"),
+        ...scalar(source, "requestHash", "string"),
+        ...scalar(source, "failedAt", "string"),
+        ...failureMetadata(source.error, "error"),
       };
     case "watchdog-ready.json":
       return {

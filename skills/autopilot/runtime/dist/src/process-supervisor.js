@@ -13,8 +13,10 @@ const CANCEL_FILE = "cancel.json";
 const ACTIVITY_FILE = "stderr-activity.log";
 const CHILD_FILE = "child.json";
 const WATCHDOG_READY_FILE = "watchdog-ready.json";
+const WATCHDOG_ERROR_FILE = "watchdog-error.json";
 const ACTIVITY_PULSE_FILE = "activity-pulse";
 const COMPLETION_FILE = "completion.json";
+const RESULT_TERMINAL_STATES = ["completed", "failed", "cancelled", "timed-out"];
 function parseArguments(value) {
     if (!Array.isArray(value) || value.some((argument) => typeof argument !== "string")) {
         throw new AutopilotError("CHARTER_INVALID", "supervisor request.arguments must be an array of strings");
@@ -99,6 +101,29 @@ export async function readSupervisedStatus(directory) {
     const value = await readJson(join(directory, STATUS_FILE));
     return value === undefined ? undefined : parseStatus(value);
 }
+async function failIfWatchdogErrored(directory, executionId, requestHash) {
+    try {
+        const value = await readJson(join(directory, WATCHDOG_ERROR_FILE));
+        if (value === undefined) {
+            return;
+        }
+        const object = expectRecord(value, "supervisor watchdog error");
+        if (object.schemaVersion !== 1
+            || expectString(object.executionId, "supervisor watchdog error.executionId") !== executionId
+            || expectString(object.requestHash, "supervisor watchdog error.requestHash") !== requestHash) {
+            throw new Error("identity mismatch");
+        }
+        const failedAt = expectString(object.failedAt, "supervisor watchdog error.failedAt");
+        if (!Number.isFinite(Date.parse(failedAt))) {
+            throw new Error("timestamp is malformed");
+        }
+        expectString(object.error, "supervisor watchdog error.error");
+    }
+    catch {
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor watchdog error identity is malformed or changed");
+    }
+    throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor watchdog failed before terminal publication");
+}
 function parseProcessResult(value, label) {
     const object = expectRecord(value, label);
     if (typeof object.stdout !== "string" || typeof object.stderr !== "string") {
@@ -134,6 +159,11 @@ export async function readWindowsBrokerIdentity(directory) {
 export async function readSupervisedResult(directory) {
     const value = await readJson(join(directory, RESULT_FILE));
     return value === undefined ? undefined : parseProcessResult(value, "supervisor result");
+}
+async function readValidTerminalResult(directory, status) {
+    return RESULT_TERMINAL_STATES.includes(status.state)
+        ? await readSupervisedResult(directory)
+        : undefined;
 }
 export async function readSupervisedCompletion(directory) {
     const value = await readJson(join(directory, COMPLETION_FILE));
@@ -178,17 +208,21 @@ async function validateWindowsHelperIdentity(request) {
         throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervised Windows execution helper identity is missing or changed");
     }
 }
-async function waitForStatus(directory, requestHash, timeoutMs) {
+async function waitForStatus(directory, executionId, requestHash, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const status = await readSupervisedStatus(directory);
         if (status !== undefined) {
-            if (status.requestHash !== requestHash) {
+            if (status.executionId !== executionId || status.requestHash !== requestHash) {
                 throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor status request identity changed");
             }
-            if (process.platform !== "win32" || status.state !== "starting") {
+            if (await readValidTerminalResult(directory, status) !== undefined) {
                 return status;
             }
+        }
+        await failIfWatchdogErrored(directory, executionId, requestHash);
+        if (status !== undefined && (process.platform !== "win32" || status.state !== "starting")) {
+            return status;
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -205,8 +239,11 @@ export async function launchSupervisedProcess(directory, request, environment) {
     const requestHash = supervisorRequestHash(persistedRequest);
     const existingStatus = await readSupervisedStatus(directory);
     if (existingStatus !== undefined) {
-        if (existingStatus.requestHash !== requestHash) {
+        if (existingStatus.executionId !== request.executionId || existingStatus.requestHash !== requestHash) {
             throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor status does not match its immutable request");
+        }
+        if (await readValidTerminalResult(directory, existingStatus) === undefined) {
+            await failIfWatchdogErrored(directory, request.executionId, requestHash);
         }
         return {
             schemaVersion: 1,
@@ -216,6 +253,7 @@ export async function launchSupervisedProcess(directory, request, environment) {
             startedAt: existingStatus.startedAt,
         };
     }
+    await failIfWatchdogErrored(directory, request.executionId, requestHash);
     if (!created) {
         throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor request exists without bootstrap status");
     }
@@ -227,7 +265,7 @@ export async function launchSupervisedProcess(directory, request, environment) {
         windowsHide: true,
     });
     child.unref();
-    const status = await waitForStatus(directory, requestHash, 5_000);
+    const status = await waitForStatus(directory, request.executionId, requestHash, 5_000);
     return {
         schemaVersion: 1,
         executionId: request.executionId,
@@ -247,8 +285,13 @@ export async function reattachSupervisedProcess(directory, request) {
     }
     const requestHash = supervisorRequestHash(existing);
     const status = await readSupervisedStatus(directory);
-    if (status === undefined || status.requestHash !== requestHash) {
+    if (status === undefined || status.executionId !== request.executionId || status.requestHash !== requestHash) {
+        await failIfWatchdogErrored(directory, request.executionId, requestHash);
         throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervised execution bootstrap is incomplete");
+    }
+    const terminalResult = await readValidTerminalResult(directory, status);
+    if (terminalResult === undefined) {
+        await failIfWatchdogErrored(directory, request.executionId, requestHash);
     }
     if (process.platform === "win32" && !["completed", "failed", "cancelled", "timed-out", "state-unknown"].includes(status.state)) {
         const expected = await windowsBrokerIdentity(request.executionId, requestHash);
@@ -278,6 +321,15 @@ export async function observeSupervisedProcess(handle, onActivityLine) {
     let activityBytes = 0;
     const deadline = Date.now() + 15_000 + Math.max(1, Date.parse((await readSupervisedRequest(handle.directory))?.deadline ?? "") - Date.now());
     while (Date.now() < deadline) {
+        const status = await readSupervisedStatus(handle.directory);
+        if (status === undefined || status.executionId !== handle.executionId || status.requestHash !== handle.requestHash) {
+            await failIfWatchdogErrored(handle.directory, handle.executionId, handle.requestHash);
+            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor status identity changed during observation");
+        }
+        const terminalResult = await readValidTerminalResult(handle.directory, status);
+        if (terminalResult === undefined) {
+            await failIfWatchdogErrored(handle.directory, handle.executionId, handle.requestHash);
+        }
         if (onActivityLine !== undefined) {
             try {
                 const activity = await readFile(join(handle.directory, ACTIVITY_FILE), "utf8");
@@ -291,16 +343,11 @@ export async function observeSupervisedProcess(handle, onActivityLine) {
                 }
             }
         }
-        const status = await readSupervisedStatus(handle.directory);
-        if (status === undefined || status.executionId !== handle.executionId || status.requestHash !== handle.requestHash) {
-            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor status identity changed during observation");
+        if (terminalResult !== undefined) {
+            return { result: terminalResult, state: status.state };
         }
-        if (["completed", "failed", "cancelled", "timed-out"].includes(status.state)) {
-            const result = await readSupervisedResult(handle.directory);
-            if (result === undefined) {
-                throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor terminal status is missing its result");
-            }
-            return { result, state: status.state };
+        if (RESULT_TERMINAL_STATES.includes(status.state)) {
+            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor terminal status is missing its result");
         }
         if (status.state === "state-unknown") {
             throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor cannot prove execution state");
@@ -341,6 +388,7 @@ export const supervisorArtifactNames = {
     activity: ACTIVITY_FILE,
     child: CHILD_FILE,
     watchdogReady: WATCHDOG_READY_FILE,
+    watchdogError: WATCHDOG_ERROR_FILE,
     activityPulse: ACTIVITY_PULSE_FILE,
     completion: COMPLETION_FILE,
 };

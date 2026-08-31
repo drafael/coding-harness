@@ -108,6 +108,24 @@ async function syncParentDirectory(path) {
         await directory.close();
     }
 }
+async function replaceAtomicFile(temporaryPath, path) {
+    const deadline = Date.now() + 2_000;
+    while (true) {
+        try {
+            await rename(temporaryPath, path);
+            return;
+        }
+        catch (error) {
+            const code = error instanceof Error && "code" in error ? error.code : undefined;
+            const transientWindowsSharingError = process.platform === "win32"
+                && (code === "EPERM" || code === "EACCES" || code === "EBUSY");
+            if (!transientWindowsSharingError || Date.now() >= deadline) {
+                throw error;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+    }
+}
 export async function writeJsonAtomic(path, value) {
     const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
     const file = await open(temporaryPath, "wx", 0o600);
@@ -118,7 +136,7 @@ export async function writeJsonAtomic(path, value) {
     finally {
         await file.close();
     }
-    await rename(temporaryPath, path);
+    await replaceAtomicFile(temporaryPath, path);
     await syncParentDirectory(path);
 }
 export async function writeImmutableJson(path, value) {

@@ -35,6 +35,7 @@ test("Windows diagnostic collector emits typed metadata without secret process o
   const secretStderr = "SECRET_TOKEN=hunter2\ncannot connect to the Windows Job Object broker (win32=5)\n";
   const knownStderr = "cannot connect to the Windows Job Object broker (win32=5)\n";
   const secretStatusError = "Windows Job Object query was not confirmed SECRET_TOKEN=status-hunter2";
+  const secretWatchdogError = "rename failed SECRET_TOKEN=watchdog-hunter2";
   const knownStatusError = "Windows Job Object query was not confirmed";
   await mkdir(execution, { recursive: true });
   await mkdir(knownFailureExecution, { recursive: true });
@@ -79,6 +80,14 @@ test("Windows diagnostic collector emits typed metadata without secret process o
     childPid: ["child-pid-secret"],
     supervisorPid: process.pid,
     startedAt: { nestedSecret: "child-start-secret" },
+  }));
+  await writeFile(join(execution, "watchdog-error.json"), JSON.stringify({
+    schemaVersion: 1,
+    executionId: "execution-1",
+    requestHash: "request-hash",
+    failedAt: "2026-08-31T00:00:00.000Z",
+    error: secretWatchdogError,
+    environment: { SECRET_TOKEN: "secret" },
   }));
   await writeFile(join(execution, "watchdog-ready.json"), JSON.stringify({
     schemaVersion: 1,
@@ -157,6 +166,18 @@ test("Windows diagnostic collector emits typed metadata without secret process o
           ...statusErrorMetadata(secretStatusError, "UNKNOWN"),
         },
         pidLiveness: [{ field: "supervisorPid", pid: process.pid, state: "alive" }],
+      },
+      {
+        path: "autopilot-supervisor-fixture/runs/run-1/executions/execution-1/watchdog-error.json",
+        file: "watchdog-error.json",
+        value: {
+          schemaVersion: 1,
+          executionId: "execution-1",
+          requestHash: "request-hash",
+          failedAt: "2026-08-31T00:00:00.000Z",
+          ...statusErrorMetadata(secretWatchdogError, "UNKNOWN"),
+        },
+        pidLiveness: [],
       },
       {
         path: "autopilot-supervisor-fixture/runs/run-1/executions/execution-1/watchdog-ready.json",

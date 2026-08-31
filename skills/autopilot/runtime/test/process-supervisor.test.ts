@@ -5,6 +5,8 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { writeImmutableJson, writeJsonAtomic } from "../src/journal.js";
+import { runProcess } from "../src/process.js";
 import {
   queryWindowsJob,
   terminateWindowsJob,
@@ -18,7 +20,9 @@ import {
   readSupervisedRequest,
   reattachSupervisedProcess,
   supervisedExecutionId,
+  supervisorArtifactNames,
   supervisorDirectory,
+  supervisorRequestHash,
   type SupervisedProcessRequest,
 } from "../src/process-supervisor.js";
 
@@ -69,6 +73,97 @@ test("supervisor request preserves empty process arguments", async () => {
   await writeFile(join(directory, "request.json"), JSON.stringify({ ...request, arguments: [""] }));
 
   assert.deepEqual((await readSupervisedRequest(directory))?.arguments, [""]);
+});
+
+test("watchdog errors fail nonterminal execution without poisoning valid terminal results", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-watchdog-fatal-"));
+  const request = requestFor(root, join(root, "child.mjs"), 30_000);
+  const directory = supervisorDirectory(root, request.executionId);
+  const requestHash = supervisorRequestHash(request);
+  const startedAt = new Date().toISOString();
+  const runningStatus = {
+    schemaVersion: 1,
+    executionId: request.executionId,
+    requestHash,
+    state: "running",
+    supervisorPid: process.pid,
+    startedAt,
+    updatedAt: startedAt,
+  };
+  await mkdir(directory, { recursive: true });
+  await writeImmutableJson(join(directory, supervisorArtifactNames.request), request);
+  await writeJsonAtomic(join(directory, supervisorArtifactNames.status), runningStatus);
+  await mkdir(join(directory, supervisorArtifactNames.activityPulse));
+
+  const watchdog = join(process.cwd(), "dist", "src", "supervisor-watchdog.js");
+  const result = await runProcess({
+    executable: process.execPath,
+    arguments: [watchdog, directory],
+    cwd: root,
+    timeoutMs: 10_000,
+  });
+  const watchdogError = JSON.parse(
+    await readFile(join(directory, supervisorArtifactNames.watchdogError), "utf8"),
+  ) as { schemaVersion: number; executionId: string; requestHash: string; failedAt: string; error: string };
+  const status = JSON.parse(
+    await readFile(join(directory, supervisorArtifactNames.status), "utf8"),
+  ) as { executionId: string; requestHash: string; state: string; exitCode: number };
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(watchdogError.schemaVersion, 1);
+  assert.equal(watchdogError.executionId, request.executionId);
+  assert.equal(watchdogError.requestHash, requestHash);
+  assert.ok(Number.isFinite(Date.parse(watchdogError.failedAt)));
+  assert.ok(watchdogError.error.length > 0);
+  assert.equal(status.executionId, request.executionId);
+  assert.equal(status.requestHash, requestHash);
+  assert.equal(status.state, "state-unknown");
+  assert.equal(status.exitCode, 1);
+
+  await writeJsonAtomic(join(directory, supervisorArtifactNames.status), runningStatus);
+  const handle = {
+    schemaVersion: 1 as const,
+    executionId: request.executionId,
+    directory,
+    requestHash,
+    startedAt,
+  };
+  await assert.rejects(
+    observeSupervisedProcess(handle),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "EXECUTION_STATE_UNKNOWN",
+  );
+  await writeJsonAtomic(join(directory, supervisorArtifactNames.watchdogError), {
+    ...watchdogError,
+    requestHash: "changed-request-hash",
+  });
+  await assert.rejects(
+    observeSupervisedProcess(handle),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "EXECUTION_STATE_UNKNOWN",
+  );
+  await writeJsonAtomic(join(directory, supervisorArtifactNames.watchdogError), watchdogError);
+
+  const terminalResult = { exitCode: 124, stdout: "", stderr: "cancelled", truncated: false };
+  const completedAt = new Date().toISOString();
+  await writeJsonAtomic(join(directory, supervisorArtifactNames.result), terminalResult);
+  await writeJsonAtomic(join(directory, supervisorArtifactNames.status), {
+    ...runningStatus,
+    state: "cancelled",
+    updatedAt: completedAt,
+    completedAt,
+    exitCode: terminalResult.exitCode,
+  });
+
+  if (process.platform !== "win32" || windowsJobSupported) {
+    const launched = await launchSupervisedProcess(directory, request, process.env);
+    const reattached = await reattachSupervisedProcess(directory, request);
+    assert.ok(reattached !== undefined);
+    assert.equal(launched.requestHash, requestHash);
+    assert.equal(reattached.requestHash, requestHash);
+  }
+  assert.deepEqual(await observeSupervisedProcess(handle), {
+    state: "cancelled",
+    result: terminalResult,
+  });
 });
 
 supervisedTest("supervised process survives client replacement and returns its durable result", async () => {

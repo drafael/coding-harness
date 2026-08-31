@@ -64,6 +64,7 @@ export declare const supervisorArtifactNames: {
     readonly activity: "stderr-activity.log";
     readonly child: "child.json";
     readonly watchdogReady: "watchdog-ready.json";
+    readonly watchdogError: "watchdog-error.json";
     readonly activityPulse: "activity-pulse";
     readonly completion: "completion.json";
 };
