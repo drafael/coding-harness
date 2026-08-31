@@ -46,9 +46,34 @@ jobs:
         run: npm run lint
       - name: Check formatting
         run: npm run format:check
-      - name: Run real Windows Job Object suite
-        run: npm test
+      - name: Compile runtime and tests
+        shell: pwsh
+        run: |
+          npm run build
+          ./node_modules/.bin/tsc.cmd -p tsconfig.test.json
+          node scripts/copy-native-helper.mjs
+      - name: Run isolated native Windows suites
+        run: node --test --test-concurrency=1 .test-dist/test/windows-job.test.js .test-dist/test/process-supervisor.test.js
+      - name: Run full protected suite serially
+        run: node --test --test-concurrency=1 .test-dist/test/*.test.js
+      - name: Collect sanitized failure diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $autopilotTemp = node -p "require('node:os').tmpdir()"
+          node scripts/collect-windows-diagnostics.mjs `
+            --root $autopilotTemp `
+            --output native/build/windows-job-helper/diagnostics/windows-supervision.json
+      - name: Upload sanitized failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: autopilot-windows-diagnostics-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: skills/autopilot/runtime/native/build/windows-job-helper/diagnostics/windows-supervision.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify packaged helper identity
+        if: success()
         shell: pwsh
         run: |
           $source = (Get-FileHash -Algorithm SHA256 native/bin/win32-x64/job-helper.exe).Hash
@@ -70,6 +95,7 @@ jobs:
           if ($manifest.workflowRef -ne "${{ github.workflow_ref }}") { throw "helper workflow ref provenance changed" }
           if (-not $manifest.toolset) { throw "helper toolset provenance is absent" }
       - name: Upload reviewed bootstrap artifact
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: autopilot-job-helper-win32-x64-${{ github.sha }}
