@@ -36,6 +36,18 @@ Resume acquires the coordinator lock, validates the sealed charter and journal, 
 
 On POSIX hosts, built-in harness adapters supervise implementation executions with a detached, attempt-scoped helper and a pre-established process-group watchdog. After coordinator loss, `resume` reconstructs the exact request from the journaled attempt and immutable context, reattaches to matching running or terminal artifacts, and observes process-group quiescence before permitting a replacement attempt. The reviewed Windows x64 Job Object helper will not be packaged, so Windows restart reattachment remains disabled while the cooperative harness backend is implemented. Current Windows execution and cancellation are session-scoped. Under the approved cooperative design, only an exact terminal response through the uninterrupted owning harness instance may proceed; harness, session, or exact-subject loss becomes `EXECUTION_STATE_UNKNOWN` and cannot launch a speculative replacement. Legacy attempts, review executions, mismatched requests, and incomplete supervisor artifacts also remain unknown.
 
+## Recover an unknown execution
+
+Recovery requires an inactive coordinator, the current run-lock fence, the exact item, attempt, and lease epoch, plus a nonempty operator attestation. Inspect `status --json` and use one explicit action:
+
+```bash
+node runtime/dist/src/cli.js recover <run-id> --action abandon --item <item-id> --attempt <attempt-id> --lease-epoch <epoch> --attestation "old execution stopped and accounted for"
+node runtime/dist/src/cli.js recover <run-id> --action adopt --item <item-id> --attempt <attempt-id> --lease-epoch <epoch> --tree <tree-id> --attestation "old execution confirmed inactive"
+node runtime/dist/src/cli.js recover <run-id> --action stop --item <item-id> --attempt <attempt-id> --lease-epoch <epoch> --attestation "stop this run"
+```
+
+`abandon` moves the uncertain worktree to a deterministic quarantine path, detaches it without deleting its files, retires the exact lease, and permits a fresh attempt only in a newly created worktree. `adopt` seals HEAD, tree, refs, configuration, and changed paths, retires the writer lease, and enters the ordinary predicates, hooks, independent review, commit, and delivery path without launching another implementation worker. A changed adopted identity returns to `EXECUTION_STATE_UNKNOWN`. `stop` terminalizes the run while preserving evidence. Recovery events store the run-lock token hash, never the token itself. Late adapter results cannot satisfy or replace the recovered attempt.
+
 ## Address review comments with an amendment successor
 
 A successful run stays terminal. `/autopilot address review comments` first uses the runtime's read-only `review-feedback` operation to discover the latest successful leaf, verify its exact recorded PR/MR remains open at the accepted head, and snapshot unresolved GitHub review threads, PR comments and review summaries, or GitLab discussions. Comment bodies are untrusted data. Ambiguous, conflicting, untestable, authority-expanding, or out-of-scope requests require user clarification instead of automatic execution.

@@ -141,6 +141,12 @@ export async function acquireRunLock(path, resource = "run") {
                 throw error;
             }
         },
+        async assertOwned() {
+            const current = await readLockOwner(ownedPath);
+            if (current?.token !== owner.token) {
+                throw new AutopilotError("LOCK_HELD", `${resource} lock ownership changed`, { owner: current });
+            }
+        },
         async release() {
             const current = await readLockOwner(ownedPath);
             if (current?.token === owner.token) {

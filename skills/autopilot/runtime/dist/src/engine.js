@@ -828,6 +828,46 @@ export class AutopilotEngine {
                 });
                 continue;
             }
+            if (itemProjection.state === "ACTIVE" && attempt.adoptedTree !== undefined) {
+                const adopted = attempt.adoptedTree;
+                let observed;
+                try {
+                    observed = await this.#observeRepository(adopted.worktreePath);
+                    if (observed.headCommit !== adopted.headCommit || observed.treeIdentity !== adopted.treeIdentity
+                        || observed.refIdentity !== adopted.refIdentity
+                        || observed.configurationIdentity !== adopted.configurationIdentity
+                        || canonicalJson(observed.changedPaths) !== canonicalJson(adopted.changedPaths)) {
+                        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "adopted worktree changed before verification");
+                    }
+                }
+                catch (error) {
+                    await this.#record({
+                        ...eventBase(error instanceof Error ? error.message : String(error), "reconciler"),
+                        type: "ITEM_BLOCKED",
+                        itemId: item.id,
+                        attemptId: attempt.attemptId,
+                        errorCode: "EXECUTION_STATE_UNKNOWN",
+                    });
+                    continue;
+                }
+                try {
+                    await assertWritablePaths(adopted.worktreePath, observed.changedPaths, item.writableRoots);
+                    await this.#verifyObservedItem(item, attempt.attemptId, adopted.worktreePath, observed, await inspectPreCommitHook(adopted.worktreePath));
+                }
+                catch (error) {
+                    const state = this.#projection.items[item.id]?.state;
+                    if (state === "ACTIVE" || state === "VERIFYING") {
+                        await this.#record({
+                            ...eventBase(error instanceof Error ? error.message : String(error), "reconciler"),
+                            type: "ITEM_BLOCKED",
+                            itemId: item.id,
+                            attemptId: attempt.attemptId,
+                            errorCode: error instanceof AutopilotError ? error.code : "UNKNOWN_FAILURE",
+                        });
+                    }
+                }
+                continue;
+            }
             if (itemProjection.state === "ACTIVE") {
                 let reattachedStatus;
                 try {
@@ -1965,6 +2005,126 @@ export class AutopilotEngine {
             });
         }
     }
+    async #verifyObservedItem(item, attemptId, worktreePath, initialObservation, hookSnapshot) {
+        await this.#record({ ...eventBase("Runtime is verifying the observed tree"), type: "ITEM_VERIFYING", itemId: item.id, attemptId });
+        let finalObservation = initialObservation;
+        let verification = await this.#verifyItem(item, worktreePath, attemptId, finalObservation);
+        if (await this.#blockItemForStop(item, attemptId)) {
+            return;
+        }
+        if (!verification.met) {
+            await this.#record({
+                ...eventBase(verification.reasons.join("; ") || "Acceptance predicates are not met"),
+                type: "ITEM_BLOCKED",
+                itemId: item.id,
+                attemptId,
+                errorCode: "PREDICATE_NOT_MET",
+            });
+            return;
+        }
+        if (!finalObservation.clean && this.#charter.commitPolicy?.preCommitHook === "run") {
+            if (await this.#blockItemForStop(item, attemptId)) {
+                return;
+            }
+            const hook = await runPreCommitHook(worktreePath, hookSnapshot ?? { identity: "NOT_CONFIGURED" }, this.#charter.commitPolicy.environmentNames, this.#charter.limits.attemptTimeoutMs, this.#charter.limits.maxRetainedOutputBytes);
+            const hookObservation = await this.#observeRepository(worktreePath);
+            const hooksDirectory = join(this.#runDirectory, "reports", "hooks");
+            await mkdir(hooksDirectory, { recursive: true, mode: 0o700 });
+            const hookPath = join(hooksDirectory, `${attemptId}.json`);
+            await writeJsonAtomic(hookPath, {
+                schemaVersion: 1,
+                status: hook.status,
+                configuredPath: hook.path,
+                beforeTree: finalObservation.treeIdentity,
+                afterTree: hookObservation.treeIdentity,
+                exitCode: hook.result?.exitCode ?? 0,
+                stdout: redactEnvironmentSecrets(hook.result?.stdout ?? "", this.#charter.commitPolicy.environmentNames),
+                stderr: redactEnvironmentSecrets(hook.result?.stderr ?? "", this.#charter.commitPolicy.environmentNames),
+                truncated: hook.result?.truncated ?? false,
+            });
+            await this.#record({
+                ...eventBase(`Pre-commit hook finished ${hook.status}`),
+                type: "PRE_COMMIT_HOOK_FINISHED",
+                itemId: item.id,
+                attemptId,
+                status: hook.status,
+                beforeTree: finalObservation.treeIdentity,
+                afterTree: hookObservation.treeIdentity,
+                exitCode: hook.result?.exitCode ?? 0,
+                evidence: [hookPath],
+            });
+            if (await this.#blockItemForStop(item, attemptId)) {
+                return;
+            }
+            if (hookObservation.headCommit !== finalObservation.headCommit
+                || hookObservation.externalRefIdentity !== finalObservation.externalRefIdentity) {
+                throw new AutopilotError("BRANCH_COLLISION", "pre-commit hook changed HEAD or another Git ref");
+            }
+            if (hookObservation.configurationIdentity !== finalObservation.configurationIdentity) {
+                throw new AutopilotError("CAPABILITY_DENIED", "pre-commit hook changed Git configuration");
+            }
+            await assertWritablePaths(worktreePath, hookObservation.changedPaths, [...item.writableRoots, ...this.#charter.commitPolicy.writableRoots]);
+            if (hook.status === "FAILED") {
+                await this.#record({
+                    ...eventBase("Pre-commit hook failed before the runtime-owned commit"),
+                    type: "ITEM_BLOCKED",
+                    itemId: item.id,
+                    attemptId,
+                    errorCode: "PRE_COMMIT_HOOK_FAILED",
+                });
+                return;
+            }
+            if (hookObservation.treeIdentity !== finalObservation.treeIdentity) {
+                verification = await this.#verifyItem(item, worktreePath, attemptId, hookObservation);
+                if (!verification.met) {
+                    await this.#record({
+                        ...eventBase(verification.reasons.join("; ") || "Post-hook acceptance predicates are not met"),
+                        type: "ITEM_BLOCKED",
+                        itemId: item.id,
+                        attemptId,
+                        errorCode: "POST_HOOK_PREDICATE_NOT_MET",
+                    });
+                    return;
+                }
+            }
+            finalObservation = hookObservation;
+        }
+        const finalHook = await inspectPreCommitHook(worktreePath);
+        const receiptIds = [];
+        for (const { event: receiptEvent } of this.#records) {
+            if (receiptEvent.type !== "RECEIPT_RECORDED" || receiptEvent.itemId !== item.id
+                || receiptEvent.attemptId !== attemptId) {
+                continue;
+            }
+            const receiptValue = JSON.parse(await readFile(join(this.#runDirectory, "receipts", `${receiptEvent.receiptId}.json`), "utf8"));
+            const requiredGateReceipt = receiptEvent.gateId !== undefined && item.acceptance.some((predicate) => predicate.type === "gate-passed" && predicate.gateId === receiptEvent.gateId);
+            if (isRecord(receiptValue) && receiptValue.subject === verification.subject
+                && (receiptEvent.receiptKind === "predicate" || requiredGateReceipt)) {
+                receiptIds.push(receiptEvent.receiptId);
+            }
+        }
+        await this.#record({
+            ...eventBase("Exact tree and acceptance evidence verified"),
+            type: "ITEM_VERIFIED",
+            itemId: item.id,
+            attemptId,
+            subject: verification.subject,
+            headCommit: finalObservation.headCommit,
+            treeIdentity: finalObservation.treeIdentity,
+            auxiliaryRefIdentity: finalObservation.auxiliaryRefIdentity,
+            externalRefIdentity: finalObservation.externalRefIdentity,
+            configurationIdentity: finalObservation.configurationIdentity,
+            hookIdentity: finalHook.identity,
+            ...(finalHook.path === undefined ? {} : { hookPath: finalHook.path }),
+            commitRequired: !finalObservation.clean,
+            receiptIds,
+        });
+        const checkpoint = this.#projection.items[item.id]?.verified;
+        if (checkpoint === undefined) {
+            throw new AutopilotError("JOURNAL_CORRUPT", "verified checkpoint was not projected");
+        }
+        await this.#completeVerifiedItem(item, worktreePath, checkpoint);
+    }
     async #runItem(item) {
         if (this.#stopRequested || this.#pauseRequested) {
             return;
@@ -2181,124 +2341,7 @@ export class AutopilotEngine {
         if (await this.#blockItemForStop(item, attemptId)) {
             return;
         }
-        await this.#record({ ...eventBase("Runtime is verifying the observed tree"), type: "ITEM_VERIFYING", itemId: item.id, attemptId });
-        let finalObservation = after;
-        let verification = await this.#verifyItem(item, worktreePath, attemptId, finalObservation);
-        if (await this.#blockItemForStop(item, attemptId)) {
-            return;
-        }
-        if (!verification.met) {
-            await this.#record({
-                ...eventBase(verification.reasons.join("; ") || "Acceptance predicates are not met"),
-                type: "ITEM_BLOCKED",
-                itemId: item.id,
-                attemptId,
-                errorCode: "PREDICATE_NOT_MET",
-            });
-            return;
-        }
-        if (!finalObservation.clean && this.#charter.commitPolicy?.preCommitHook === "run") {
-            if (await this.#blockItemForStop(item, attemptId)) {
-                return;
-            }
-            const hook = await runPreCommitHook(worktreePath, hookSnapshot ?? { identity: "NOT_CONFIGURED" }, this.#charter.commitPolicy.environmentNames, this.#charter.limits.attemptTimeoutMs, this.#charter.limits.maxRetainedOutputBytes);
-            const hookObservation = await this.#observeRepository(worktreePath);
-            const hooksDirectory = join(this.#runDirectory, "reports", "hooks");
-            await mkdir(hooksDirectory, { recursive: true, mode: 0o700 });
-            const hookPath = join(hooksDirectory, `${attemptId}.json`);
-            await writeJsonAtomic(hookPath, {
-                schemaVersion: 1,
-                status: hook.status,
-                configuredPath: hook.path,
-                beforeTree: finalObservation.treeIdentity,
-                afterTree: hookObservation.treeIdentity,
-                exitCode: hook.result?.exitCode ?? 0,
-                stdout: redactEnvironmentSecrets(hook.result?.stdout ?? "", this.#charter.commitPolicy.environmentNames),
-                stderr: redactEnvironmentSecrets(hook.result?.stderr ?? "", this.#charter.commitPolicy.environmentNames),
-                truncated: hook.result?.truncated ?? false,
-            });
-            await this.#record({
-                ...eventBase(`Pre-commit hook finished ${hook.status}`),
-                type: "PRE_COMMIT_HOOK_FINISHED",
-                itemId: item.id,
-                attemptId,
-                status: hook.status,
-                beforeTree: finalObservation.treeIdentity,
-                afterTree: hookObservation.treeIdentity,
-                exitCode: hook.result?.exitCode ?? 0,
-                evidence: [hookPath],
-            });
-            if (await this.#blockItemForStop(item, attemptId)) {
-                return;
-            }
-            if (hookObservation.headCommit !== finalObservation.headCommit
-                || hookObservation.externalRefIdentity !== finalObservation.externalRefIdentity) {
-                throw new AutopilotError("BRANCH_COLLISION", "pre-commit hook changed HEAD or another Git ref");
-            }
-            if (hookObservation.configurationIdentity !== finalObservation.configurationIdentity) {
-                throw new AutopilotError("CAPABILITY_DENIED", "pre-commit hook changed Git configuration");
-            }
-            await assertWritablePaths(worktreePath, hookObservation.changedPaths, [...item.writableRoots, ...this.#charter.commitPolicy.writableRoots]);
-            if (hook.status === "FAILED") {
-                await this.#record({
-                    ...eventBase("Pre-commit hook failed before the runtime-owned commit"),
-                    type: "ITEM_BLOCKED",
-                    itemId: item.id,
-                    attemptId,
-                    errorCode: "PRE_COMMIT_HOOK_FAILED",
-                });
-                return;
-            }
-            if (hookObservation.treeIdentity !== finalObservation.treeIdentity) {
-                verification = await this.#verifyItem(item, worktreePath, attemptId, hookObservation);
-                if (!verification.met) {
-                    await this.#record({
-                        ...eventBase(verification.reasons.join("; ") || "Post-hook acceptance predicates are not met"),
-                        type: "ITEM_BLOCKED",
-                        itemId: item.id,
-                        attemptId,
-                        errorCode: "POST_HOOK_PREDICATE_NOT_MET",
-                    });
-                    return;
-                }
-            }
-            finalObservation = hookObservation;
-        }
-        const finalHook = await inspectPreCommitHook(worktreePath);
-        const receiptIds = [];
-        for (const { event: receiptEvent } of this.#records) {
-            if (receiptEvent.type !== "RECEIPT_RECORDED" || receiptEvent.itemId !== item.id
-                || receiptEvent.attemptId !== attemptId) {
-                continue;
-            }
-            const receiptValue = JSON.parse(await readFile(join(this.#runDirectory, "receipts", `${receiptEvent.receiptId}.json`), "utf8"));
-            const requiredGateReceipt = receiptEvent.gateId !== undefined && item.acceptance.some((predicate) => predicate.type === "gate-passed" && predicate.gateId === receiptEvent.gateId);
-            if (isRecord(receiptValue) && receiptValue.subject === verification.subject
-                && (receiptEvent.receiptKind === "predicate" || requiredGateReceipt)) {
-                receiptIds.push(receiptEvent.receiptId);
-            }
-        }
-        await this.#record({
-            ...eventBase("Exact tree and acceptance evidence verified"),
-            type: "ITEM_VERIFIED",
-            itemId: item.id,
-            attemptId,
-            subject: verification.subject,
-            headCommit: finalObservation.headCommit,
-            treeIdentity: finalObservation.treeIdentity,
-            auxiliaryRefIdentity: finalObservation.auxiliaryRefIdentity,
-            externalRefIdentity: finalObservation.externalRefIdentity,
-            configurationIdentity: finalObservation.configurationIdentity,
-            hookIdentity: finalHook.identity,
-            ...(finalHook.path === undefined ? {} : { hookPath: finalHook.path }),
-            commitRequired: !finalObservation.clean,
-            receiptIds,
-        });
-        const checkpoint = this.#projection.items[item.id]?.verified;
-        if (checkpoint === undefined) {
-            throw new AutopilotError("JOURNAL_CORRUPT", "verified checkpoint was not projected");
-        }
-        await this.#completeVerifiedItem(item, worktreePath, checkpoint);
+        await this.#verifyObservedItem(item, attemptId, worktreePath, after, hookSnapshot);
     }
     async run() {
         if (this.#projection.state === "SUCCEEDED" || this.#projection.state === "STOPPED") {

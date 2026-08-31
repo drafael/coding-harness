@@ -31,6 +31,10 @@ export declare function branchExists(repositoryRoot: string, branchName: string)
 export declare function validateBranchName(repositoryRoot: string, branchName: string): Promise<void>;
 export declare function resolveWorktreePath(charter: RunCharter, item: WorkItem): Promise<string>;
 export declare function assertRegisteredWorktree(repositoryRoot: string, worktreePath: string): Promise<void>;
+export declare function quarantineWorktree(repositoryRoot: string, worktreePath: string, runId: string, itemId: string, attemptId: string): Promise<{
+    readonly path: string;
+    readonly observation: RepositoryObservation;
+}>;
 export declare function ensureWorktree(charter: RunCharter, item: WorkItem, baseCommit?: string, ownedCommits?: readonly string[]): Promise<string>;
 export declare function assertWritablePaths(worktreePath: string, changed: readonly string[], writableRoots: readonly string[]): Promise<void>;
 export declare function observeRepository(worktreePath: string, managedBranches?: readonly ManagedBranchExpectation[]): Promise<RepositoryObservation>;

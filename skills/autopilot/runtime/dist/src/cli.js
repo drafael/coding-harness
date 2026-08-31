@@ -12,6 +12,7 @@ import { runDoctor } from "./doctor.js";
 import { AutopilotEngine } from "./engine.js";
 import { AutopilotError } from "./errors.js";
 import { newEventId } from "./events.js";
+import { recoverUnknownExecution } from "./execution-recovery.js";
 import { appendEvent, readJournal, repairTruncatedJournal, writeImmutableJson } from "./journal.js";
 import { isRecord } from "./json.js";
 import { acquireBranchOwnershipLock, acquireRunLock, requestRunPause, requestRunStop } from "./lock.js";
@@ -35,6 +36,7 @@ Usage:
   autopilot [--state-dir <path>] [--json] [--repair-journal] resume [run-id]
   autopilot [--state-dir <path>] [--json] pause [run-id]
   autopilot [--state-dir <path>] [--json] stop [run-id]
+  autopilot [--state-dir <path>] [--json] recover <run-id> --action <abandon|adopt|stop> --item <id> --attempt <id> --lease-epoch <n> --attestation <text> [--tree <tree>]
   autopilot [--state-dir <path>] [--json] review-feedback [run-id]
   autopilot [--state-dir <path>] [--json] [--handoff] wrap-up [run-id]
   autopilot [--json] doctor
@@ -339,6 +341,54 @@ async function resume(runId, options) {
         await ownershipLock?.release();
     }
 }
+async function recover(runId, options) {
+    if (runId === undefined || options.recoveryAction === undefined || options.recoveryItem === undefined
+        || options.recoveryAttempt === undefined || options.recoveryLeaseEpoch === undefined
+        || options.recoveryAttestation === undefined) {
+        throw new AutopilotError("CHARTER_INVALID", "recover requires run ID, action, item, attempt, lease epoch, and attestation");
+    }
+    const stateRoot = await resolveStateRoot(process.cwd(), options.stateDir);
+    const location = await locateStoredRun(stateRoot, runId);
+    const ownershipLock = location.charter.amends === undefined
+        ? undefined
+        : await acquireBranchOwnershipLock(stateRoot, location.charter.work[0]?.branchName ?? "");
+    try {
+        const lock = await acquireRunLock(join(location.directory, "run.lock"));
+        try {
+            const run = await loadRun(runId, options.stateDir, false);
+            const projection = rebuildProjection(run.charter, run.journal.records);
+            const recovered = await recoverUnknownExecution(run.directory, run.charter, projection, lock, {
+                action: options.recoveryAction,
+                itemId: options.recoveryItem,
+                attemptId: options.recoveryAttempt,
+                leaseEpoch: options.recoveryLeaseEpoch,
+                attestation: options.recoveryAttestation,
+                ...(options.recoveryTree === undefined ? {} : { expectedTreeIdentity: options.recoveryTree }),
+            });
+            if (recovered.state === "STOPPED") {
+                const journal = await readJournal(join(run.directory, "events.jsonl"));
+                const metadata = await loadReportMetadata(run.directory);
+                return await writeReports(run.directory, run.charter, recovered, journal.records, metadata.assurance, metadata.unverifiedBoundaries);
+            }
+            const journal = await readJournal(join(run.directory, "events.jsonl"));
+            const engine = new AutopilotEngine({
+                stateRoot: run.stateRoot,
+                runDirectory: run.directory,
+                charter: run.charter,
+                adapter: createAdapter(run.charter.harnessAdapter),
+                records: journal.records,
+                projection: recovered,
+            });
+            return await runEngine(engine, lock, run.charter.runId);
+        }
+        finally {
+            await lock.release();
+        }
+    }
+    finally {
+        await ownershipLock?.release();
+    }
+}
 async function reviewFeedback(runId, options) {
     const stateRoot = await resolveStateRoot(process.cwd(), options.stateDir);
     return await observeReviewFeedback(stateRoot, process.cwd(), runId);
@@ -500,6 +550,12 @@ export async function main(arguments_ = process.argv.slice(2)) {
             json: { type: "boolean", default: false },
             "repair-journal": { type: "boolean", default: false },
             handoff: { type: "boolean", default: false },
+            action: { type: "string" },
+            item: { type: "string" },
+            attempt: { type: "string" },
+            "lease-epoch": { type: "string" },
+            attestation: { type: "string" },
+            tree: { type: "string" },
             help: { type: "boolean", short: "h", default: false },
             version: { type: "boolean", short: "v", default: false },
         },
@@ -516,11 +572,29 @@ export async function main(arguments_ = process.argv.slice(2)) {
     if (command === undefined || extra.length > 0) {
         throw new AutopilotError("CHARTER_INVALID", usage());
     }
+    const recoveryAction = parsed.values.action;
+    if (recoveryAction !== undefined && !["abandon", "adopt", "stop"].includes(recoveryAction)) {
+        throw new AutopilotError("CHARTER_INVALID", `unsupported recovery action: ${recoveryAction}`);
+    }
+    const recoveryLeaseEpochText = parsed.values["lease-epoch"];
+    const recoveryLeaseEpoch = recoveryLeaseEpochText === undefined || !/^\d+$/u.test(recoveryLeaseEpochText)
+        ? undefined
+        : Number.parseInt(recoveryLeaseEpochText, 10);
+    if (recoveryLeaseEpochText !== undefined
+        && (recoveryLeaseEpoch === undefined || !Number.isSafeInteger(recoveryLeaseEpoch) || recoveryLeaseEpoch < 1)) {
+        throw new AutopilotError("CHARTER_INVALID", "--lease-epoch must be a positive integer");
+    }
     const options = {
         json: parsed.values.json,
         repairJournal: parsed.values["repair-journal"],
         handoff: parsed.values.handoff,
         ...(parsed.values["state-dir"] === undefined ? {} : { stateDir: parsed.values["state-dir"] }),
+        ...(recoveryAction === undefined ? {} : { recoveryAction: recoveryAction }),
+        ...(parsed.values.item === undefined ? {} : { recoveryItem: parsed.values.item }),
+        ...(parsed.values.attempt === undefined ? {} : { recoveryAttempt: parsed.values.attempt }),
+        ...(recoveryLeaseEpoch === undefined ? {} : { recoveryLeaseEpoch }),
+        ...(parsed.values.attestation === undefined ? {} : { recoveryAttestation: parsed.values.attestation }),
+        ...(parsed.values.tree === undefined ? {} : { recoveryTree: parsed.values.tree }),
     };
     let result;
     switch (command) {
@@ -544,6 +618,9 @@ export async function main(arguments_ = process.argv.slice(2)) {
             break;
         case "stop":
             result = await stop(argument, options);
+            break;
+        case "recover":
+            result = await recover(argument, options);
             break;
         case "review-feedback":
             result = await reviewFeedback(argument, options);

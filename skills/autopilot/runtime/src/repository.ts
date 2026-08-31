@@ -147,6 +147,41 @@ export async function assertRegisteredWorktree(repositoryRoot: string, worktreeP
   }
 }
 
+export async function quarantineWorktree(
+  repositoryRoot: string,
+  worktreePath: string,
+  runId: string,
+  itemId: string,
+  attemptId: string,
+): Promise<{ readonly path: string; readonly observation: RepositoryObservation }> {
+  const quarantinePath = `${worktreePath}.quarantine-${sha256(`${runId}\0${itemId}\0${attemptId}`).slice(0, 16)}`;
+  let activePath = worktreePath;
+  try {
+    await lstat(worktreePath);
+    await assertRegisteredWorktree(repositoryRoot, worktreePath);
+    try {
+      await lstat(quarantinePath);
+      throw new AutopilotError("BRANCH_COLLISION", `quarantine destination already exists: ${quarantinePath}`);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        throw error;
+      }
+    }
+    await runChecked({ executable: "git", arguments: ["worktree", "move", worktreePath, quarantinePath], cwd: repositoryRoot });
+    activePath = quarantinePath;
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+    await assertRegisteredWorktree(repositoryRoot, quarantinePath);
+    activePath = quarantinePath;
+  }
+  if (await currentBranch(activePath) !== "") {
+    await runChecked({ executable: "git", arguments: ["switch", "--detach", "--quiet", "HEAD"], cwd: activePath });
+  }
+  return { path: activePath, observation: await observeRepository(activePath) };
+}
+
 export async function ensureWorktree(
   charter: RunCharter,
   item: WorkItem,

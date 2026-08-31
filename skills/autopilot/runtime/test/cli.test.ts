@@ -35,6 +35,7 @@ test("compiled CLI exposes help and version without side effects", async () => {
   assert.equal(help.exitCode, 0);
   assert.match(help.stdout, /autopilot.*start <charter-file>/s);
   assert.match(help.stdout, /status \[run-id\]/);
+  assert.match(help.stdout, /recover <run-id> --action <abandon\|adopt\|stop>/);
   assert.equal(version.stdout.trim(), "0.1.0");
 });
 
@@ -338,6 +339,13 @@ if (process.argv[2] === "--version") {
   assert.equal(exitCode, 0);
   assert.equal(journal.records.filter(({ event }) => event.type === "RUN_STOPPED").length, 1);
   assert.equal(journal.records.some(({ event }) => event.type === "RUN_SUCCEEDED"), false);
+});
+
+test("compiled CLI requires the complete fenced recovery identity", async () => {
+  const result = await runProcess({ executable: process.execPath, arguments: [cliPath, "recover"], cwd: process.cwd() });
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /recover requires run ID, action, item, attempt, lease epoch, and attestation/);
 });
 
 test("compiled CLI reports a stable error for an unknown command", async () => {

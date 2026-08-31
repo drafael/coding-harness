@@ -33,6 +33,17 @@ export interface AttemptProjection {
     readonly observedHeadCommit?: string;
     readonly observedTreeIdentity?: string;
     readonly budgetConsumed?: boolean;
+    readonly quarantinedWorktreePath?: string;
+    readonly adoptedTree?: {
+        readonly worktreePath: string;
+        readonly headCommit: string;
+        readonly treeIdentity: string;
+        readonly refIdentity: string;
+        readonly auxiliaryRefIdentity: string;
+        readonly externalRefIdentity: string;
+        readonly configurationIdentity: string;
+        readonly changedPaths: readonly string[];
+    };
 }
 export interface VerifiedCheckpoint {
     readonly attemptId: string;

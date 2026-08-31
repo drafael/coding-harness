@@ -1,6 +1,6 @@
 # Cooperative harness execution implementation plan
 
-- **Status:** Approved design; PR 1 decision/promotion shutdown and PR 2 execution-assurance protocol complete; operator recovery and harness integration remain pending
+- **Status:** Approved design; PR 1 decision/promotion shutdown, PR 2 execution assurance, and PR 3 fenced unknown-execution recovery are complete; harness integration remains pending
 - **Date:** 2026-08-31
 - **Audience:** Autopilot implementers and reviewers
 - **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [durable event engine ADR](adr/0001-durable-event-engine.md)

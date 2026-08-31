@@ -22,6 +22,10 @@ export interface RunReport {
     readonly blocker?: string;
     readonly attempts: number;
     readonly chargedAttempts: number;
+    readonly recovery?: {
+      readonly quarantinedWorktreePath: string;
+      readonly adoptedTreeIdentity?: string;
+    };
     readonly execution?: {
       readonly assurance?: ExecutionAssurance;
       readonly adapterName?: string;
@@ -129,7 +133,7 @@ export async function writeReports(
       : projection.waiting?.kind === "operator-pause"
         ? "/autopilot resume"
         : projection.waiting?.kind === "execution-unknown"
-          ? "Do not launch a replacement; prove or externally cancel the orphaned execution first."
+          ? "Use the fenced recover command to abandon, adopt the exact tree, or stop; do not launch a replacement."
           : projection.waiting?.kind === "provider-checks"
           ? "Wait for the bounded provider-check session, or /autopilot resume after the coordinator exits."
           : projection.state === "RUNNING" || projection.state === "RECONCILING" || projection.state === "VERIFYING"
@@ -188,6 +192,12 @@ export async function writeReports(
         chargedAttempts: consumedAttempts(itemProjection),
         ...(itemProjection?.subject === undefined ? {} : { subject: itemProjection.subject }),
         ...(itemProjection?.blocker === undefined ? {} : { blocker: itemProjection.blocker }),
+        ...(lastAttempt?.quarantinedWorktreePath === undefined ? {} : {
+          recovery: {
+            quarantinedWorktreePath: lastAttempt.quarantinedWorktreePath,
+            ...(lastAttempt.adoptedTree === undefined ? {} : { adoptedTreeIdentity: lastAttempt.adoptedTree.treeIdentity }),
+          },
+        }),
         ...(lastAttempt?.executionAssurance === undefined && execution === undefined ? {} : {
           execution: {
             ...(lastAttempt?.executionAssurance === undefined ? {} : { assurance: lastAttempt.executionAssurance }),

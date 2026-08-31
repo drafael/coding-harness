@@ -17,6 +17,10 @@ export interface RunReport {
         readonly blocker?: string;
         readonly attempts: number;
         readonly chargedAttempts: number;
+        readonly recovery?: {
+            readonly quarantinedWorktreePath: string;
+            readonly adoptedTreeIdentity?: string;
+        };
         readonly execution?: {
             readonly assurance?: ExecutionAssurance;
             readonly adapterName?: string;
