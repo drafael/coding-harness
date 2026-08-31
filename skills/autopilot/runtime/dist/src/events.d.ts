@@ -53,6 +53,9 @@ export type LifecycleEvent = (EventBase & {
     readonly type: "RUN_STOPPED";
     readonly errorCode: string;
     readonly remediation: string;
+    readonly leaseEpoch?: number;
+    readonly lockTokenHash?: string;
+    readonly attestation?: string;
 }) | (EventBase & {
     readonly type: "WRAP_UP_STARTED";
     readonly chainRunIds: readonly string[];
@@ -98,6 +101,37 @@ export type LifecycleEvent = (EventBase & {
     readonly backendId: string;
     readonly subjectId: string;
     readonly harnessInstanceId?: string;
+}) | (EventBase & {
+    readonly type: "EXECUTION_UNKNOWN_ABANDONED";
+    readonly itemId: string;
+    readonly attemptId: string;
+    readonly leaseEpoch: number;
+    readonly lockTokenHash: string;
+    readonly attestation: string;
+    readonly originalWorktreePath: string;
+    readonly quarantineWorktreePath: string;
+    readonly headCommit: string;
+    readonly treeIdentity: string;
+    readonly refIdentity: string;
+    readonly auxiliaryRefIdentity: string;
+    readonly externalRefIdentity: string;
+    readonly configurationIdentity: string;
+    readonly changedPaths: readonly string[];
+}) | (EventBase & {
+    readonly type: "EXECUTION_UNKNOWN_TREE_ADOPTED";
+    readonly itemId: string;
+    readonly attemptId: string;
+    readonly leaseEpoch: number;
+    readonly lockTokenHash: string;
+    readonly attestation: string;
+    readonly worktreePath: string;
+    readonly headCommit: string;
+    readonly treeIdentity: string;
+    readonly refIdentity: string;
+    readonly auxiliaryRefIdentity: string;
+    readonly externalRefIdentity: string;
+    readonly configurationIdentity: string;
+    readonly changedPaths: readonly string[];
 }) | (EventBase & {
     readonly type: "ATTEMPT_FINISHED";
     readonly itemId: string;

@@ -12,9 +12,30 @@ import {
   installRestackCandidate,
   observeRepository,
   prepareRestackCandidate,
+  quarantineWorktree,
   resolveWorktreePath,
 } from "../src/repository.js";
 import { createRepository, proposedCharter } from "./helpers.js";
+
+test("unknown worktree quarantine is idempotent and frees the sealed branch for a fresh worktree", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit));
+  const item = charter.work[0];
+  assert.ok(item !== undefined);
+  const worktreePath = await ensureWorktree(charter, item);
+  await writeFile(join(worktreePath, "result.txt"), "uncertain\n");
+  const before = await observeRepository(worktreePath);
+
+  const first = await quarantineWorktree(repository.root, worktreePath, charter.runId, item.id, "attempt-unknown");
+  const second = await quarantineWorktree(repository.root, worktreePath, charter.runId, item.id, "attempt-unknown");
+  const fresh = await ensureWorktree(charter, item);
+
+  assert.equal(first.path, second.path);
+  assert.equal(first.observation.treeIdentity, before.treeIdentity);
+  assert.deepEqual(first.observation.changedPaths, before.changedPaths);
+  assert.equal(await realpath(fresh), await realpath(worktreePath));
+  assert.notEqual(await realpath(first.path), await realpath(fresh));
+});
 
 test("worktree creation is idempotent for the same run item identity", async () => {
   const repository = await createRepository();

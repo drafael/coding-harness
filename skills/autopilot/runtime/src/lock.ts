@@ -20,6 +20,7 @@ export interface RunLock {
   relocate(path: string): Promise<void>;
   controlRequested(runId: string): Promise<ControlAction | undefined>;
   stopRequested(runId: string): Promise<boolean>;
+  assertOwned(): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -170,6 +171,12 @@ export async function acquireRunLock(path: string, resource = "run"): Promise<Ru
           return false;
         }
         throw error;
+      }
+    },
+    async assertOwned(): Promise<void> {
+      const current = await readLockOwner(ownedPath);
+      if (current?.token !== owner.token) {
+        throw new AutopilotError("LOCK_HELD", `${resource} lock ownership changed`, { owner: current });
       }
     },
     async release(): Promise<void> {

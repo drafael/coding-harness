@@ -10,6 +10,7 @@ export interface RunLock {
     relocate(path: string): Promise<void>;
     controlRequested(runId: string): Promise<ControlAction | undefined>;
     stopRequested(runId: string): Promise<boolean>;
+    assertOwned(): Promise<void>;
     release(): Promise<void>;
 }
 export type ControlRequestResult = {

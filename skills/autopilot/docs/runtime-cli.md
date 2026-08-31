@@ -17,6 +17,7 @@ autopilot [--state-dir <path>] [--json] status [run-id]
 autopilot [--state-dir <path>] [--json] [--repair-journal] resume [run-id]
 autopilot [--state-dir <path>] [--json] pause [run-id]
 autopilot [--state-dir <path>] [--json] stop [run-id]
+autopilot [--state-dir <path>] [--json] recover <run-id> --action <abandon|adopt|stop> --item <id> --attempt <id> --lease-epoch <n> --attestation <text> [--tree <tree>]
 autopilot [--state-dir <path>] [--json] review-feedback [run-id]
 autopilot [--state-dir <path>] [--json] [--handoff] wrap-up [run-id]
 autopilot [--json] doctor
@@ -43,6 +44,8 @@ An explicit `--state-dir` relocates durable state only. It does not relocate sib
 If no coordinator owns the run, `pause` acquires the run lock and reconciles the request. If a foreground coordinator is active, it writes a token-bound request inside that exact lock. The owner cancels active implementation work, waits for adapter observation to prove quiescence, retires only the matching writer lease, records `ATTEMPT_PAUSED`, and enters `WAITING` with `kind: operator-pause`. The requesting process never appends concurrently. An attempt cancelled solely by pause remains in the physical launch history but is excluded from the consumed-attempt budget. `resume` leaves the waiting state and creates a fresh attempt only when implementation was not already verified.
 
 If no coordinator owns the run, `stop` acquires the run lock and records the terminal stop. If a foreground coordinator is active, `stop` uses the same fenced request path. The owner cancels active adapter work and records `RUN_STOPPED`. A success recorded before either request wins remains successful.
+
+`recover` requires an inactive coordinator and the exact current unknown item, attempt, and lease epoch. Every action records the owning run-lock token hash and explicit operator attestation. `abandon` permanently moves the uncertain worktree aside before a fresh attempt; `adopt` requires the exact freshly observed `--tree` and runs verification without an implementation launch; `stop` preserves the evidence and terminalizes the run.
 
 `stop` is terminal. A stopped or successful run requires a sealed successor for changed work. On supported POSIX hosts, built-in adapters reattach supervised implementation executions after coordinator loss and wait for terminal process-tree evidence before retrying. Legacy attempts, review executions, and incomplete or mismatched supervisor artifacts record `EXECUTION_STATE_UNKNOWN` and refuse a replacement launch.
 

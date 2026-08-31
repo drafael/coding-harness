@@ -36,6 +36,17 @@ export interface AttemptProjection {
   readonly observedHeadCommit?: string;
   readonly observedTreeIdentity?: string;
   readonly budgetConsumed?: boolean;
+  readonly quarantinedWorktreePath?: string;
+  readonly adoptedTree?: {
+    readonly worktreePath: string;
+    readonly headCommit: string;
+    readonly treeIdentity: string;
+    readonly refIdentity: string;
+    readonly auxiliaryRefIdentity: string;
+    readonly externalRefIdentity: string;
+    readonly configurationIdentity: string;
+    readonly changedPaths: readonly string[];
+  };
 }
 
 export interface VerifiedCheckpoint {
@@ -268,13 +279,59 @@ function transitionItem(item: ItemProjection, event: LifecycleEvent): ItemProjec
           : attempt),
       };
     }
+    case "EXECUTION_UNKNOWN_ABANDONED": {
+      const attempt = item.attempts.at(-1);
+      if (item.state !== "BLOCKED" || item.blocker !== "EXECUTION_STATE_UNKNOWN"
+        || attempt?.attemptId !== event.attemptId || attempt.leaseEpoch !== event.leaseEpoch) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", "unknown execution abandonment does not match the current fenced attempt");
+      }
+      const { blocker: _blocker, ...unblocked } = item;
+      return {
+        ...unblocked,
+        state: "READY",
+        attempts: item.attempts.map((candidate) => candidate.attemptId === event.attemptId
+          ? { ...candidate, outcome: "stale", budgetConsumed: true, quarantinedWorktreePath: event.quarantineWorktreePath }
+          : candidate),
+      };
+    }
+    case "EXECUTION_UNKNOWN_TREE_ADOPTED": {
+      const attempt = item.attempts.at(-1);
+      if (item.state !== "BLOCKED" || item.blocker !== "EXECUTION_STATE_UNKNOWN"
+        || attempt?.attemptId !== event.attemptId || attempt.leaseEpoch !== event.leaseEpoch) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", "unknown execution adoption does not match the current fenced attempt");
+      }
+      const { blocker: _blocker, ...unblocked } = item;
+      return {
+        ...unblocked,
+        state: "ACTIVE",
+        attempts: item.attempts.map((candidate) => candidate.attemptId === event.attemptId
+          ? {
+              ...candidate,
+              outcome: "completed",
+              budgetConsumed: true,
+              quarantinedWorktreePath: event.worktreePath,
+              adoptedTree: {
+                worktreePath: event.worktreePath,
+                headCommit: event.headCommit,
+                treeIdentity: event.treeIdentity,
+                refIdentity: event.refIdentity,
+                auxiliaryRefIdentity: event.auxiliaryRefIdentity,
+                externalRefIdentity: event.externalRefIdentity,
+                configurationIdentity: event.configurationIdentity,
+                changedPaths: event.changedPaths,
+              },
+            }
+          : candidate),
+      };
+    }
     case "ATTEMPT_FINISHED": {
       if (item.state !== "ACTIVE") {
         throw new AutopilotError("ILLEGAL_TRANSITION", `ATTEMPT_FINISHED cannot follow ${item.state}`);
       }
       const currentAttempt = item.attempts.at(-1);
-      if (currentAttempt?.attemptId !== event.attemptId) {
-        throw new AutopilotError("ILLEGAL_TRANSITION", `attempt ${event.attemptId} is stale for item ${item.itemId}`);
+      if (currentAttempt?.attemptId !== event.attemptId
+        || currentAttempt.outcome !== undefined || currentAttempt.adoptedTree !== undefined) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `attempt ${event.attemptId} is stale or already recovered for item ${item.itemId}`);
       }
       return {
         ...item,
@@ -491,7 +548,8 @@ export function reduce(projection: RunProjection, event: LifecycleEvent): RunPro
   const nextState = assertRunTransition(projection.state, event);
   let items = projection.items;
   const ordinaryItemLifecycle = [
-    "DECISION_RECORDED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_EXECUTION_ADMITTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED",
+    "DECISION_RECORDED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_EXECUTION_ADMITTED", "EXECUTION_UNKNOWN_ABANDONED",
+    "EXECUTION_UNKNOWN_TREE_ADOPTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED",
     "ITEM_VERIFIED", "ITEM_SATISFIED", "ITEM_BLOCKED", "ITEM_ABANDONED",
   ];
   if (event.itemId !== undefined && projection.restacks[event.itemId] !== undefined

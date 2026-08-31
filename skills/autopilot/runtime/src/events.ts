@@ -40,7 +40,14 @@ export type LifecycleEvent =
   | (EventBase & { readonly type: "RUN_RESUMED" })
   | (EventBase & { readonly type: "RUN_VERIFYING" })
   | (EventBase & { readonly type: "RUN_SUCCEEDED"; readonly predicateSummary: string })
-  | (EventBase & { readonly type: "RUN_STOPPED"; readonly errorCode: string; readonly remediation: string })
+  | (EventBase & {
+      readonly type: "RUN_STOPPED";
+      readonly errorCode: string;
+      readonly remediation: string;
+      readonly leaseEpoch?: number;
+      readonly lockTokenHash?: string;
+      readonly attestation?: string;
+    })
   | (EventBase & { readonly type: "WRAP_UP_STARTED"; readonly chainRunIds: readonly string[]; readonly handoff: boolean })
   | (EventBase & {
       readonly type: "WORKTREE_ADOPTED";
@@ -83,6 +90,39 @@ export type LifecycleEvent =
       readonly backendId: string;
       readonly subjectId: string;
       readonly harnessInstanceId?: string;
+    })
+  | (EventBase & {
+      readonly type: "EXECUTION_UNKNOWN_ABANDONED";
+      readonly itemId: string;
+      readonly attemptId: string;
+      readonly leaseEpoch: number;
+      readonly lockTokenHash: string;
+      readonly attestation: string;
+      readonly originalWorktreePath: string;
+      readonly quarantineWorktreePath: string;
+      readonly headCommit: string;
+      readonly treeIdentity: string;
+      readonly refIdentity: string;
+      readonly auxiliaryRefIdentity: string;
+      readonly externalRefIdentity: string;
+      readonly configurationIdentity: string;
+      readonly changedPaths: readonly string[];
+    })
+  | (EventBase & {
+      readonly type: "EXECUTION_UNKNOWN_TREE_ADOPTED";
+      readonly itemId: string;
+      readonly attemptId: string;
+      readonly leaseEpoch: number;
+      readonly lockTokenHash: string;
+      readonly attestation: string;
+      readonly worktreePath: string;
+      readonly headCommit: string;
+      readonly treeIdentity: string;
+      readonly refIdentity: string;
+      readonly auxiliaryRefIdentity: string;
+      readonly externalRefIdentity: string;
+      readonly configurationIdentity: string;
+      readonly changedPaths: readonly string[];
     })
   | (EventBase & {
       readonly type: "ATTEMPT_FINISHED";
@@ -182,7 +222,8 @@ export type LifecycleEvent =
 const EVENT_TYPES = [
   "CHARTER_COMPILED", "RECONCILIATION_STARTED", "RECONCILIATION_COMPLETED", "RUN_PAUSE_REQUESTED", "RUN_WAITING", "RUN_WOKEN",
   "RUN_RESUMED", "RUN_VERIFYING", "RUN_SUCCEEDED", "RUN_STOPPED", "WRAP_UP_STARTED", "WORKTREE_ADOPTED", "ITEM_READY",
-  "ATTEMPT_STARTED", "ATTEMPT_EXECUTION_ADMITTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED", "ITEM_VERIFIED", "ITEM_SATISFIED",
+  "ATTEMPT_STARTED", "ATTEMPT_EXECUTION_ADMITTED", "EXECUTION_UNKNOWN_ABANDONED", "EXECUTION_UNKNOWN_TREE_ADOPTED",
+  "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED", "ITEM_VERIFIED", "ITEM_SATISFIED",
   "ITEM_BLOCKED", "ITEM_ABANDONED", "RESTACK_DESCENDANT_STARTED", "RESTACK_DESCENDANT_TREE_PREPARED",
   "RESTACK_DESCENDANT_VERIFIED", "RESTACK_PROVIDER_HEAD_CONFIRMED", "RESTACK_DESCENDANT_SATISFIED",
   "RESTACK_DESCENDANT_BLOCKED", "EFFECT_INTENDED",
@@ -246,6 +287,9 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         type,
         errorCode: expectString(object.errorCode, "event.errorCode"),
         remediation: expectString(object.remediation, "event.remediation"),
+        ...(object.leaseEpoch === undefined ? {} : { leaseEpoch: expectInteger(object.leaseEpoch, "event.leaseEpoch", 1) }),
+        ...(object.lockTokenHash === undefined ? {} : { lockTokenHash: expectString(object.lockTokenHash, "event.lockTokenHash") }),
+        ...(object.attestation === undefined ? {} : { attestation: expectString(object.attestation, "event.attestation") }),
       };
     case "WRAP_UP_STARTED":
       return {
@@ -379,6 +423,43 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         ...(object.harnessInstanceId === undefined ? {} : {
           harnessInstanceId: expectString(object.harnessInstanceId, "event.harnessInstanceId"),
         }),
+      };
+    case "EXECUTION_UNKNOWN_ABANDONED":
+      return {
+        ...base,
+        type,
+        itemId: expectString(object.itemId, "event.itemId"),
+        attemptId: expectString(object.attemptId, "event.attemptId"),
+        leaseEpoch: expectInteger(object.leaseEpoch, "event.leaseEpoch", 1),
+        lockTokenHash: expectString(object.lockTokenHash, "event.lockTokenHash"),
+        attestation: expectString(object.attestation, "event.attestation"),
+        originalWorktreePath: expectString(object.originalWorktreePath, "event.originalWorktreePath"),
+        quarantineWorktreePath: expectString(object.quarantineWorktreePath, "event.quarantineWorktreePath"),
+        headCommit: expectString(object.headCommit, "event.headCommit"),
+        treeIdentity: expectString(object.treeIdentity, "event.treeIdentity"),
+        refIdentity: expectString(object.refIdentity, "event.refIdentity"),
+        auxiliaryRefIdentity: expectString(object.auxiliaryRefIdentity, "event.auxiliaryRefIdentity"),
+        externalRefIdentity: expectString(object.externalRefIdentity, "event.externalRefIdentity"),
+        configurationIdentity: expectString(object.configurationIdentity, "event.configurationIdentity"),
+        changedPaths: expectStringArray(object.changedPaths, "event.changedPaths"),
+      };
+    case "EXECUTION_UNKNOWN_TREE_ADOPTED":
+      return {
+        ...base,
+        type,
+        itemId: expectString(object.itemId, "event.itemId"),
+        attemptId: expectString(object.attemptId, "event.attemptId"),
+        leaseEpoch: expectInteger(object.leaseEpoch, "event.leaseEpoch", 1),
+        lockTokenHash: expectString(object.lockTokenHash, "event.lockTokenHash"),
+        attestation: expectString(object.attestation, "event.attestation"),
+        worktreePath: expectString(object.worktreePath, "event.worktreePath"),
+        headCommit: expectString(object.headCommit, "event.headCommit"),
+        treeIdentity: expectString(object.treeIdentity, "event.treeIdentity"),
+        refIdentity: expectString(object.refIdentity, "event.refIdentity"),
+        auxiliaryRefIdentity: expectString(object.auxiliaryRefIdentity, "event.auxiliaryRefIdentity"),
+        externalRefIdentity: expectString(object.externalRefIdentity, "event.externalRefIdentity"),
+        configurationIdentity: expectString(object.configurationIdentity, "event.configurationIdentity"),
+        changedPaths: expectStringArray(object.changedPaths, "event.changedPaths"),
       };
     case "ATTEMPT_FINISHED":
       return {

@@ -103,6 +103,36 @@ export async function assertRegisteredWorktree(repositoryRoot, worktreePath) {
         throw new AutopilotError("BRANCH_COLLISION", "managed worktree path is not registered to the charter repository");
     }
 }
+export async function quarantineWorktree(repositoryRoot, worktreePath, runId, itemId, attemptId) {
+    const quarantinePath = `${worktreePath}.quarantine-${sha256(`${runId}\0${itemId}\0${attemptId}`).slice(0, 16)}`;
+    let activePath = worktreePath;
+    try {
+        await lstat(worktreePath);
+        await assertRegisteredWorktree(repositoryRoot, worktreePath);
+        try {
+            await lstat(quarantinePath);
+            throw new AutopilotError("BRANCH_COLLISION", `quarantine destination already exists: ${quarantinePath}`);
+        }
+        catch (error) {
+            if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+                throw error;
+            }
+        }
+        await runChecked({ executable: "git", arguments: ["worktree", "move", worktreePath, quarantinePath], cwd: repositoryRoot });
+        activePath = quarantinePath;
+    }
+    catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+            throw error;
+        }
+        await assertRegisteredWorktree(repositoryRoot, quarantinePath);
+        activePath = quarantinePath;
+    }
+    if (await currentBranch(activePath) !== "") {
+        await runChecked({ executable: "git", arguments: ["switch", "--detach", "--quiet", "HEAD"], cwd: activePath });
+    }
+    return { path: activePath, observation: await observeRepository(activePath) };
+}
 export async function ensureWorktree(charter, item, baseCommit = charter.repository.baseCommit, ownedCommits = []) {
     await validateBranchName(charter.repository.root, item.branchName);
     const worktreePath = await resolveWorktreePath(charter, item);
