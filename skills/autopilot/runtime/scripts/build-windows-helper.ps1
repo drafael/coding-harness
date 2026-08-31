@@ -31,7 +31,7 @@ function Build-Helper([string]$directory) {
   $executable = Join-Path $directory "job-helper.exe"
   $object = Join-Path $directory "job-helper.obj"
   $command = "`"$developerShell`" -no_logo -arch=amd64 -host_arch=amd64 && cl.exe /nologo /W4 /WX /O2 /MT /GS /guard:cf /Fo`"$object`" /Fe`"$executable`" `"$source`" /link advapi32.lib /Brepro /guard:cf /DYNAMICBASE /NXCOMPAT"
-  & $env:ComSpec /d /s /c $command
+  & $env:ComSpec /d /s /c $command | Out-Host
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path $executable)) {
     throw "MSVC failed to build the Windows Job Object helper"
   }
