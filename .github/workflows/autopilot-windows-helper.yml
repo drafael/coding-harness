@@ -54,8 +54,13 @@ jobs:
           node scripts/copy-native-helper.mjs
       - name: Run isolated native Windows suites
         run: node --test --test-concurrency=1 .test-dist/test/windows-job.test.js .test-dist/test/process-supervisor.test.js
-      - name: Run full protected suite serially
-        run: node --test --test-concurrency=1 .test-dist/test/*.test.js
+      - name: Run remaining protected suites serially
+        shell: pwsh
+        run: |
+          $tests = Get-ChildItem .test-dist/test/*.test.js |
+            Where-Object { $_.Name -notin @('windows-job.test.js', 'process-supervisor.test.js') } |
+            ForEach-Object { $_.FullName }
+          node --test --test-concurrency=1 $tests
       - name: Collect sanitized failure diagnostics
         if: failure()
         shell: pwsh
