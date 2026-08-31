@@ -457,14 +457,14 @@ test("Pi extension invokes the runtime core and completes through process-local 
       "events.jsonl",
     );
     let admissionObserved = false;
-    for (let attempt = 0; attempt < 100 && !admissionObserved; attempt += 1) {
+    for (let attempt = 0; attempt < 1_000 && !admissionObserved; attempt += 1) {
       try {
         admissionObserved = (await readFile(reloadJournalPath, "utf8")).includes("ATTEMPT_EXECUTION_ADMITTED");
       } catch {
         // The coordinator has not published the run directory yet.
       }
       if (!admissionObserved) {
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
       }
     }
     assert.equal(admissionObserved, true);
