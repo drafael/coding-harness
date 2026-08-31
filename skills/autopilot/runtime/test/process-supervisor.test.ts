@@ -233,7 +233,7 @@ test("Windows broker preserves npm shim argv and environment casing end to end",
   const entry = join(bin, "adapter-entry.mjs");
   const shim = join(bin, "adapter.cmd");
   await mkdir(bin);
-  await writeFile(entry, `console.log(JSON.stringify({ arguments: process.argv.slice(2), environment: process.env.MiXeD_Key }));\n`);
+  await writeFile(entry, `console.log(JSON.stringify({ arguments: process.argv.slice(2), environment: process.env.MiXeD_Value }));\n`);
   await writeFile(shim, [
     "@ECHO off",
     "GOTO start",
@@ -251,7 +251,7 @@ test("Windows broker preserves npm shim argv and environment casing end to end",
     SystemRoot: process.env.SystemRoot,
     Path: bin,
     PATHEXT: ".EXE;.CMD",
-    MiXeD_Key: "Case-Preserved",
+    MiXeD_Value: "Case-Preserved",
   };
   const base = requestFor(root, entry);
   const request = {
