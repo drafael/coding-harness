@@ -290,12 +290,15 @@ test("Windows broker retries transient unauthenticated contention before exact t
     helperSha256: string;
   };
   const occupier = createConnection(identity.brokerName);
+  const occupierErrors: NodeJS.ErrnoException[] = [];
+  occupier.on("error", (error: NodeJS.ErrnoException) => occupierErrors.push(error));
   await once(occupier, "connect");
 
   assert.deepEqual(await queryWindowsJob(identity), { state: "busy", activeProcesses: 0 });
   const termination = await terminateWindowsJob(identity);
   occupier.destroy();
 
+  assert.ok(occupierErrors.every(({ code }) => code === "EPIPE" || code === "ECONNRESET"));
   assert.deepEqual(termination, { state: "terminated", activeProcesses: 0 });
   assert.equal((await observeSupervisedProcess(handle)).state, "failed");
 });
