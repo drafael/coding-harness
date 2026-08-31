@@ -21,13 +21,12 @@
     "schemas/"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/copy-native-helper.mjs && node scripts/make-executable.mjs",
-    "build:windows-helper": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-helper.ps1",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/make-executable.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters && tsc -p tsconfig.test.json --noEmit --noUnusedLocals --noUnusedParameters",
     "format:check": "node scripts/format-check.mjs",
-    "test": "npm run build && tsc -p tsconfig.test.json && node scripts/copy-native-helper.mjs && node --test .test-dist/test/*.test.js",
-    "test:coverage": "npm run build && tsc -p tsconfig.test.json && node scripts/copy-native-helper.mjs && node --test --experimental-test-coverage .test-dist/test/*.test.js"
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test .test-dist/test/*.test.js",
+    "test:coverage": "npm run build && tsc -p tsconfig.test.json && node --test --experimental-test-coverage .test-dist/test/*.test.js"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

@@ -10,7 +10,6 @@ import {
   supervisorRequestHash,
 } from "./process-supervisor.js";
 import { terminateProcessTree } from "./process.js";
-import { terminateWindowsJob, verifiedWindowsJobHelperSha256, windowsBrokerIdentity } from "./windows-job.js";
 
 function processExists(pid: number): boolean {
   try {
@@ -21,37 +20,11 @@ function processExists(pid: number): boolean {
   }
 }
 
-async function quiesceExecution(
-  supervisorPid: number,
-  executable: string,
-  executionId: string,
-  requestHash: string,
-  windowsHelperSha256?: string,
-): Promise<void> {
-  if (process.platform !== "win32") {
-    await terminateProcessTree(supervisorPid, executable);
-    return;
+async function quiesceExecution(supervisorPid: number, executable: string): Promise<void> {
+  if (process.platform === "win32") {
+    throw new Error("runtime-owned process supervision is unavailable on Windows");
   }
-  const helperSha256 = await verifiedWindowsJobHelperSha256();
-  if (windowsHelperSha256 === undefined || helperSha256 === undefined || windowsHelperSha256 !== helperSha256) {
-    throw new Error("Windows Job Object helper identity changed before process-tree quiescence");
-  }
-  await terminateWindowsJob(await windowsBrokerIdentity(executionId, requestHash));
-  try {
-    process.kill(supervisorPid);
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
-      throw error;
-    }
-  }
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    if (!processExists(supervisorPid)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error("Windows Job Object is empty but its attempt supervisor did not terminate");
+  await terminateProcessTree(supervisorPid, executable);
 }
 
 async function lastActivityAt(directory: string, startedAt: string): Promise<number> {
@@ -160,13 +133,7 @@ async function main(): Promise<void> {
       let terminalState: "cancelled" | "completed" | "failed" | "timed-out" | "state-unknown" = state;
       let terminalMessage = message;
       try {
-        await quiesceExecution(
-          supervisorPid,
-          request.executable,
-          request.executionId,
-          requestHash,
-          request.windowsHelperSha256,
-        );
+        await quiesceExecution(supervisorPid, request.executable);
       } catch (error) {
         terminalState = "state-unknown";
         terminalMessage = error instanceof Error ? error.message : String(error);

@@ -56,6 +56,14 @@ export async function runDoctor() {
             status: major >= 24 ? "ok" : "unsupported",
             detail: process.version,
             ...(major >= 24 ? {} : { setup: "Install Node.js 24 or newer; Autopilot never installs runtimes." }),
+        }, process.platform === "win32" ? {
+            name: "process-supervision",
+            status: "unsupported",
+            detail: "Windows native containment is not packaged; direct CLI execution is session-scoped and continuity loss requires operator recovery",
+        } : {
+            name: "process-supervision",
+            status: "ok",
+            detail: "POSIX attempt-scoped process-group supervision and restart reattachment are available",
         }];
     const piSubagents = findPiSubagentsInstallation();
     checks.push(await commandCheck("git", "git", ["--version"], "Install Git and make it available on PATH."), await commandCheck("pi", "pi", ["--version"], "Install Pi only if you plan to use the Pi adapter."), piSubagents === undefined

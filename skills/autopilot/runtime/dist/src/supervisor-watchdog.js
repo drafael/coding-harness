@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { writeJsonAtomic } from "./journal.js";
 import { readSupervisedCompletion, readSupervisedRequest, readSupervisedStatus, supervisedCancellationAt, supervisorArtifactNames, supervisorRequestHash, } from "./process-supervisor.js";
 import { terminateProcessTree } from "./process.js";
-import { terminateWindowsJob, verifiedWindowsJobHelperSha256, windowsBrokerIdentity } from "./windows-job.js";
 function processExists(pid) {
     try {
         process.kill(pid, 0);
@@ -13,32 +12,11 @@ function processExists(pid) {
         return !(error instanceof Error && "code" in error && error.code === "ESRCH");
     }
 }
-async function quiesceExecution(supervisorPid, executable, executionId, requestHash, windowsHelperSha256) {
-    if (process.platform !== "win32") {
-        await terminateProcessTree(supervisorPid, executable);
-        return;
+async function quiesceExecution(supervisorPid, executable) {
+    if (process.platform === "win32") {
+        throw new Error("runtime-owned process supervision is unavailable on Windows");
     }
-    const helperSha256 = await verifiedWindowsJobHelperSha256();
-    if (windowsHelperSha256 === undefined || helperSha256 === undefined || windowsHelperSha256 !== helperSha256) {
-        throw new Error("Windows Job Object helper identity changed before process-tree quiescence");
-    }
-    await terminateWindowsJob(await windowsBrokerIdentity(executionId, requestHash));
-    try {
-        process.kill(supervisorPid);
-    }
-    catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
-            throw error;
-        }
-    }
-    const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline) {
-        if (!processExists(supervisorPid)) {
-            return;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    throw new Error("Windows Job Object is empty but its attempt supervisor did not terminate");
+    await terminateProcessTree(supervisorPid, executable);
 }
 async function lastActivityAt(directory, startedAt) {
     try {
@@ -147,7 +125,7 @@ async function main() {
             let terminalState = state;
             let terminalMessage = message;
             try {
-                await quiesceExecution(supervisorPid, request.executable, request.executionId, requestHash, request.windowsHelperSha256);
+                await quiesceExecution(supervisorPid, request.executable);
             }
             catch (error) {
                 terminalState = "state-unknown";

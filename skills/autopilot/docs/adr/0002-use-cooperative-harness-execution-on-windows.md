@@ -88,11 +88,12 @@ Costs:
 
 ## Follow-up
 
-Implementation follows the ordered boundaries in the cooperative harness execution plan:
+The first five ordered boundaries in the cooperative harness execution plan are complete:
 
-1. record this decision and stop native artifact promotion;
-2. separate continuity from quiescence in the adapter and journal contracts;
-3. add fenced abandon, adopt, and stop recovery;
-4. implement and fault-test Pi structured delegation in-process;
-5. remove the retained Windows helper source, build, protocol, and test surfaces;
-6. investigate other harnesses independently after Pi proves the boundary.
+1. this decision stopped native artifact promotion;
+2. the adapter and journal contracts separate continuity from quiescence;
+3. fenced abandon, adopt, and stop recovery is available;
+4. Pi structured delegation runs in-process with fault coverage;
+5. the retained Windows helper source, build, protocol, and test surfaces have been removed.
+
+Codex, OpenCode, and Claude harness-owned execution remain separate investigations. No provider inherits Pi's assurance without equivalent evidence.

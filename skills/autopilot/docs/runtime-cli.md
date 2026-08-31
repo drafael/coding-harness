@@ -57,7 +57,7 @@ If no coordinator owns the run, `stop` acquires the run lock and records the ter
 
 `recover` requires an inactive coordinator and the exact current unknown item, attempt, and lease epoch. Every action records the owning run-lock token hash and explicit operator attestation. `abandon` permanently moves the uncertain worktree aside before a fresh attempt; `adopt` requires the exact freshly observed `--tree` and runs verification without an implementation launch; `stop` preserves the evidence and terminalizes the run.
 
-`stop` is terminal. A stopped or successful run requires a sealed successor for changed work. On supported POSIX hosts, built-in adapters reattach supervised implementation executions after coordinator loss and wait for terminal process-tree evidence before retrying. Legacy attempts, review executions, and incomplete or mismatched supervisor artifacts record `EXECUTION_STATE_UNKNOWN` and refuse a replacement launch.
+`stop` is terminal. A stopped or successful run requires a sealed successor for changed work. On supported POSIX hosts, built-in adapters reattach supervised implementation executions after coordinator loss and wait for terminal process-tree evidence before retrying. Autopilot packages no Windows native containment helper: direct Windows CLI executions are session-scoped, and continuity loss records `EXECUTION_STATE_UNKNOWN` without a replacement launch. Legacy attempts, review executions, and incomplete or mismatched supervisor artifacts fail closed the same way.
 
 ## Journal repair
 
