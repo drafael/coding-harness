@@ -487,7 +487,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 187 Node tests locally after intentional removal of 13 native-helper-specific tests and their production surface. The earlier 200-test Pi process-local, 162-test, and 137-test baselines passed at their recorded revisions on Ubuntu and Windows.
+**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 205 Node tests locally after adding Codex app-server contract coverage. The earlier 187-test native-free, 200-test Pi process-local, 162-test, and 137-test baselines passed at their recorded revisions on Ubuntu and Windows.
 
 ### Files
 

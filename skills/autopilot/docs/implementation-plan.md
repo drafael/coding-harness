@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot implementation plan
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped reattachment, versioned execution assurance, fenced unknown recovery, and the Pi process-local structured delegation backend are packaged. The Windows native-helper source, runtime path, build scripts, and tests have been removed; Windows restart reattachment remains unsupported.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped reattachment, versioned execution assurance, fenced unknown recovery, Pi process-local structured delegation, and the Codex same-instance app-server backend are packaged. The Windows native-helper source, runtime path, build scripts, and tests have been removed; Windows restart reattachment remains unsupported.
 - **Date:** 2026-08-22
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Autopilot architecture](architecture.md)
@@ -41,7 +41,7 @@ The completed first release must:
 
 ## Developer-preview evidence
 
-The implementation currently has 200 Node test cases and a clean-copy package smoke test. Generated attempt context, predicate-to-evidence reports, exact-tree independent review, intentional pause, and exact-subject provider waiting have controlled coverage. Disposable exact-tree review runs passed with Pi 0.84.4 through pi-subagents 0.60.0, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 reached its adapter but reported no usable noninteractive credential source, so its edit and review flows remain unverified. The same suite passes in Node 24 CI on Ubuntu and Windows; Windows coverage includes locking, atomic writes, Git worktrees and governed hooks, provider fixtures, cancellation, and descendant process-tree termination. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Authorized private GitHub project `drafael/autopilot-amendment-validation` PR #1 exercised immutable feedback capture, exact-head successor adoption, fast-forward update, exact thread resolution, merge, and amendment-chain wrap-up with `gh` 2.98.0. Authorized private GitLab project `drafael/autopilot-amendment-validation` MR !2 exercised the equivalent complete amendment workflow with `glab` 1.115.0.
+The implementation currently has 205 Node test cases (203 passing and 2 platform skips on macOS) and a clean-copy package smoke test. Generated attempt context, predicate-to-evidence reports, exact-tree independent review, intentional pause, exact-subject provider waiting, and Codex app-server admission, cancellation, continuity loss, identity fencing, server-request denial, and protocol bounds have controlled coverage. Disposable exact-tree review runs passed with Pi 0.84.4 through pi-subagents 0.60.0, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 reached its adapter but reported no usable noninteractive credential source, so its edit and review flows remain unverified. The same suite passes in Node 24 CI on Ubuntu and Windows; Windows coverage includes locking, atomic writes, Git worktrees and governed hooks, provider fixtures, cancellation, and descendant process-tree termination. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Authorized private GitHub project `drafael/autopilot-amendment-validation` PR #1 exercised immutable feedback capture, exact-head successor adoption, fast-forward update, exact thread resolution, merge, and amendment-chain wrap-up with `gh` 2.98.0. Authorized private GitLab project `drafael/autopilot-amendment-validation` MR !2 exercised the equivalent complete amendment workflow with `glab` 1.115.0.
 
 ## Planned package boundary
 
@@ -254,6 +254,8 @@ skills/autopilot/runtime/test/adapter-compatibility.test.ts
 - An adapter that cannot preserve background execution reports that limitation.
 - Same-model review limitations appear in capability or report metadata rather than being hidden.
 - Cross-harness integration claims remain limited to versions actually exercised.
+- Codex app-server 0.151.0 returns exact ephemeral thread and turn identity on one stdio connection, reports exact completion and interruption, and leaves the tested Codex config digest unchanged because Autopilot omits explicit `thread/start.cwd`.
+- Codex app-server connection or process loss remains unknown; its default stdio transport is not restart-reattachable, and direct `codex` remains a separate fallback.
 
 ## Phase 6: Add independent queues and ordered stacks
 

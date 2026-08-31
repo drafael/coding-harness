@@ -43,13 +43,13 @@ interface ExecutionEntry {
   readonly promise: Promise<ExecutionObservation>;
 }
 
-function adapterCredentialNames(request: ExecutionRequest): readonly string[] {
+export function adapterCredentialNames(request: ExecutionRequest): readonly string[] {
   return [...new Set(request.grants
     .filter(({ actor, family }) => actor === "adapter" && family === "credentials.use")
     .flatMap(({ environmentNames }) => environmentNames ?? []))].sort();
 }
 
-function adapterEnvironment(request: ExecutionRequest): NodeJS.ProcessEnv {
+export function adapterEnvironment(request: ExecutionRequest): NodeJS.ProcessEnv {
   const allowedCredentialNames = new Set(adapterCredentialNames(request));
   return Object.fromEntries(Object.entries(process.env).filter(([name]) =>
     !/(TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH)/i.test(name) || allowedCredentialNames.has(name),
@@ -179,7 +179,7 @@ export function parseReviewResult(stdout: string): ReviewResult | undefined {
   return unique.size === 1 ? [...unique.values()][0] : undefined;
 }
 
-function redactionValues(credentialEnvironmentNames: readonly string[]): readonly string[] {
+export function redactionValues(credentialEnvironmentNames: readonly string[]): readonly string[] {
   const credentialNames = new Set(credentialEnvironmentNames);
   return Object.entries(process.env).flatMap(([name, value]) => {
     const explicitlyGranted = credentialNames.has(name);
@@ -190,7 +190,7 @@ function redactionValues(credentialEnvironmentNames: readonly string[]): readonl
   });
 }
 
-function redactSecrets(text: string, credentialEnvironmentNames: readonly string[] = []): string {
+export function redactSecrets(text: string, credentialEnvironmentNames: readonly string[] = []): string {
   const credentialNames = new Set(credentialEnvironmentNames);
   return Object.entries(process.env).reduce((current, [name, value]) => {
     const explicitlyGranted = credentialNames.has(name);

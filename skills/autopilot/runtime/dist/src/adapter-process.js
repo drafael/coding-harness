@@ -5,12 +5,12 @@ import { AutopilotError } from "./errors.js";
 import { isRecord } from "./json.js";
 import { cancelSupervisedProcess, launchSupervisedProcess, observeSupervisedProcess, reattachSupervisedProcess, supervisedExecutionId, supervisorDirectory, } from "./process-supervisor.js";
 import { boundUtf8, runProcess } from "./process.js";
-function adapterCredentialNames(request) {
+export function adapterCredentialNames(request) {
     return [...new Set(request.grants
             .filter(({ actor, family }) => actor === "adapter" && family === "credentials.use")
             .flatMap(({ environmentNames }) => environmentNames ?? []))].sort();
 }
-function adapterEnvironment(request) {
+export function adapterEnvironment(request) {
     const allowedCredentialNames = new Set(adapterCredentialNames(request));
     return Object.fromEntries(Object.entries(process.env).filter(([name]) => !/(TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH)/i.test(name) || allowedCredentialNames.has(name)));
 }
@@ -126,7 +126,7 @@ export function parseReviewResult(stdout) {
     const unique = new Map(parsed.map((result) => [JSON.stringify(result), result]));
     return unique.size === 1 ? [...unique.values()][0] : undefined;
 }
-function redactionValues(credentialEnvironmentNames) {
+export function redactionValues(credentialEnvironmentNames) {
     const credentialNames = new Set(credentialEnvironmentNames);
     return Object.entries(process.env).flatMap(([name, value]) => {
         const explicitlyGranted = credentialNames.has(name);
@@ -136,7 +136,7 @@ function redactionValues(credentialEnvironmentNames) {
             : [value];
     });
 }
-function redactSecrets(text, credentialEnvironmentNames = []) {
+export function redactSecrets(text, credentialEnvironmentNames = []) {
     const credentialNames = new Set(credentialEnvironmentNames);
     return Object.entries(process.env).reduce((current, [name, value]) => {
         const explicitlyGranted = credentialNames.has(name);

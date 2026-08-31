@@ -1,4 +1,5 @@
 import { CliHarnessAdapter } from "../../src/adapter-process.js";
+import { CodexAppServerAdapter } from "./app-server.js";
 
 export function createCodexAdapter(): CliHarnessAdapter {
   return new CliHarnessAdapter({
@@ -20,8 +21,15 @@ export function createCodexAdapter(): CliHarnessAdapter {
     limitations: [
       "Codex enforces a workspace sandbox, but Autopilot item-path and effect restrictions are checked after execution.",
       "Implementation executions use the attempt-scoped supervisor for restart reattachment; review executions remain session-scoped.",
-      "The exact-tree review role is implemented but has no version-pinned live verification.",
+      "The exact-tree review role passed disposable validation with Codex 0.151.0; other versions remain environment-specific.",
     ],
     expectsJsonLines: true,
+  });
+}
+
+export function createCodexAppServerAdapter(): CodexAppServerAdapter {
+  return new CodexAppServerAdapter({
+    executable: "codex",
+    reviewAdapter: createCodexAdapter(),
   });
 }

@@ -147,7 +147,7 @@ export interface ProposedRunCharter {
     readonly sourceText: string;
     readonly createdAt: string;
     readonly repository: RepositorySpec;
-    readonly harnessAdapter: "pi" | "claude-code" | "codex" | "opencode";
+    readonly harnessAdapter: "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode";
     readonly mode: RunMode;
     readonly work: readonly WorkItem[];
     readonly delivery: DeliveryMode;

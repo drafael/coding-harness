@@ -12,7 +12,11 @@ export interface CliHarnessConfiguration {
     readonly validateResult?: (stdout: string, request: ExecutionRequest) => string | undefined;
     readonly displayStderrActivity?: boolean;
 }
+export declare function adapterCredentialNames(request: ExecutionRequest): readonly string[];
+export declare function adapterEnvironment(request: ExecutionRequest): NodeJS.ProcessEnv;
 export declare function parseReviewResult(stdout: string): ReviewResult | undefined;
+export declare function redactionValues(credentialEnvironmentNames: readonly string[]): readonly string[];
+export declare function redactSecrets(text: string, credentialEnvironmentNames?: readonly string[]): string;
 export declare class CliHarnessAdapter implements HarnessPort {
     #private;
     constructor(configuration: CliHarnessConfiguration);

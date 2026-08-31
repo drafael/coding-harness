@@ -1,6 +1,6 @@
 # Cooperative harness execution implementation plan
 
-- **Status:** Implemented through PR 5: decision/promotion shutdown, execution assurance, fenced unknown-execution recovery, Pi process-local integration, and Windows native-path removal are complete; later provider investigations remain separate
+- **Status:** Implemented through the Codex app-server integration: decision/promotion shutdown, execution assurance, fenced unknown-execution recovery, Pi process-local integration, Windows native-path removal, and exact same-instance Codex turns are complete; OpenCode and Claude investigations remain separate
 - **Date:** 2026-08-31
 - **Audience:** Autopilot implementers and reviewers
 - **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [durable event engine ADR](adr/0001-durable-event-engine.md)
@@ -364,11 +364,20 @@ Validation:
 - Windows continuity loss deterministically becomes unknown.
 - Ubuntu and Windows typecheck, lint, formatting, full tests, package smoke, and generated-artifact checks pass.
 
+### Codex app-server integration
+
+**Status:** Completed and kept distinct from the direct CLI adapter.
+
+Codex 0.151.0 exposes exact v2 thread and turn identities, streamed lifecycle notifications, and `turn/interrupt` over the default stdio app-server transport. Autopilot starts one app-server process per implementation attempt, uses one initialized connection, creates one ephemeral unattended workspace-write thread, and admits one turn. The subject binds an app-server instance nonce, thread ID, turn ID, and installed Codex version. Only the matching `turn/completed` notification from that uninterrupted connection is terminal. Server requests are denied, malformed or oversized protocol output fails closed, and cancellation remains pending until the same turn reports `interrupted`.
+
+The adapter sets the app-server process working directory to the attempt worktree but omits `thread/start.cwd`. Codex 0.151.0 persists project trust when a writable thread starts with an explicit `cwd`; omitting that field preserves the selected worktree without changing the user's Codex configuration. A live validation confirmed exact completion, exact cancellation, no tracked worktree mutation, and an unchanged `~/.codex/config.toml` digest.
+
+The default stdio transport cannot reconnect after coordinator loss. WebSocket transport is experimental and unsupported, and daemon bootstrap would add separately managed global state. Autopilot therefore does not attempt `thread/resume` on a replacement connection and advertises `same-harness-instance`, cooperative, single-shot assurance rather than durable reattachment. Connection, coordinator, or app-server loss becomes `EXECUTION_STATE_UNKNOWN`. Logical turn completion and interruption do not prove background-terminal or OS process-tree quiescence. Independent review remains on the direct read-only Codex CLI path, while the `codex` charter value retains the previous CLI adapter and its POSIX process supervisor.
+
 ### Later provider work
 
-Investigate each provider as a separate boundary after Pi is proven.
+Investigate each remaining provider as a separate boundary.
 
-- Codex: version-pin a harness-owned app-server and exact thread/turn reconciliation.
 - OpenCode: require exact prompt-attempt correlation and REST reconciliation around live-only events.
 - Claude Code: remain session-scoped until an active execution attachment surface exists.
 
@@ -457,6 +466,7 @@ Pause and revisit the design if implementation shows any of the following:
 
 - Controlled Pi process-local tests cover exact admission, cancellation, terminal-before-shutdown precedence, reload/session invalidation, lost admission, late/mismatched result rejection, direct fallback, and runtime-core completion in one reused local repository fixture. Whole-process live fault evidence remains environment-specific and does not prove OS quiescence or provider parity.
 - No provider currently proves Windows process-tree quiescence through its public subagent contract.
-- Codex app-server live rejoin, OpenCode disconnect reconciliation, and Claude interruption behavior were researched but not exercised for this design.
+- Codex app-server 0.151.0 exact completion and interruption were exercised over one uninterrupted stdio connection. Cross-connection live rejoin is intentionally unimplemented because the default transport is not reconnectable; continuity loss remains unknown.
+- OpenCode disconnect reconciliation and Claude interruption behavior remain researched but unexercised for this design.
 - Cooperative terminality does not prevent external effects performed by worker tools before terminal response.
 - The Pi entry point follows the documented package manifest at `runtime/dist/src/pi-extension-entry.js` and registers `/autopilot-start`, `/autopilot-resume`, and `/autopilot-recover`; callers must load it through Pi's normal package or extension mechanism.
