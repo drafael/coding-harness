@@ -59,6 +59,10 @@ $artifactExecutable = Join-Path $artifact "job-helper.exe"
 $artifactManifest = Join-Path $artifact "job-helper.json"
 Copy-Item $firstExecutable $artifactExecutable
 $toolset = (& $env:ComSpec /d /s /c "`"$developerShell`" -no_logo -arch=amd64 -host_arch=amd64 && cl.exe /Bv 2>&1" | Out-String).Trim()
+if (-not $toolset) {
+  throw "MSVC toolset identity is unavailable"
+}
+$global:LASTEXITCODE = 0
 $sourceCommit = if ($env:GITHUB_SHA) { $env:GITHUB_SHA.ToLowerInvariant() } else { (& git rev-parse HEAD).Trim().ToLowerInvariant() }
 $workflowRunId = if ($env:GITHUB_RUN_ID) { $env:GITHUB_RUN_ID } else { "local-untrusted" }
 $workflowRunAttempt = if ($env:GITHUB_RUN_ATTEMPT) { $env:GITHUB_RUN_ATTEMPT } else { "local-untrusted" }
