@@ -47,7 +47,7 @@ integration tests, and application-context smoke tests pass; no Spring Boot 3.x
 artifacts remain; and the migration guide is updated. Open a PR or MR, but do not merge or deploy.
 ```
 
-Autopilot requires Node.js 24+ and Git. Optional harness integrations can provide delegated workers and live activity; Autopilot falls back to direct harness execution when they are unavailable. Remote delivery also requires `gh` or `glab` and explicit per-run grants.
+Autopilot requires Node.js 24+ and Git. Pi can load the packaged Autopilot extension and an active `pi-subagents` owner for process-local structured execution; an unavailable owner selects the distinct direct Pi CLI fallback before admission. Autopilot never installs or enables these components. Remote delivery also requires `gh` or `glab` and explicit per-run grants.
 
 Use `/autopilot status` to check overnight progress, `/autopilot resume` to continue an interrupted nonterminal run, or `/autopilot stop` to end a run while preserving its work. `/autopilot address review comments` snapshots feedback from the exact open PR/MR, creates a sealed amendment successor, and resolves provider-resolvable threads only after the fix passes. After provider-confirmed merge, `/autopilot wrap up` performs guarded remote-branch, sibling-worktree, local-branch, and amendment-chain cleanup; use `/autopilot wrap up with handoff` to preserve project-local summaries.
 

@@ -6,13 +6,18 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createAdapter } from "./adapters.js";
+import type { HarnessPort } from "./adapter-protocol.js";
 import { loadAmendmentContext } from "./amendment.js";
 import { sealCharter, type RunCharter } from "./charter.js";
 import { runDoctor } from "./doctor.js";
 import { AutopilotEngine } from "./engine.js";
 import { AutopilotError } from "./errors.js";
 import { newEventId } from "./events.js";
-import { recoverUnknownExecution, type UnknownRecoveryAction } from "./execution-recovery.js";
+import {
+  recoverUnknownExecution,
+  type UnknownRecoveryAction,
+  type UnknownRecoveryRequest,
+} from "./execution-recovery.js";
 import { appendEvent, readJournal, repairTruncatedJournal, writeImmutableJson } from "./journal.js";
 import { isRecord } from "./json.js";
 import { acquireBranchOwnershipLock, acquireRunLock, requestRunPause, requestRunStop, type RunLock } from "./lock.js";
@@ -33,6 +38,14 @@ import { discoverWrapUpRuns, wrapUpRun, type WrapUpDiscovery } from "./wrap-up.j
 
 const VERSION = "0.1.0";
 let interrupted = false;
+
+export type CoordinatorAdapterFactory = (name: string) => HarnessPort;
+
+export interface CoordinatorInvocationOptions {
+  readonly stateDir?: string;
+  readonly repairJournal?: boolean;
+  readonly adapterFactory: CoordinatorAdapterFactory;
+}
 
 interface CliOptions {
   readonly stateDir?: string;
@@ -127,7 +140,12 @@ async function loadRun(runId: string, stateDirectory: string | undefined, repair
   return { stateRoot, directory, charter, journal };
 }
 
-async function runEngine(engine: AutopilotEngine, lock: RunLock, runId: string): Promise<unknown> {
+async function runEngine(
+  engine: AutopilotEngine,
+  lock: RunLock,
+  runId: string,
+  captureProcessSignals: boolean,
+): Promise<unknown> {
   const interrupt = (): void => {
     interrupted = true;
     void engine.requestStop();
@@ -163,20 +181,29 @@ async function runEngine(engine: AutopilotEngine, lock: RunLock, runId: string):
   const controlMonitor = setInterval(checkControlRequest, 100);
   controlMonitor.unref();
   checkControlRequest();
-  process.once("SIGINT", interrupt);
-  process.once("SIGTERM", interrupt);
+  if (captureProcessSignals) {
+    process.once("SIGINT", interrupt);
+    process.once("SIGTERM", interrupt);
+  }
   try {
     return await engine.run();
   } finally {
     controlMonitorStopped = true;
     clearInterval(controlMonitor);
     await pendingControlCheck;
-    process.removeListener("SIGINT", interrupt);
-    process.removeListener("SIGTERM", interrupt);
+    if (captureProcessSignals) {
+      process.removeListener("SIGINT", interrupt);
+      process.removeListener("SIGTERM", interrupt);
+    }
   }
 }
 
-async function start(charterFile: string, options: CliOptions): Promise<unknown> {
+async function start(
+  charterFile: string,
+  options: CliOptions,
+  adapterFactory: CoordinatorAdapterFactory = createAdapter,
+  captureProcessSignals = true,
+): Promise<unknown> {
   let proposed: unknown;
   try {
     proposed = JSON.parse(await readFile(charterFile, "utf8")) as unknown;
@@ -259,11 +286,11 @@ async function start(charterFile: string, options: CliOptions): Promise<unknown>
         stateRoot,
         runDirectory: directory,
         charter,
-        adapter: createAdapter(charter.harnessAdapter),
+        adapter: adapterFactory(charter.harnessAdapter),
         records: journal.records,
         projection,
       });
-      return await runEngine(engine, lock, charter.runId);
+      return await runEngine(engine, lock, charter.runId, captureProcessSignals);
     } finally {
       await lock.release();
     }
@@ -342,7 +369,12 @@ async function status(runId: string | undefined, options: CliOptions): Promise<u
   );
 }
 
-async function resume(runId: string | undefined, options: CliOptions): Promise<unknown> {
+async function resume(
+  runId: string | undefined,
+  options: CliOptions,
+  adapterFactory: CoordinatorAdapterFactory = createAdapter,
+  captureProcessSignals = true,
+): Promise<unknown> {
   const selected = await selectLifecycleRun("resume", runId, options);
   if (typeof selected !== "string") {
     return selected;
@@ -364,11 +396,11 @@ async function resume(runId: string | undefined, options: CliOptions): Promise<u
         stateRoot: run.stateRoot,
         runDirectory: run.directory,
         charter: run.charter,
-        adapter: createAdapter(run.charter.harnessAdapter),
+        adapter: adapterFactory(run.charter.harnessAdapter),
         records: run.journal.records,
         projection,
       });
-      return await runEngine(engine, lock, run.charter.runId);
+      return await runEngine(engine, lock, run.charter.runId, captureProcessSignals);
     } finally {
       await lock.release();
     }
@@ -377,7 +409,12 @@ async function resume(runId: string | undefined, options: CliOptions): Promise<u
   }
 }
 
-async function recover(runId: string | undefined, options: CliOptions): Promise<unknown> {
+async function recover(
+  runId: string | undefined,
+  options: CliOptions,
+  adapterFactory: CoordinatorAdapterFactory = createAdapter,
+  captureProcessSignals = true,
+): Promise<unknown> {
   if (runId === undefined || options.recoveryAction === undefined || options.recoveryItem === undefined
     || options.recoveryAttempt === undefined || options.recoveryLeaseEpoch === undefined
     || options.recoveryAttestation === undefined) {
@@ -418,17 +455,50 @@ async function recover(runId: string | undefined, options: CliOptions): Promise<
         stateRoot: run.stateRoot,
         runDirectory: run.directory,
         charter: run.charter,
-        adapter: createAdapter(run.charter.harnessAdapter),
+        adapter: adapterFactory(run.charter.harnessAdapter),
         records: journal.records,
         projection: recovered,
       });
-      return await runEngine(engine, lock, run.charter.runId);
+      return await runEngine(engine, lock, run.charter.runId, captureProcessSignals);
     } finally {
       await lock.release();
     }
   } finally {
     await ownershipLock?.release();
   }
+}
+
+function coordinatorOptions(options: CoordinatorInvocationOptions): CliOptions {
+  return {
+    json: true,
+    repairJournal: options.repairJournal ?? false,
+    handoff: false,
+    ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
+  };
+}
+
+export async function startCoordinator(charterFile: string, options: CoordinatorInvocationOptions): Promise<unknown> {
+  return await start(charterFile, coordinatorOptions(options), options.adapterFactory, false);
+}
+
+export async function resumeCoordinator(runId: string | undefined, options: CoordinatorInvocationOptions): Promise<unknown> {
+  return await resume(runId, coordinatorOptions(options), options.adapterFactory, false);
+}
+
+export async function recoverCoordinator(
+  runId: string,
+  request: UnknownRecoveryRequest,
+  options: CoordinatorInvocationOptions,
+): Promise<unknown> {
+  return await recover(runId, {
+    ...coordinatorOptions(options),
+    recoveryAction: request.action,
+    recoveryItem: request.itemId,
+    recoveryAttempt: request.attemptId,
+    recoveryLeaseEpoch: request.leaseEpoch,
+    recoveryAttestation: request.attestation,
+    ...(request.expectedTreeIdentity === undefined ? {} : { recoveryTree: request.expectedTreeIdentity }),
+  }, options.adapterFactory, false);
 }
 
 async function reviewFeedback(runId: string | undefined, options: CliOptions): Promise<unknown> {
@@ -543,7 +613,7 @@ async function pause(runId: string | undefined, options: CliOptions): Promise<un
       projection,
     });
     await engine.requestPause();
-    return await runEngine(engine, lock, run.charter.runId);
+    return await runEngine(engine, lock, run.charter.runId, true);
   } finally {
     await lock.release();
   }

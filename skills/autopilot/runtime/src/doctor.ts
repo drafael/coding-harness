@@ -69,8 +69,8 @@ export async function runDoctor(): Promise<readonly DoctorCheck[]> {
     await commandCheck("git", "git", ["--version"], "Install Git and make it available on PATH."),
     await commandCheck("pi", "pi", ["--version"], "Install Pi only if you plan to use the Pi adapter."),
     piSubagents === undefined
-      ? { name: "pi-subagents", status: "unverified", detail: "version 0.53.0 or newer was not found; the Pi adapter will use its direct fallback", setup: "Install pi-subagents through Pi to enable delegated worker activity; Autopilot never installs it." }
-      : { name: "pi-subagents", status: "ok", detail: `${piSubagents.version} at ${piSubagents.extensionPath}` },
+      ? { name: "pi-subagents", status: "unverified", detail: "version 0.53.0 or newer was not found; Pi will use its distinct direct CLI fallback", setup: "Install and enable pi-subagents through Pi to use the process-local backend; Autopilot never installs it." }
+      : { name: "pi-subagents", status: "ok", detail: `${piSubagents.version} at ${piSubagents.extensionPath}; process-local owner availability is checked by the Autopilot Pi extension before launch` },
     await commandCheck("claude-code", "claude", ["--version"], "Install Claude Code only if you plan to use that adapter."),
     await commandCheck("codex", "codex", ["--version"], "Install Codex only if you plan to use that adapter."),
     await commandCheck("opencode", "opencode", ["--version"], "Install OpenCode only if you plan to use that adapter."),
