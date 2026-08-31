@@ -1,11 +1,11 @@
 import { createClaudeCodeAdapter } from "../adapters/claude-code/index.js";
-import { createCodexAdapter } from "../adapters/codex/index.js";
+import { createCodexAdapter, createCodexAppServerAdapter } from "../adapters/codex/index.js";
 import { createOpenCodeAdapter } from "../adapters/opencode/index.js";
 import { createPiAdapter } from "../adapters/pi/index.js";
 import type { HarnessPort } from "./adapter-protocol.js";
 import { AutopilotError } from "./errors.js";
 
-export type AdapterName = "pi" | "claude-code" | "codex" | "opencode";
+export type AdapterName = "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode";
 
 export function createAdapter(name: string): HarnessPort {
   switch (name) {
@@ -15,6 +15,8 @@ export function createAdapter(name: string): HarnessPort {
       return createClaudeCodeAdapter();
     case "codex":
       return createCodexAdapter();
+    case "codex-app-server":
+      return createCodexAppServerAdapter();
     case "opencode":
       return createOpenCodeAdapter();
     default:

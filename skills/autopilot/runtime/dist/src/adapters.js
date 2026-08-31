@@ -1,5 +1,5 @@
 import { createClaudeCodeAdapter } from "../adapters/claude-code/index.js";
-import { createCodexAdapter } from "../adapters/codex/index.js";
+import { createCodexAdapter, createCodexAppServerAdapter } from "../adapters/codex/index.js";
 import { createOpenCodeAdapter } from "../adapters/opencode/index.js";
 import { createPiAdapter } from "../adapters/pi/index.js";
 import { AutopilotError } from "./errors.js";
@@ -11,6 +11,8 @@ export function createAdapter(name) {
             return createClaudeCodeAdapter();
         case "codex":
             return createCodexAdapter();
+        case "codex-app-server":
+            return createCodexAppServerAdapter();
         case "opencode":
             return createOpenCodeAdapter();
         default:

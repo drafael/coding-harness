@@ -81,6 +81,12 @@ export async function runDoctor(): Promise<readonly DoctorCheck[]> {
       : { name: "pi-subagents", status: "ok", detail: `${piSubagents.version} at ${piSubagents.extensionPath}; process-local owner availability is checked by the Autopilot Pi extension before launch` },
     await commandCheck("claude-code", "claude", ["--version"], "Install Claude Code only if you plan to use that adapter."),
     await commandCheck("codex", "codex", ["--version"], "Install Codex only if you plan to use that adapter."),
+    await commandCheck(
+      "codex-app-server",
+      "codex",
+      ["app-server", "--help"],
+      "Install a Codex version with app-server support only if you plan to use that adapter.",
+    ),
     await commandCheck("opencode", "opencode", ["--version"], "Install OpenCode only if you plan to use that adapter."),
     await commandCheck("github-cli", "gh", ["--version"], "Install gh only for GitHub delivery."),
     await commandCheck("gitlab-cli", "glab", ["--version"], "Install glab only for GitLab delivery."),

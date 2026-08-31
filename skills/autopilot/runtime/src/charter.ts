@@ -186,7 +186,7 @@ export interface ProposedRunCharter {
   readonly sourceText: string;
   readonly createdAt: string;
   readonly repository: RepositorySpec;
-  readonly harnessAdapter: "pi" | "claude-code" | "codex" | "opencode";
+  readonly harnessAdapter: "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode";
   readonly mode: RunMode;
   readonly work: readonly WorkItem[];
   readonly delivery: DeliveryMode;
@@ -480,7 +480,11 @@ function parseProposed(value: unknown, allowHash: boolean): ProposedRunCharter {
     sourceText: expectString(object.sourceText, "charter.sourceText"),
     createdAt: expectString(object.createdAt, "charter.createdAt"),
     repository: parseRepository(object.repository, "charter.repository"),
-    harnessAdapter: expectLiteral(object.harnessAdapter, ["pi", "claude-code", "codex", "opencode"], "charter.harnessAdapter"),
+    harnessAdapter: expectLiteral(
+      object.harnessAdapter,
+      ["pi", "claude-code", "codex", "codex-app-server", "opencode"],
+      "charter.harnessAdapter",
+    ),
     mode: expectLiteral(object.mode, ["single", "independent-queue", "ordered-stack"], "charter.mode"),
     work: object.work.map((entry, index) => parseWorkItem(entry, `charter.work[${index}]`)),
     delivery: expectLiteral(object.delivery, ["local-commits", "change-request-ready", "merge-verified"], "charter.delivery"),

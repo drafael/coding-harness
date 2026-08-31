@@ -23,6 +23,12 @@ export interface ProcessResult {
     readonly truncated: boolean;
 }
 export declare function terminateProcessTree(pid: number, executable: string): Promise<void>;
+export declare class StreamingRedactor {
+    #private;
+    constructor(values: readonly string[]);
+    write(chunk: Buffer): string;
+    end(): string;
+}
 export declare function boundUtf8(text: string, maximumBytes: number): {
     readonly value: string;
     readonly truncated: boolean;

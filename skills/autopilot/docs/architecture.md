@@ -136,7 +136,7 @@ interface RunCharter {
     readonly baseCommit: string;
     readonly writableRoots: readonly string[];
   };
-  readonly harnessAdapter: "pi" | "claude-code" | "codex" | "opencode";
+  readonly harnessAdapter: "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode";
   readonly mode: "single" | "independent-queue" | "ordered-stack";
   readonly work: readonly WorkItem[];
   readonly delivery: "local-commits" | "change-request-ready" | "merge-verified";
@@ -310,7 +310,9 @@ Capability degradation is explicit:
 - Missing or incomplete attempt-supervisor evidence fails closed as `EXECUTION_STATE_UNKNOWN`; the runtime never spends another attempt on a speculative replacement.
 - Missing a required delivery or enforcement capability stops before edits.
 
-The first adapters target Claude Code, Codex, Pi, and OpenCode. They share one conformance suite.
+The first adapters target Claude Code, Codex, Pi, and OpenCode. They share one conformance suite. The `codex` and `codex-app-server` charter values are distinct execution modes: direct Codex CLI retains runtime-owned POSIX supervision, while app-server implementation turns use harness-owned same-instance cooperative terminality.
+
+The Codex app-server adapter starts one per-attempt stdio server with its process working directory set to the dedicated worktree. After `initialize`, it creates an ephemeral workspace-write thread with unattended approvals and deliberately omits the `cwd` request field, avoiding Codex's persistent project-trust update while still verifying the returned working directory. It journals an exact subject derived from the app-server instance nonce, thread ID, and turn ID. Only the matching `turn/completed` notification on the same connection is terminal; interruption must finish that turn as `interrupted`. Server requests are denied. The stdio connection cannot be reattached, while reconnectable Codex transports remain experimental or require separately managed daemon state, so any coordinator, connection, or server loss is `EXECUTION_STATE_UNKNOWN`. Independent review remains on the direct read-only Codex CLI adapter.
 
 The packaged Pi extension invokes the same runtime core inside the owning Pi process and probes an installed `pi-subagents` 0.53.0+ owner before selecting process-local structured delegation. The runtime persists admission intent before the extension emits one request, then binds the exact request, logical node, subject, and extension-instance identity. Only one matching terminal response from that uninterrupted instance may proceed to repository verification. Extension reload, session replacement, stale context, process loss, or a missing exact response becomes `EXECUTION_STATE_UNKNOWN` and cannot launch a replacement. Pi's ordinary foreground subagent observability remains available, while bounded activity is also projected to stderr. If the compatible owner is absent or inactive, Autopilot selects and reports the distinct direct Pi CLI fallback before admission. Direct POSIX execution keeps process supervision; direct Windows execution remains session-scoped. Independent review remains a separate direct read-only Pi execution.
 

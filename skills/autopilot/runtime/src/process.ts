@@ -112,7 +112,7 @@ export async function terminateProcessTree(pid: number, executable: string): Pro
   }
 }
 
-class StreamingRedactor {
+export class StreamingRedactor {
   readonly #decoder = new StringDecoder("utf8");
   readonly #values: readonly string[];
   #pending = "";

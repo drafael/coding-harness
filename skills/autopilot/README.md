@@ -21,6 +21,8 @@ changes and rollback notes. Open a PR, but do not merge or deploy it.
 
 When using Pi's process-local backend, load `runtime/dist/src/pi-extension-entry.js` through Pi's documented extension or package mechanism, then start the sealed charter with `/autopilot-start <charter-file>`. The owning Pi process must remain uninterrupted; losing it makes the exact attempt unknown and never triggers a replacement.
 
+Codex offers two explicit charter modes. `codex-app-server` binds an implementation to one per-attempt app-server instance and exact ephemeral thread/turn; connection or server loss becomes unknown. `codex` retains the direct CLI fallback and POSIX process-supervised restart reattachment. App-server independent review still uses the direct read-only CLI path.
+
 Autopilot will:
 
 1. turn the request into explicit work items, completion predicates, budgets, and grants;

@@ -75,7 +75,7 @@ export async function terminateProcessTree(pid, executable) {
         throw new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot prove that ${executable} descendants stopped`, { pid });
     }
 }
-class StreamingRedactor {
+export class StreamingRedactor {
     #decoder = new StringDecoder("utf8");
     #values;
     #pending = "";
