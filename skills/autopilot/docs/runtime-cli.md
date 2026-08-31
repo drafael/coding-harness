@@ -29,6 +29,16 @@ The copied-skill entry point is:
 node "$AUTOPILOT_CLI" COMMAND
 ```
 
+When the packaged runtime is loaded as a Pi extension, it also registers:
+
+```text
+/autopilot-start <charter-file>
+/autopilot-resume [run-id]
+/autopilot-recover <run-id> <recovery-request-json>
+```
+
+These commands invoke the same coordinator in the owning Pi process. They select process-local structured delegation only when a compatible installed `pi-subagents` owner answers the process-local probe; otherwise they report the distinct direct Pi CLI fallback before admission.
+
 `status` returns the journal identity, last durable milestone, per-predicate evidence map, remaining budgets, and next legal action without rewriting coordinator-owned reports. Plain output is concise and omits state/worktree paths and full run IDs; `--json` returns the complete machine-readable report. `status`, `resume`, `pause`, and `stop` discover unsuperseded runs for the current repository when the run ID is omitted. `review-feedback` discovers successful `change-request-ready` leaf runs and returns an immutable-input snapshot of unresolved provider feedback for skill-driven amendment compilation. `wrap-up` separately discovers successful provider-delivered leaf runs. Mutating commands proceed only for one unambiguous candidate. A unique short run-ID prefix is accepted; an ambiguous prefix returns choices without mutation.
 
 `--json` keeps stdout machine-readable. Diagnostics and live adapter activity remain on stderr.

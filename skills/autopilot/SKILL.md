@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Autopilot
 
-Autopilot delegates bounded coding work to a fresh Claude Code, Codex, Pi, or OpenCode process. Its runtime owns lifecycle state, Git commits, verification, remote delivery, and completion decisions.
+Autopilot delegates bounded coding work to a fresh Claude Code, Codex, Pi, or OpenCode execution. Pi implementations prefer the packaged process-local extension backend; other modes and the Pi fallback use their declared CLI boundaries. The runtime owns lifecycle state, Git commits, verification, remote delivery, and completion decisions.
 
 ## New-run preconditions
 
@@ -64,13 +64,13 @@ Start the successor normally. The runtime revalidates the immutable feedback sna
 7. Set `commitPolicy.preCommitHook` explicitly. Prefer `run` when the repository configures a project pre-commit hook; use `skip` only when the user approves bypassing that project policy. Inspect hook code without executing it and include its known outputs in `commitPolicy.writableRoots`, repository writable roots, and runtime `files.read`/`files.write` grants without widening the worker's roots. Ask when those effects cannot be bounded.
 8. Save the proposed charter outside the repository or in an explicitly writable documentation path.
 9. Before starting the foreground process, report the work titles, branches, delivery boundary, and known unverified boundaries. The skill can rediscover the run later; do not ask the user to record runtime paths or identifiers.
-10. Start in the foreground:
+10. Start in the foreground. For Pi, when the packaged Autopilot extension and compatible process-local `pi-subagents` owner are active, instruct the operator to run `/autopilot-start <charter-file>` in that owning Pi session; do not start a second outer Pi process. For other harnesses, or when Pi reports the distinct direct fallback, run:
 
    ```bash
    node runtime/dist/src/cli.js start <charter-file>
    ```
 
-11. During Pi runs, surface the runtime's stderr activity lines instead of hiding the command output. When `pi-subagents` 0.53.0+ is available, these lines show the delegated worker's live tool, token, and terminal activity; otherwise report the direct-worker fallback.
+11. During Pi runs, surface bounded stderr activity instead of hiding it. The process-local path remains visible through Pi's ordinary foreground subagent observability and binds completion to the exact extension instance. An unavailable owner is selected and reported as the direct fallback before admission; never infer one mode's assurance from the other.
 12. Report the terminal result and any new unverified boundaries. After every recorded PR/MR is merged, use `wrap-up` only when the user wants Autopilot to remove its exact remote branches, sibling worktrees, local branches, and canonical run-state chain.
 
 ## Lifecycle commands
@@ -85,6 +85,8 @@ node runtime/dist/src/cli.js [--state-dir <path>] review-feedback [run-id]
 node runtime/dist/src/cli.js [--state-dir <path>] [--handoff] wrap-up [run-id]
 node runtime/dist/src/cli.js doctor
 ```
+
+The packaged Pi extension additionally provides `/autopilot-start <charter-file>`, `/autopilot-resume [run-id]`, and `/autopilot-recover <run-id> <recovery-request-json>`. These commands invoke the same runtime core without giving the extension or worker journal ownership. A reload, session replacement, or whole-process loss during an admitted process-local implementation becomes `EXECUTION_STATE_UNKNOWN`.
 
 These are internal and recovery commands; users normally invoke the skill forms above. Use the same `--state-dir` for every direct command addressing a run. Omitted-ID lifecycle commands discover unsuperseded runs for the current repository and mutate only one unambiguous candidate. `pause` enters nonterminal waiting only after active implementation is observed quiescent. `resume` continues an interrupted or paused nonterminal run. A stopped run requires a successor charter. `wrap-up` is destructive: without a run ID it proceeds only when discovery finds exactly one successful unsuperseded provider-delivered run; otherwise it lists candidates without mutation. `--handoff` writes optional Markdown and JSON summaries under `.autopilot/handoffs/` before cleanup.
 

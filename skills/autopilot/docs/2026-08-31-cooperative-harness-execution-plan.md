@@ -1,6 +1,6 @@
 # Cooperative harness execution implementation plan
 
-- **Status:** Approved design; PR 1 decision/promotion shutdown, PR 2 execution assurance, and PR 3 fenced unknown-execution recovery are complete; harness integration remains pending
+- **Status:** Approved design; PR 1 decision/promotion shutdown, PR 2 execution assurance, PR 3 fenced unknown-execution recovery, and PR 4 Pi process-local integration are complete; Windows native-path removal remains pending
 - **Date:** 2026-08-31
 - **Audience:** Autopilot implementers and reviewers
 - **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [durable event engine ADR](adr/0001-durable-event-engine.md)
@@ -453,8 +453,8 @@ Pause and revisit the design if implementation shows any of the following:
 
 ## Remaining evidence gaps
 
-- Live Pi fault-injection against extension reload, session replacement, whole-process loss, and late writes has not been run.
+- Controlled Pi process-local tests cover exact admission, cancellation, terminal-before-shutdown precedence, reload/session invalidation, lost admission, late/mismatched result rejection, direct fallback, and runtime-core completion in one reused local repository fixture. Whole-process live fault evidence remains environment-specific and does not prove OS quiescence or provider parity.
 - No provider currently proves Windows process-tree quiescence through its public subagent contract.
 - Codex app-server live rejoin, OpenCode disconnect reconciliation, and Claude interruption behavior were researched but not exercised for this design.
 - Cooperative terminality does not prevent external effects performed by worker tools before terminal response.
-- The exact Pi extension packaging and invocation surface must be chosen from complete Pi documentation during PR 4.
+- The Pi entry point follows the documented package manifest at `runtime/dist/src/pi-extension-entry.js` and registers `/autopilot-start`, `/autopilot-resume`, and `/autopilot-recover`; callers must load it through Pi's normal package or extension mechanism.

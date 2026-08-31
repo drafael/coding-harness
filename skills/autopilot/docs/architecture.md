@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation-process reattachment and controlled-fixture sealed restack successors are packaged. Windows restart reattachment remains disabled while approved cooperative harness execution is implemented; notification wake is not promoted, and live restack mutation remains unverified without renewed disposable-target authority.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped process reattachment, fenced unknown recovery, Pi process-local cooperative execution, and controlled-fixture sealed restack successors are packaged. Windows native-path removal remains pending; notification wake is not promoted, and live restack mutation remains unverified without renewed target authority.
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
@@ -312,7 +312,7 @@ Capability degradation is explicit:
 
 The first adapters target Claude Code, Codex, Pi, and OpenCode. They share one conformance suite.
 
-The Pi adapter prefers the installed `pi-subagents` 0.53.0+ public structured delegation API. Autopilot loads only that extension and its bundled bridge in a headless Pi process, delegates one item to the resolved `worker` role in the runtime-owned worktree, and projects bounded progress to stderr. If the compatible extension is absent, the adapter uses a direct Pi worker and records the fallback. The originating interactive Pi FleetView cannot own this subprocess because Pi's event bus and FleetView are process-local; the stderr projection preserves visible activity without transferring lifecycle authority away from Autopilot.
+The packaged Pi extension invokes the same runtime core inside the owning Pi process and probes an installed `pi-subagents` 0.53.0+ owner before selecting process-local structured delegation. The runtime persists admission intent before the extension emits one request, then binds the exact request, logical node, subject, and extension-instance identity. Only one matching terminal response from that uninterrupted instance may proceed to repository verification. Extension reload, session replacement, stale context, process loss, or a missing exact response becomes `EXECUTION_STATE_UNKNOWN` and cannot launch a replacement. Pi's ordinary foreground subagent observability remains available, while bounded activity is also projected to stderr. If the compatible owner is absent or inactive, Autopilot selects and reports the distinct direct Pi CLI fallback before admission. Direct POSIX execution keeps process supervision; direct Windows execution remains session-scoped. Independent review remains a separate direct read-only Pi execution.
 
 ## Playbooks
 

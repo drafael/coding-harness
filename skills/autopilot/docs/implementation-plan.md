@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot implementation plan
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation reattachment, versioned per-mode execution assurance, exact admitted-subject journaling, and controlled-fixture sealed restack successors are packaged. The reviewed Windows x64 Job Object artifact will not be packaged; Windows restart reattachment remains disabled while operator recovery and cooperative harness integration are implemented.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped reattachment, versioned execution assurance, fenced unknown recovery, and the Pi process-local structured delegation backend are packaged. The reviewed Windows x64 Job Object artifact will not be packaged; its source and runtime path remain only until the ordered native-removal change.
 - **Date:** 2026-08-22
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Autopilot architecture](architecture.md)
@@ -37,10 +37,11 @@ The completed first release must:
 - Keep harness and delivery adapters outside reducer and journal ownership.
 - Prefer Node built-ins and small direct modules. Evaluate any production dependency before adding it.
 - Never auto-install tools, download runtimes, or alter user authentication.
+- Local tests may create temporary Git repositories. GitHub and GitLab live validation must reuse an existing authorized validation project (or create one persistent project once and reuse it); do not create a new remote repository per scenario.
 
 ## Developer-preview evidence
 
-The implementation currently has 162 Node test cases and a clean-copy package smoke test. Generated attempt context, predicate-to-evidence reports, exact-tree independent review, intentional pause, and exact-subject provider waiting have controlled coverage. Disposable exact-tree review runs passed with Pi 0.84.4 through pi-subagents 0.60.0, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 reached its adapter but reported no usable noninteractive credential source, so its edit and review flows remain unverified. The same suite passes in Node 24 CI on Ubuntu and Windows; Windows coverage includes locking, atomic writes, Git worktrees and governed hooks, provider fixtures, cancellation, and descendant process-tree termination. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Authorized private GitHub project `drafael/autopilot-amendment-validation` PR #1 exercised immutable feedback capture, exact-head successor adoption, fast-forward update, exact thread resolution, merge, and amendment-chain wrap-up with `gh` 2.98.0. Authorized private GitLab project `drafael/autopilot-amendment-validation` MR !2 exercised the equivalent complete amendment workflow with `glab` 1.115.0.
+The implementation currently has 200 Node test cases and a clean-copy package smoke test. Generated attempt context, predicate-to-evidence reports, exact-tree independent review, intentional pause, and exact-subject provider waiting have controlled coverage. Disposable exact-tree review runs passed with Pi 0.84.4 through pi-subagents 0.60.0, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 reached its adapter but reported no usable noninteractive credential source, so its edit and review flows remain unverified. The same suite passes in Node 24 CI on Ubuntu and Windows; Windows coverage includes locking, atomic writes, Git worktrees and governed hooks, provider fixtures, cancellation, and descendant process-tree termination. An authorized GitHub wrap-up was exercised against merged chat4j PR #69. Authorized private GitHub project `drafael/autopilot-amendment-validation` PR #1 exercised immutable feedback capture, exact-head successor adoption, fast-forward update, exact thread resolution, merge, and amendment-chain wrap-up with `gh` 2.98.0. Authorized private GitLab project `drafael/autopilot-amendment-validation` MR !2 exercised the equivalent complete amendment workflow with `glab` 1.115.0.
 
 ## Planned package boundary
 
@@ -207,8 +208,8 @@ skills/autopilot/runtime/test/fixtures/adapter-events/
 2. Reject unknown protocol versions and malformed messages.
 3. Bound line size, retained output, deadlines, and subprocess lifetime.
 4. Forward cancellation to the complete process group where the platform supports it.
-5. Implement the Pi adapter against Pi's public JSON-mode CLI, preferring the installed `pi-subagents` 0.53.0+ structured delegation API and retaining a direct-worker fallback.
-6. Project bounded delegated-worker activity to stderr so JSON stdout remains machine-readable.
+5. Implement the packaged Pi extension against the public process-local `pi-subagents` 0.53.0+ structured delegation API, retaining the direct Pi CLI as an explicitly different fallback.
+6. Invoke the runtime core from the owning extension context, bind exact admission and terminal identity, and project bounded worker activity without transferring journal ownership.
 7. Report whether restrictions are enforced or cooperative.
 8. Run each attempt in a fresh session with only item-scoped context.
 9. Build an adapter conformance suite that does not depend on Pi-specific event names.
@@ -219,9 +220,10 @@ skills/autopilot/runtime/test/fixtures/adapter-events/
 - Duplicate, reordered, truncated, oversized, and malicious event lines cannot advance state.
 - A silent adapter triggers the idle deadline and bounded recovery path.
 - A late Pi result with an expired lease is quarantined.
-- One disposable local fixture completes through the real Pi adapter.
-- A compatible `pi-subagents` fixture proves structured delegation, terminal-result validation, direct fallback behavior, and visible activity without allowing child output to claim completion.
-- The fixture records the exact Pi and `pi-subagents` versions and exercised boundary; support remains unverified until that real end-to-end fixture passes.
+- One reused local Git repository fixture completes through the process-local runtime entry point; no remote repository is required.
+- Compatible `pi-subagents` fixtures prove exact admission, terminal-result validation, cancellation, extension-instance loss, direct fallback behavior, and visible activity without allowing child output to claim completion.
+- The fixture records the exact Pi and `pi-subagents` versions and exercised boundary. Cooperative completion remains distinct from OS process-tree proof.
+- Live local validation with Pi 0.84.4 and `pi-subagents` 0.60.0 reused one repository: normal completion reached `SUCCEEDED`; whole-process loss resumed as `WAITING/execution-unknown` with exactly one started attempt; and pause during a shell tool call produced an uncharged cancelled attempt and `WAITING/operator-pause`.
 
 ## Phase 5: Add Claude Code, Codex, and OpenCode adapters
 
@@ -329,7 +331,7 @@ skills/autopilot/runtime/test/gitlab-delivery.test.ts
 - Unknown CI failures remain failures.
 - A named waiver applies only to its configured gate and failure signature.
 - A stack lands only through its contiguous verified prefix.
-- All external mutation tests use disposable repositories. Organization-specific approval and merge policies remain unverified.
+- External mutation tests use local disposable repositories or existing authorized reusable GitHub/GitLab validation projects; they do not create one-off remote repositories. Organization-specific approval and merge policies remain unverified.
 
 ## Phase 8: Complete the skill, playbooks, doctor, and packaging
 

@@ -10,7 +10,7 @@ Install these yourself before launching a run:
 - Git
 - Claude Code, Codex, Pi, or OpenCode
 - `gh` for GitHub delivery or `glab` for GitLab delivery
-- optionally, `pi-subagents` 0.53.0 or newer for structured Pi delegation
+- optionally, an installed and active `pi-subagents` 0.53.0 or newer for Pi process-local structured delegation
 
 Autopilot checks these requirements before launch. It reports missing or unverified capabilities without installing dependencies, downloading runtimes, authenticating providers, or changing global configuration.
 
@@ -36,7 +36,7 @@ and rollback notes. Open a PR, but do not merge or deploy it.
 
 Autopilot converts the request into a proposed charter. Review the charter when the skill asks about credentials, remote writes, merge authority, assumptions, waivers, or hook behavior. It never infers deployment, force-push, unrelated credentials, destructive cleanup, or weaker completion checks.
 
-Leave the foreground process running. During Pi execution, progress is written to stderr while structured output remains machine-readable.
+For the Pi process-local backend, load the packaged runtime extension through Pi's documented package or `--extension` mechanism and start the charter with `/autopilot-start <charter-file>`. The extension checks that the compatible `pi-subagents` owner is active in the same process; otherwise it reports and uses the distinct direct Pi CLI fallback. Autopilot never installs or enables either extension. Leave the owning Pi process running. Extension reload, session replacement, or process loss makes an admitted in-process execution unknown rather than launching a replacement.
 
 ## Understand the run
 
@@ -70,7 +70,7 @@ Natural requests work too:
 
 `status` rebuilds progress from the sealed charter, hash-linked journal, Git identities, and receipts. It reports the last durable milestone, unmet predicate identities, normalized failure, remaining budgets, repeated no-change attempts, and next legal action. `pause` asks the live coordinator to cancel active implementation work, prove quiescence, retire the exact lease, and enter nonterminal waiting. A cancellation caused solely by pause remains auditable but does not consume an attempt. `resume` continues a paused or interrupted nonterminal run within its original limits. Verified items reconcile their checkpoint and effects without rerunning implementation. It does not restart a run that still has a live coordinator. `stop` asks a live coordinator to cancel active adapter work and record a durable terminal stop; if the coordinator is gone, Autopilot records the stop under the run lock. Branches, worktrees, receipts, and evidence remain intact.
 
-A stopped run cannot be resumed. Changed authority, budgets, or objectives require a sealed successor. After coordinator loss on supported POSIX hosts, Autopilot reattaches built-in supervised implementation executions and waits for terminal process-tree evidence. Legacy attempts, review executions, and incomplete or mismatched supervisor artifacts record `EXECUTION_STATE_UNKNOWN` and refuse a replacement launch until quiescence can be proven.
+A stopped run cannot be resumed. Changed authority, budgets, or objectives require a sealed successor. After coordinator loss on supported POSIX hosts, Autopilot reattaches built-in supervised implementation executions and waits for terminal process-tree evidence. Legacy attempts, review executions, and incomplete or mismatched supervisor artifacts record `EXECUTION_STATE_UNKNOWN` and refuse a replacement launch until quiescence can be proven. Pi in-process implementations also become unknown when their exact owning extension instance is lost. Resume them through `/autopilot-resume [run-id]` in a loaded Autopilot extension; use fenced `/autopilot-recover` or the runtime CLI to abandon, adopt, or stop an unknown attempt.
 
 If several runs match, Autopilot lists their title, short ID, state, progress, and last update. It changes nothing until you choose one, for example `resume 1` or `status spring-boot-4`.
 

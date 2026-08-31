@@ -162,7 +162,7 @@ Add `test/attempt-context.test.ts` only if context assembly becomes a distinct p
 5. Write an immutable, user-only context artifact under the existing attempt-report area before recording `ATTEMPT_STARTED`. A crash may leave an unreferenced artifact; it must not create a lifecycle transition.
 6. Add the context hash and source journal sequence or hash to `ATTEMPT_STARTED`. Parse these fields compatibly for journals created before this change.
 7. Render one worker prompt from the normalized context. Adapter-specific argument builders may change transport syntax, but they must not add authority or omit required semantics.
-8. Continue to pass the rendered task through the Pi bridge. Do not teach the bridge a second context format unless Pi needs structured fields for a demonstrated capability.
+8. Pass the same rendered task through Pi process-local structured delegation or the distinct direct fallback. Do not introduce a second context format unless a demonstrated capability requires structured fields.
 9. On a replacement attempt, build a new context from reconciled state. Never reuse a stale lease, deadline, expected head, or prior context artifact.
 10. Treat repository guidance and review findings as labeled data. They may appear only through sealed assumptions or normalized evidence fields and cannot alter grants or predicates.
 
@@ -487,7 +487,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 162 Node tests locally and a 93-file package dry run; the previous 137-test baseline passed on Ubuntu and Windows.
+**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 200 Node tests locally, including the later Pi process-local backend; the earlier 162-test and 137-test baselines passed at their recorded revisions on Ubuntu and Windows.
 
 ### Files
 
@@ -560,7 +560,7 @@ GitHub Actions run [33335872725](https://github.com/drafael/coding-harness/actio
 
 ### Direct Pi validation evidence
 
-Pi 0.84.4 completed five isolated `--no-session --no-extensions` calls against a disposable Git repository. The matrix covered two sequential calls in one worktree, an explicit retry context, two additional calls in a sibling worktree under distinct run identities, and a read-only exact-tree review. Each implementation call created only its unique nonce file with the expected content; the review returned `AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[]}`. No output contained the historical `ctx is stale` error or either captured-context invalidation phrase. This validates the current direct Pi path for repeated process-isolated calls; it does not change the structured `pi-subagents` worker path or claim compatibility for the retired `/run` slash bridge.
+Pi 0.84.4 completed five isolated `--no-session --no-extensions` calls against a disposable Git repository. The matrix covered two sequential calls in one worktree, an explicit retry context, two additional calls in a sibling worktree under distinct run identities, and a read-only exact-tree review. Each implementation call created only its unique nonce file with the expected content; the review returned `AUTOPILOT_REVIEW_RESULT:{"verdict":"clean","findings":[]}`. No output contained the historical `ctx is stale` error or either captured-context invalidation phrase. This remains evidence for the distinct direct Pi fallback at that revision; the later process-local structured backend has its own exact-admission and continuity tests and does not rely on the retired `/run` slash bridge.
 
 ## Cross-cutting test matrix
 

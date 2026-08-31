@@ -11,6 +11,11 @@
   "bin": {
     "autopilot": "./dist/src/cli.js"
   },
+  "pi": {
+    "extensions": [
+      "./dist/src/pi-extension-entry.js"
+    ]
+  },
   "files": [
     "dist/",
     "schemas/"
@@ -23,6 +28,14 @@
     "format:check": "node scripts/format-check.mjs",
     "test": "npm run build && tsc -p tsconfig.test.json && node scripts/copy-native-helper.mjs && node --test .test-dist/test/*.test.js",
     "test:coverage": "npm run build && tsc -p tsconfig.test.json && node scripts/copy-native-helper.mjs && node --test --experimental-test-coverage .test-dist/test/*.test.js"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

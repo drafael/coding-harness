@@ -6,7 +6,7 @@ Autopilot is not a prompt loop. It seals your request into an immutable charter,
 
 ## Use it
 
-You need Node.js 24+, Git, and at least one supported harness CLI. Remote delivery also needs authenticated `gh` or `glab`. Autopilot checks the environment before launch; it never installs tools or signs you in.
+You need Node.js 24+, Git, and at least one supported harness CLI. Remote delivery also needs authenticated `gh` or `glab`. Pi can use the packaged Autopilot extension with an installed and active `pi-subagents` 0.53.0+ owner for process-local execution; otherwise it reports the distinct direct CLI fallback. Autopilot checks the environment before launch; it never installs tools, enables extensions, or signs you in.
 
 From the project repository, invoke the skill through your host:
 
@@ -18,6 +18,8 @@ replace removed APIs, and preserve the existing HTTP and persistence behavior. D
 3.x artifacts remain in the dependency tree, and the migration guide records compatibility
 changes and rollback notes. Open a PR, but do not merge or deploy it.
 ```
+
+When using Pi's process-local backend, load `runtime/dist/src/pi-extension-entry.js` through Pi's documented extension or package mechanism, then start the sealed charter with `/autopilot-start <charter-file>`. The owning Pi process must remain uninterrupted; losing it makes the exact attempt unknown and never triggers a replacement.
 
 Autopilot will:
 

@@ -12,7 +12,7 @@ import { runDoctor } from "./doctor.js";
 import { AutopilotEngine } from "./engine.js";
 import { AutopilotError } from "./errors.js";
 import { newEventId } from "./events.js";
-import { recoverUnknownExecution } from "./execution-recovery.js";
+import { recoverUnknownExecution, } from "./execution-recovery.js";
 import { appendEvent, readJournal, repairTruncatedJournal, writeImmutableJson } from "./journal.js";
 import { isRecord } from "./json.js";
 import { acquireBranchOwnershipLock, acquireRunLock, requestRunPause, requestRunStop } from "./lock.js";
@@ -100,7 +100,7 @@ async function loadRun(runId, stateDirectory, repair) {
     }
     return { stateRoot, directory, charter, journal };
 }
-async function runEngine(engine, lock, runId) {
+async function runEngine(engine, lock, runId, captureProcessSignals) {
     const interrupt = () => {
         interrupted = true;
         void engine.requestStop();
@@ -139,8 +139,10 @@ async function runEngine(engine, lock, runId) {
     const controlMonitor = setInterval(checkControlRequest, 100);
     controlMonitor.unref();
     checkControlRequest();
-    process.once("SIGINT", interrupt);
-    process.once("SIGTERM", interrupt);
+    if (captureProcessSignals) {
+        process.once("SIGINT", interrupt);
+        process.once("SIGTERM", interrupt);
+    }
     try {
         return await engine.run();
     }
@@ -148,11 +150,13 @@ async function runEngine(engine, lock, runId) {
         controlMonitorStopped = true;
         clearInterval(controlMonitor);
         await pendingControlCheck;
-        process.removeListener("SIGINT", interrupt);
-        process.removeListener("SIGTERM", interrupt);
+        if (captureProcessSignals) {
+            process.removeListener("SIGINT", interrupt);
+            process.removeListener("SIGTERM", interrupt);
+        }
     }
 }
-async function start(charterFile, options) {
+async function start(charterFile, options, adapterFactory = createAdapter, captureProcessSignals = true) {
     let proposed;
     try {
         proposed = JSON.parse(await readFile(charterFile, "utf8"));
@@ -234,11 +238,11 @@ async function start(charterFile, options) {
                 stateRoot,
                 runDirectory: directory,
                 charter,
-                adapter: createAdapter(charter.harnessAdapter),
+                adapter: adapterFactory(charter.harnessAdapter),
                 records: journal.records,
                 projection,
             });
-            return await runEngine(engine, lock, charter.runId);
+            return await runEngine(engine, lock, charter.runId, captureProcessSignals);
         }
         finally {
             await lock.release();
@@ -305,7 +309,7 @@ async function status(runId, options) {
     const metadata = await loadReportMetadata(run.directory);
     return await writeReports(run.directory, run.charter, projection, run.journal.records, metadata.assurance, metadata.unverifiedBoundaries, false);
 }
-async function resume(runId, options) {
+async function resume(runId, options, adapterFactory = createAdapter, captureProcessSignals = true) {
     const selected = await selectLifecycleRun("resume", runId, options);
     if (typeof selected !== "string") {
         return selected;
@@ -327,11 +331,11 @@ async function resume(runId, options) {
                 stateRoot: run.stateRoot,
                 runDirectory: run.directory,
                 charter: run.charter,
-                adapter: createAdapter(run.charter.harnessAdapter),
+                adapter: adapterFactory(run.charter.harnessAdapter),
                 records: run.journal.records,
                 projection,
             });
-            return await runEngine(engine, lock, run.charter.runId);
+            return await runEngine(engine, lock, run.charter.runId, captureProcessSignals);
         }
         finally {
             await lock.release();
@@ -341,7 +345,7 @@ async function resume(runId, options) {
         await ownershipLock?.release();
     }
 }
-async function recover(runId, options) {
+async function recover(runId, options, adapterFactory = createAdapter, captureProcessSignals = true) {
     if (runId === undefined || options.recoveryAction === undefined || options.recoveryItem === undefined
         || options.recoveryAttempt === undefined || options.recoveryLeaseEpoch === undefined
         || options.recoveryAttestation === undefined) {
@@ -375,11 +379,11 @@ async function recover(runId, options) {
                 stateRoot: run.stateRoot,
                 runDirectory: run.directory,
                 charter: run.charter,
-                adapter: createAdapter(run.charter.harnessAdapter),
+                adapter: adapterFactory(run.charter.harnessAdapter),
                 records: journal.records,
                 projection: recovered,
             });
-            return await runEngine(engine, lock, run.charter.runId);
+            return await runEngine(engine, lock, run.charter.runId, captureProcessSignals);
         }
         finally {
             await lock.release();
@@ -388,6 +392,31 @@ async function recover(runId, options) {
     finally {
         await ownershipLock?.release();
     }
+}
+function coordinatorOptions(options) {
+    return {
+        json: true,
+        repairJournal: options.repairJournal ?? false,
+        handoff: false,
+        ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
+    };
+}
+export async function startCoordinator(charterFile, options) {
+    return await start(charterFile, coordinatorOptions(options), options.adapterFactory, false);
+}
+export async function resumeCoordinator(runId, options) {
+    return await resume(runId, coordinatorOptions(options), options.adapterFactory, false);
+}
+export async function recoverCoordinator(runId, request, options) {
+    return await recover(runId, {
+        ...coordinatorOptions(options),
+        recoveryAction: request.action,
+        recoveryItem: request.itemId,
+        recoveryAttempt: request.attemptId,
+        recoveryLeaseEpoch: request.leaseEpoch,
+        recoveryAttestation: request.attestation,
+        ...(request.expectedTreeIdentity === undefined ? {} : { recoveryTree: request.expectedTreeIdentity }),
+    }, options.adapterFactory, false);
 }
 async function reviewFeedback(runId, options) {
     const stateRoot = await resolveStateRoot(process.cwd(), options.stateDir);
@@ -483,7 +512,7 @@ async function pause(runId, options) {
             projection,
         });
         await engine.requestPause();
-        return await runEngine(engine, lock, run.charter.runId);
+        return await runEngine(engine, lock, run.charter.runId, true);
     }
     finally {
         await lock.release();

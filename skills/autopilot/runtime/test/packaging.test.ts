@@ -24,6 +24,10 @@ test("compiled skill CLI starts from a clean copy without node_modules", async (
   assert.equal(version.exitCode, 0);
   assert.equal(version.stdout.trim(), "0.1.0");
   assert.equal(doctor.exitCode, 0);
+  const packageManifest: unknown = JSON.parse(await readFile(join(copyRoot, "package.json"), "utf8"));
+  assert.ok(isRecord(packageManifest) && isRecord(packageManifest.pi));
+  assert.deepEqual(packageManifest.pi.extensions, ["./dist/src/pi-extension-entry.js"]);
+  assert.equal(existsSync(join(copyRoot, "dist", "src", "pi-extension-entry.js")), true);
   const checks: unknown = JSON.parse(doctor.stdout);
   assert.ok(Array.isArray(checks));
   const node = checks.find((entry) => isRecord(entry) && entry.name === "node");
