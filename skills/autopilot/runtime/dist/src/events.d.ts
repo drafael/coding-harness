@@ -1,3 +1,4 @@
+import { type ExecutionAssurance } from "./adapter-protocol.js";
 export type EventSource = "runtime" | "operator" | "reconciler";
 export type WaitingDetails = {
     readonly kind: "operator-pause";
@@ -83,8 +84,20 @@ export type LifecycleEvent = (EventBase & {
     readonly contextHash?: string;
     readonly contextJournalSequence?: number;
     readonly executionSupervised?: boolean;
+    readonly executionAssurance?: ExecutionAssurance;
     readonly deadline: string;
     readonly idempotencyKey: string;
+}) | (EventBase & {
+    readonly type: "ATTEMPT_EXECUTION_ADMITTED";
+    readonly itemId: string;
+    readonly attemptId: string;
+    readonly adapterName: string;
+    readonly adapterVersion: string;
+    readonly harnessVersion: string;
+    readonly adapterExecutionId: string;
+    readonly backendId: string;
+    readonly subjectId: string;
+    readonly harnessInstanceId?: string;
 }) | (EventBase & {
     readonly type: "ATTEMPT_FINISHED";
     readonly itemId: string;

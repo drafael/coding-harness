@@ -284,6 +284,50 @@ test("reducer projects a nonterminal operator pause without charging its cancell
   assert.equal(projection.pauseRequestId, undefined);
 });
 
+test("reducer binds execution assurance and exact admitted subject to the current attempt", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit));
+  const attemptId = "attempt-admitted";
+  let projection = initialProjection(charter);
+  for (const lifecycleEvent of [
+    { ...base("reconcile"), type: "RECONCILIATION_STARTED" } as LifecycleEvent,
+    { ...base("running"), type: "RECONCILIATION_COMPLETED" } as LifecycleEvent,
+    { ...base("ready"), type: "ITEM_READY", itemId: "item-1" } as LifecycleEvent,
+    {
+      ...base("intent"), type: "ATTEMPT_STARTED", itemId: "item-1", attemptId, leaseEpoch: 1,
+      expectedBaseCommit: repository.baseCommit,
+      executionAssurance: {
+        schemaVersion: 1,
+        owner: "harness",
+        continuity: "same-harness-instance",
+        terminality: "cooperative",
+        admission: "single-shot",
+      },
+      deadline: new Date(Date.now() + 1_000).toISOString(), idempotencyKey: "attempt:admitted",
+    } as LifecycleEvent,
+    {
+      ...base("admitted"), type: "ATTEMPT_EXECUTION_ADMITTED", itemId: "item-1", attemptId,
+      adapterName: "pi", adapterVersion: "2", harnessVersion: "0.84.4",
+      adapterExecutionId: "request-1", backendId: "pi-subagents", subjectId: "node-1",
+      harnessInstanceId: "owner-run-1",
+    } as LifecycleEvent,
+  ]) {
+    projection = reduce(projection, lifecycleEvent);
+  }
+
+  const attempt = projection.items["item-1"]?.attempts.at(-1);
+  assert.equal(attempt?.executionAssurance?.continuity, "same-harness-instance");
+  assert.equal(attempt?.execution?.backendId, "pi-subagents");
+  assert.equal(attempt?.execution?.subjectId, "node-1");
+  assert.equal(attempt?.execution?.harnessInstanceId, "owner-run-1");
+  assert.throws(() => reduce(projection, {
+    ...base("duplicate"), type: "ATTEMPT_EXECUTION_ADMITTED", itemId: "item-1", attemptId,
+    adapterName: "pi", adapterVersion: "2", harnessVersion: "0.84.4",
+    adapterExecutionId: "request-1", backendId: "pi-subagents", subjectId: "node-1",
+    harnessInstanceId: "owner-run-1",
+  }), /duplicated/);
+});
+
 test("reducer charges a naturally completed attempt when pause races with completion", async () => {
   const repository = await createRepository();
   const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit));

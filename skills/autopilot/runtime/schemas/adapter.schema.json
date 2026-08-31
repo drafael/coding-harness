@@ -48,6 +48,28 @@
     }
   ],
   "$defs": {
+    "executionAssurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "owner", "continuity", "terminality", "admission"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "owner": { "enum": ["runtime", "harness"] },
+        "continuity": { "enum": ["session", "same-harness-instance", "durable-subject"] },
+        "terminality": { "enum": ["cooperative", "process-supervised"] },
+        "admission": { "enum": ["single-shot", "idempotent"] }
+      }
+    },
+    "executionAssuranceProfiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "implementation", "review"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "implementation": { "$ref": "#/$defs/executionAssurance" },
+        "review": { "$ref": "#/$defs/executionAssurance" }
+      }
+    },
     "manifest": {
       "type": "object",
       "additionalProperties": false,
@@ -78,6 +100,7 @@
         "eventStreaming": { "type": "boolean" },
         "cancellation": { "type": "boolean" },
         "restartReattachment": { "type": "boolean" },
+        "executionAssurance": { "$ref": "#/$defs/executionAssuranceProfiles" },
         "restrictions": { "enum": ["cooperative", "enforced"] },
         "limitations": { "type": "array", "items": { "type": "string" } }
       }

@@ -4,11 +4,13 @@ import { join, resolve } from "node:path";
 import type {
   AttemptContext,
   CapabilityManifest,
+  ExecutionAssurance,
   ExecutionHandle,
   ExecutionObservation,
   ExecutionRequest,
   HarnessPort,
 } from "./adapter-protocol.js";
+import { executionAssuranceFor } from "./adapter-protocol.js";
 import { loadAmendmentContext, type AmendmentContext } from "./amendment.js";
 import { attemptContextHash, buildAttemptContext } from "./attempt-context.js";
 import type { GrantFamily, ReviewGate, RunCharter, WorkItem } from "./charter.js";
@@ -123,6 +125,7 @@ export class AutopilotEngine {
   #waitAbort: AbortController | undefined;
   readonly #activeHandles = new Map<string, ExecutionHandle>();
   readonly #implementationHandleIds = new Set<string>();
+  readonly #cancellationRequestedHandleIds = new Set<string>();
 
   constructor(options: EngineOptions) {
     this.#stateRoot = options.stateRoot;
@@ -143,13 +146,9 @@ export class AutopilotEngine {
     }
     this.#stopRequested = true;
     this.#waitAbort?.abort();
-    await Promise.all([...this.#activeHandles.values()].map(async (handle) => {
-      try {
-        await this.#adapter.cancel(handle);
-      } catch {
-        // The coordinator still stops after the bounded process deadline.
-      }
-    }));
+    await Promise.all([...this.#activeHandles.values()].map(async (handle) =>
+      await this.#requestHandleCancellation(handle)
+    ));
   }
 
   async requestPause(): Promise<void> {
@@ -171,8 +170,24 @@ export class AutopilotEngine {
       if (handle === undefined) {
         return [];
       }
-      return [this.#adapter.cancel(handle).catch(() => undefined)];
+      return [this.#requestHandleCancellation(handle)];
     }));
+  }
+
+  async #requestHandleCancellation(handle: ExecutionHandle): Promise<void> {
+    if (this.#cancellationRequestedHandleIds.has(handle.adapterExecutionId)) {
+      return;
+    }
+    this.#cancellationRequestedHandleIds.add(handle.adapterExecutionId);
+    try {
+      const result = await this.#adapter.cancel(handle);
+      if (!result.accepted) {
+        this.#cancellationRequestedHandleIds.delete(handle.adapterExecutionId);
+      }
+    } catch {
+      this.#cancellationRequestedHandleIds.delete(handle.adapterExecutionId);
+      // Observation or unknown-state recovery still owns the execution boundary.
+    }
   }
 
   async #blockItemForStop(item: WorkItem, attemptId?: string): Promise<boolean> {
@@ -196,6 +211,22 @@ export class AutopilotEngine {
     return Object.values(this.#projection.items).some(({ attempts }) =>
       attempts.length > 0 && attempts.at(-1)?.outcome === undefined
     );
+  }
+
+  async #classifyUnobservedExecutionUnknown(reason: string): Promise<boolean> {
+    for (const item of Object.values(this.#projection.items)) {
+      const attempt = item.attempts.at(-1);
+      if (item.state === "ACTIVE" && attempt !== undefined && attempt.outcome === undefined) {
+        await this.#record({
+          ...eventBase(reason, "reconciler"),
+          type: "ITEM_BLOCKED",
+          itemId: item.itemId,
+          attemptId: attempt.attemptId,
+          errorCode: "EXECUTION_STATE_UNKNOWN",
+        });
+      }
+    }
+    return Object.values(this.#projection.items).some(({ blocker }) => blocker === "EXECUTION_STATE_UNKNOWN");
   }
 
   async #settlePauseIfRequested(): Promise<boolean> {
@@ -346,8 +377,39 @@ export class AutopilotEngine {
     );
   }
 
+  #executionAssurance(role: ExecutionRequest["role"]): ExecutionAssurance {
+    if (this.#manifest === undefined) {
+      throw new AutopilotError("ADAPTER_UNSUPPORTED", "adapter capabilities have not been loaded");
+    }
+    return executionAssuranceFor(this.#manifest, role);
+  }
+
+  #attemptExecutionAssurance(attempt: RunProjection["items"][string]["attempts"][number]): ExecutionAssurance {
+    if (attempt.executionAssurance !== undefined) {
+      return attempt.executionAssurance;
+    }
+    return attempt.executionSupervised === true
+      ? {
+          schemaVersion: 1,
+          owner: "runtime",
+          continuity: "durable-subject",
+          terminality: "process-supervised",
+          admission: "idempotent",
+        }
+      : {
+          schemaVersion: 1,
+          owner: "runtime",
+          continuity: "session",
+          terminality: "cooperative",
+          admission: "single-shot",
+        };
+  }
+
   #executionSupervisionEnabled(): boolean {
-    return this.#manifest?.restartReattachment === true && this.#adapter.reattach !== undefined;
+    const assurance = this.#executionAssurance("implementation");
+    return assurance.continuity === "durable-subject"
+      && assurance.terminality === "process-supervised"
+      && this.#adapter.reattach !== undefined;
   }
 
   #implementationRequest(
@@ -361,6 +423,7 @@ export class AutopilotEngine {
     return {
       protocolVersion: 1,
       role: "implementation",
+      executionAssurance: this.#executionAssurance("implementation"),
       runId: this.#charter.runId,
       itemId: item.id,
       attemptId,
@@ -377,6 +440,33 @@ export class AutopilotEngine {
       maximumOutputBytes: this.#charter.limits.maxRetainedOutputBytes,
       ...(this.#executionSupervisionEnabled() ? { supervisionDirectory: this.#runDirectory } : {}),
     };
+  }
+
+  async #recordExecutionAdmission(itemId: string, attemptId: string, handle: ExecutionHandle): Promise<void> {
+    if (this.#manifest === undefined || handle.adapterExecutionId.length === 0) {
+      throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "adapter execution admission identity is incomplete");
+    }
+    const assurance = this.#executionAssurance("implementation");
+    const subject = handle.subject ?? (assurance.owner === "runtime"
+      ? { schemaVersion: 1 as const, backendId: "legacy-runtime-adapter", subjectId: handle.adapterExecutionId }
+      : undefined);
+    if (subject === undefined || subject.backendId.length === 0 || subject.subjectId.length === 0
+      || (assurance.continuity === "same-harness-instance" && !subject.harnessInstanceId)) {
+      throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "harness-owned execution subject identity was not captured");
+    }
+    await this.#record({
+      ...eventBase("Exact adapter execution subject admitted"),
+      type: "ATTEMPT_EXECUTION_ADMITTED",
+      itemId,
+      attemptId,
+      adapterName: this.#manifest.adapterName,
+      adapterVersion: this.#manifest.adapterVersion,
+      harnessVersion: this.#manifest.harnessVersion,
+      adapterExecutionId: handle.adapterExecutionId,
+      backendId: subject.backendId,
+      subjectId: subject.subjectId,
+      ...(subject.harnessInstanceId === undefined ? {} : { harnessInstanceId: subject.harnessInstanceId }),
+    });
   }
 
   #runtimeAuthorize(family: GrantFamily, details: Omit<Parameters<typeof authorizeEffect>[0], "family" | "actor"> = {}): void {
@@ -473,8 +563,11 @@ export class AutopilotEngine {
             || lease.attemptId !== attempt.attemptId || lease.epoch !== attempt.leaseEpoch) {
             throw new AutopilotError("JOURNAL_CORRUPT", "interrupted attempt writer lease changed identity");
           }
+          const attemptAssurance = this.#attemptExecutionAssurance(attempt);
           if (itemProjection.state === "ACTIVE" && attempt.outcome === undefined
-            && attempt.executionSupervised === true && this.#executionSupervisionEnabled()) {
+            && attemptAssurance.continuity === "durable-subject"
+            && attemptAssurance.terminality === "process-supervised"
+            && this.#adapter.reattach !== undefined) {
             continue;
           }
           const observed = await this.#observeRepository(lease.worktreePath);
@@ -728,7 +821,12 @@ export class AutopilotEngine {
     item: WorkItem,
     attempt: RunProjection["items"][string]["attempts"][number],
   ): Promise<ExecutionObservation["status"] | "stale" | false> {
-    if (attempt.outcome !== undefined || attempt.executionSupervised !== true || !this.#executionSupervisionEnabled()) {
+    const assurance = this.#attemptExecutionAssurance(attempt);
+    if (attempt.outcome !== undefined
+      || assurance.continuity !== "durable-subject"
+      || assurance.terminality !== "process-supervised"
+      || canonicalJson(assurance) !== canonicalJson(this.#executionAssurance("implementation"))
+      || this.#adapter.reattach === undefined) {
       return false;
     }
     const lease = await readLease(this.#runDirectory, item.id);
@@ -753,16 +851,44 @@ export class AutopilotEngine {
     if (reattach === undefined) {
       return false;
     }
-    const existingHandle = await reattach.call(this.#adapter, request);
-    const handle = existingHandle ?? await this.#adapter.launch(request);
+    const handle = await reattach.call(this.#adapter, request);
+    if (handle === undefined) {
+      return false;
+    }
+    const admitted = attempt.execution;
+    const subject = handle.subject;
+    if (admitted !== undefined && (this.#manifest === undefined
+      || this.#manifest.adapterName !== admitted.adapterName
+      || this.#manifest.adapterVersion !== admitted.adapterVersion
+      || this.#manifest.harnessVersion !== admitted.harnessVersion
+      || handle.adapterExecutionId !== admitted.adapterExecutionId
+      || subject === undefined || subject.backendId !== admitted.backendId || subject.subjectId !== admitted.subjectId
+      || subject.harnessInstanceId !== admitted.harnessInstanceId)) {
+      return false;
+    }
     this.#activeHandles.set(handle.adapterExecutionId, handle);
     this.#implementationHandleIds.add(handle.adapterExecutionId);
     let observation: ExecutionObservation;
     try {
-      observation = await this.#adapter.observe(handle);
+      if (this.#stopRequested || this.#pauseRequested) {
+        await this.#requestHandleCancellation(handle);
+      }
+      try {
+        observation = await this.#adapter.observe(handle);
+      } catch (error) {
+        throw new AutopilotError(
+          "EXECUTION_STATE_UNKNOWN",
+          "reattached execution did not produce an authoritative terminal observation",
+          { cause: error instanceof Error ? error.message : String(error) },
+        );
+      }
     } finally {
       this.#activeHandles.delete(handle.adapterExecutionId);
       this.#implementationHandleIds.delete(handle.adapterExecutionId);
+      this.#cancellationRequestedHandleIds.delete(handle.adapterExecutionId);
+    }
+    if (observation.adapterExecutionId !== handle.adapterExecutionId) {
+      throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "reattached observation changed exact execution identity");
     }
     const attemptsDirectory = join(this.#runDirectory, "reports", "attempts");
     const observationPath = join(attemptsDirectory, `${attempt.attemptId}.json`);
@@ -785,7 +911,7 @@ export class AutopilotEngine {
     }
     await assertWritablePaths(lease.worktreePath, after.changedPaths, item.writableRoots);
     await this.#record({
-      ...eventBase(stale ? "Late supervised adapter result quarantined" : "Supervised adapter execution reattached and observed", "reconciler"),
+      ...eventBase(stale ? "Late supervised adapter result quarantined" : "Exact supervised adapter execution reattached and observed", "reconciler"),
       type: "ATTEMPT_FINISHED",
       itemId: item.id,
       attemptId: attempt.attemptId,
@@ -838,7 +964,15 @@ export class AutopilotEngine {
         continue;
       }
       if (itemProjection.state === "ACTIVE") {
-        const reattachedStatus = await this.#reattachInterruptedExecution(item, attempt);
+        let reattachedStatus: ExecutionObservation["status"] | "stale" | false;
+        try {
+          reattachedStatus = await this.#reattachInterruptedExecution(item, attempt);
+        } catch (error) {
+          if (!(error instanceof AutopilotError) || error.code !== "EXECUTION_STATE_UNKNOWN") {
+            throw error;
+          }
+          reattachedStatus = false;
+        }
         if (reattachedStatus !== false) {
           if (reattachedStatus === "cancelled" && this.#projection.pauseRequestId !== undefined) {
             await this.#record({
@@ -1557,6 +1691,7 @@ export class AutopilotEngine {
     const handle = await this.#adapter.launch({
       protocolVersion: 1,
       role: "review",
+      executionAssurance: this.#executionAssurance("review"),
       runId: this.#charter.runId,
       itemId: item.id,
       attemptId: `${attemptId}-review-${reviewKey}`,
@@ -1581,6 +1716,7 @@ export class AutopilotEngine {
       adapterObservation = await this.#adapter.observe(handle);
     } finally {
       this.#activeHandles.delete(handle.adapterExecutionId);
+      this.#cancellationRequestedHandleIds.delete(handle.adapterExecutionId);
     }
     const reviewObservationPath = join(attemptsDirectory, `${attemptId}.review-${reviewKey}-${contextHash.slice(0, 16)}.json`);
     await writeJsonAtomic(reviewObservationPath, adapterObservation);
@@ -2211,6 +2347,7 @@ export class AutopilotEngine {
       contextHash,
       contextJournalSequence: context.sourceJournalSequence,
       executionSupervised: this.#executionSupervisionEnabled(),
+      executionAssurance: this.#executionAssurance("implementation"),
       deadline,
       evidence: [contextPath],
       idempotencyKey: `attempt:${this.#charter.runId}:${item.id}:${lease.epoch}`,
@@ -2225,29 +2362,52 @@ export class AutopilotEngine {
     if (await this.#blockItemForStop(item, attemptId)) {
       return;
     }
-    const handle = await this.#adapter.launch(this.#implementationRequest(
-      item,
-      attemptId,
-      worktreePath,
-      context,
-      contextHash,
-      deadline,
-    ));
+    const assurance = this.#executionAssurance("implementation");
+    let handle: ExecutionHandle;
+    try {
+      handle = await this.#adapter.launch(this.#implementationRequest(
+        item,
+        attemptId,
+        worktreePath,
+        context,
+        contextHash,
+        deadline,
+      ));
+    } catch (error) {
+      throw new AutopilotError(
+        "EXECUTION_STATE_UNKNOWN",
+        "execution admission did not return an exact durable subject; launch retry is prohibited",
+        {
+          cause: error instanceof Error ? error.message : String(error),
+          owner: assurance.owner,
+          admission: assurance.admission,
+        },
+      );
+    }
     this.#activeHandles.set(handle.adapterExecutionId, handle);
     this.#implementationHandleIds.add(handle.adapterExecutionId);
+    await this.#recordExecutionAdmission(item.id, attemptId, handle);
     if (this.#stopRequested || this.#pauseRequested) {
-      try {
-        await this.#adapter.cancel(handle);
-      } catch {
-        // Observation still owns bounded process cleanup.
-      }
+      await this.#requestHandleCancellation(handle);
     }
     let observation: ExecutionObservation;
     try {
-      observation = await this.#adapter.observe(handle);
+      try {
+        observation = await this.#adapter.observe(handle);
+      } catch (error) {
+        throw new AutopilotError(
+          "EXECUTION_STATE_UNKNOWN",
+          "admitted execution did not produce an authoritative terminal observation",
+          { cause: error instanceof Error ? error.message : String(error) },
+        );
+      }
     } finally {
       this.#activeHandles.delete(handle.adapterExecutionId);
       this.#implementationHandleIds.delete(handle.adapterExecutionId);
+      this.#cancellationRequestedHandleIds.delete(handle.adapterExecutionId);
+    }
+    if (observation.adapterExecutionId !== handle.adapterExecutionId) {
+      throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "adapter observation changed exact execution identity");
     }
     const observationPath = join(attemptsDirectory, `${attemptId}.json`);
     await writeJsonAtomic(observationPath, observation);
@@ -2486,8 +2646,14 @@ export class AutopilotEngine {
     try {
       this.#manifest = await this.#adapter.describe();
     } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (this.#hasUnobservedExecution()
+        && await this.#classifyUnobservedExecutionUnknown(`Exact adapter continuity could not be restored: ${reason}`)) {
+        await this.#waitForUnknownExecution();
+        return await this.#writeReport();
+      }
       await this.#record({
-        ...eventBase(error instanceof Error ? error.message : String(error)),
+        ...eventBase(reason),
         type: "RUN_STOPPED",
         errorCode: error instanceof AutopilotError ? error.code : "ADAPTER_PREFLIGHT_FAILED",
         remediation: "Install or configure the selected harness adapter, then start a successor run.",
@@ -2544,6 +2710,9 @@ export class AutopilotEngine {
 
     while (this.#projection.state === "RUNNING") {
       if (await this.#stopRunIfRequested()) {
+        break;
+      }
+      if (await this.#waitForUnknownExecution()) {
         break;
       }
       if (await this.#settlePauseIfRequested()) {

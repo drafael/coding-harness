@@ -1,3 +1,4 @@
+import type { ExecutionAssurance } from "./adapter-protocol.js";
 import type { RunCharter } from "./charter.js";
 import { type PredicateEvidenceEntry } from "./evidence-map.js";
 import type { JournalRecord } from "./journal.js";
@@ -16,6 +17,16 @@ export interface RunReport {
         readonly blocker?: string;
         readonly attempts: number;
         readonly chargedAttempts: number;
+        readonly execution?: {
+            readonly assurance?: ExecutionAssurance;
+            readonly adapterName?: string;
+            readonly adapterVersion?: string;
+            readonly harnessVersion?: string;
+            readonly adapterExecutionId?: string;
+            readonly backendId?: string;
+            readonly subjectId?: string;
+            readonly harnessInstanceId?: string;
+        };
     }[];
     readonly restacks: readonly {
         readonly itemId: string;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseExecutionAssurance, type ExecutionAssurance } from "./adapter-protocol.js";
 import { AutopilotError } from "./errors.js";
 import { expectBoolean, expectInteger, expectLiteral, expectRecord, expectString, expectStringArray } from "./json.js";
 
@@ -67,8 +68,21 @@ export type LifecycleEvent =
       readonly contextHash?: string;
       readonly contextJournalSequence?: number;
       readonly executionSupervised?: boolean;
+      readonly executionAssurance?: ExecutionAssurance;
       readonly deadline: string;
       readonly idempotencyKey: string;
+    })
+  | (EventBase & {
+      readonly type: "ATTEMPT_EXECUTION_ADMITTED";
+      readonly itemId: string;
+      readonly attemptId: string;
+      readonly adapterName: string;
+      readonly adapterVersion: string;
+      readonly harnessVersion: string;
+      readonly adapterExecutionId: string;
+      readonly backendId: string;
+      readonly subjectId: string;
+      readonly harnessInstanceId?: string;
     })
   | (EventBase & {
       readonly type: "ATTEMPT_FINISHED";
@@ -168,7 +182,7 @@ export type LifecycleEvent =
 const EVENT_TYPES = [
   "CHARTER_COMPILED", "RECONCILIATION_STARTED", "RECONCILIATION_COMPLETED", "RUN_PAUSE_REQUESTED", "RUN_WAITING", "RUN_WOKEN",
   "RUN_RESUMED", "RUN_VERIFYING", "RUN_SUCCEEDED", "RUN_STOPPED", "WRAP_UP_STARTED", "WORKTREE_ADOPTED", "ITEM_READY",
-  "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED", "ITEM_VERIFIED", "ITEM_SATISFIED",
+  "ATTEMPT_STARTED", "ATTEMPT_EXECUTION_ADMITTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED", "ITEM_VERIFIED", "ITEM_SATISFIED",
   "ITEM_BLOCKED", "ITEM_ABANDONED", "RESTACK_DESCENDANT_STARTED", "RESTACK_DESCENDANT_TREE_PREPARED",
   "RESTACK_DESCENDANT_VERIFIED", "RESTACK_PROVIDER_HEAD_CONFIRMED", "RESTACK_DESCENDANT_SATISFIED",
   "RESTACK_DESCENDANT_BLOCKED", "EFFECT_INTENDED",
@@ -344,8 +358,27 @@ export function parseLifecycleEvent(value: unknown): LifecycleEvent {
         ...(object.executionSupervised === undefined ? {} : {
           executionSupervised: expectBoolean(object.executionSupervised, "event.executionSupervised"),
         }),
+        ...(object.executionAssurance === undefined ? {} : {
+          executionAssurance: parseExecutionAssurance(object.executionAssurance, "event.executionAssurance"),
+        }),
         deadline: expectString(object.deadline, "event.deadline"),
         idempotencyKey: expectString(object.idempotencyKey, "event.idempotencyKey"),
+      };
+    case "ATTEMPT_EXECUTION_ADMITTED":
+      return {
+        ...base,
+        type,
+        itemId: expectString(object.itemId, "event.itemId"),
+        attemptId: expectString(object.attemptId, "event.attemptId"),
+        adapterName: expectString(object.adapterName, "event.adapterName"),
+        adapterVersion: expectString(object.adapterVersion, "event.adapterVersion"),
+        harnessVersion: expectString(object.harnessVersion, "event.harnessVersion"),
+        adapterExecutionId: expectString(object.adapterExecutionId, "event.adapterExecutionId"),
+        backendId: expectString(object.backendId, "event.backendId"),
+        subjectId: expectString(object.subjectId, "event.subjectId"),
+        ...(object.harnessInstanceId === undefined ? {} : {
+          harnessInstanceId: expectString(object.harnessInstanceId, "event.harnessInstanceId"),
+        }),
       };
     case "ATTEMPT_FINISHED":
       return {

@@ -81,6 +81,8 @@ export async function writeReports(runDirectory, charter, projection, records, a
         state: projection.state,
         items: ordinaryWork.map((item) => {
             const itemProjection = projection.items[item.id];
+            const lastAttempt = itemProjection?.attempts.at(-1);
+            const execution = lastAttempt?.execution;
             return {
                 itemId: item.id,
                 state: itemProjection?.state ?? "PENDING",
@@ -89,6 +91,12 @@ export async function writeReports(runDirectory, charter, projection, records, a
                 chargedAttempts: consumedAttempts(itemProjection),
                 ...(itemProjection?.subject === undefined ? {} : { subject: itemProjection.subject }),
                 ...(itemProjection?.blocker === undefined ? {} : { blocker: itemProjection.blocker }),
+                ...(lastAttempt?.executionAssurance === undefined && execution === undefined ? {} : {
+                    execution: {
+                        ...(lastAttempt?.executionAssurance === undefined ? {} : { assurance: lastAttempt.executionAssurance }),
+                        ...(execution === undefined ? {} : execution),
+                    },
+                }),
             };
         }),
         restacks: Object.values(projection.restacks).map((restack) => ({

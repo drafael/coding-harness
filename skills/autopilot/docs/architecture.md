@@ -283,7 +283,19 @@ interface HarnessPort {
 }
 ```
 
-The capability manifest describes unattended execution, useful concurrency, event streaming, cancellation, restart reattachment, tool restrictions, and assurance level.
+The capability manifest describes unattended execution, useful concurrency, event streaming, cancellation, tool restrictions, and assurance level. Its versioned execution-assurance profiles select implementation and review behavior independently:
+
+```ts
+interface ExecutionAssurance {
+  schemaVersion: 1;
+  owner: "runtime" | "harness";
+  continuity: "session" | "same-harness-instance" | "durable-subject";
+  terminality: "cooperative" | "process-supervised";
+  admission: "single-shot" | "idempotent";
+}
+```
+
+`restartReattachment` remains a protocol-v1 compatibility field for older manifests and journals. New attempts persist their selected assurance before launch in `ATTEMPT_STARTED`, then persist the exact adapter, backend, and subject identity in `ATTEMPT_EXECUTION_ADMITTED`. A lost single-shot admission or cooperative continuity boundary becomes `EXECUTION_STATE_UNKNOWN`; the engine never converts a missing reattachment into a new launch.
 
 Adapters return observations. They never write the journal or choose lifecycle transitions. On POSIX hosts, built-in CLI implementation executions run beneath a detached, attempt-scoped supervisor that owns the harness pipes and bounded output/activity capture. Before harness launch, a separately detached watchdog durably confirms readiness. The harness then joins the supervisor's known process group. All terminal publication is a watchdog-owned handshake: the supervisor publishes a bounded completion candidate, the watchdog terminates and confirms the group is quiescent, and only then publishes the durable result and terminal status. This also covers supervisor exit before child-identity publication. The reviewed Windows x64 Job Object helper will not be packaged because a custom process-management executable creates antivirus, application-reputation, architecture, and provenance risk. The source and runtime path remain temporarily for ordered removal, but the artifact-producing workflow is gone and Windows continues to report restart reattachment as unsupported. Windows currently uses `taskkill` only for the existing session-scoped direct-execution fallback. The approved replacement is version-pinned cooperative harness execution: only an exact terminal response from the uninterrupted harness instance may proceed to repository verification. Harness loss becomes `EXECUTION_STATE_UNKNOWN`, launches no replacement, and requires operator recovery. This boundary does not prove process-tree quiescence. The supervisor writes only fenced operational artifacts under `runs/<run-id>/executions/<execution-id>/`; it cannot write `events.jsonl`, receipts, leases, snapshots, or Git state. On supported POSIX attempts, a fresh coordinator reconstructs the exact request from the journaled attempt and immutable context, reattaches to running or terminal supervisor artifacts, and waits for terminal process-tree evidence before allowing a replacement attempt. Review executions remain session-scoped.
 

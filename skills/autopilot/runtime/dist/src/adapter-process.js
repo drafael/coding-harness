@@ -203,6 +203,31 @@ export class CliHarnessAdapter {
             eventStreaming: this.#configuration.expectsJsonLines,
             cancellation: this.#configuration.cancellation,
             restartReattachment: process.platform !== "win32" || windowsHelperSha256 !== undefined,
+            executionAssurance: {
+                schemaVersion: 1,
+                implementation: process.platform !== "win32" || windowsHelperSha256 !== undefined
+                    ? {
+                        schemaVersion: 1,
+                        owner: "runtime",
+                        continuity: "durable-subject",
+                        terminality: "process-supervised",
+                        admission: "idempotent",
+                    }
+                    : {
+                        schemaVersion: 1,
+                        owner: "runtime",
+                        continuity: "session",
+                        terminality: "cooperative",
+                        admission: "single-shot",
+                    },
+                review: {
+                    schemaVersion: 1,
+                    owner: "runtime",
+                    continuity: "session",
+                    terminality: "cooperative",
+                    admission: "single-shot",
+                },
+            },
             restrictions: this.#configuration.assurance,
             limitations: [
                 ...this.#configuration.limitations,
@@ -266,6 +291,7 @@ export class CliHarnessAdapter {
                 protocolVersion: 1,
                 adapterExecutionId: handle.executionId,
                 startedAt: handle.startedAt,
+                subject: { schemaVersion: 1, backendId: "process-supervisor", subjectId: handle.executionId },
                 supervisor: { schemaVersion: 1, directory: handle.directory, requestHash: handle.requestHash },
             };
         }
@@ -301,7 +327,12 @@ export class CliHarnessAdapter {
         }));
         this.#executions.set(adapterExecutionId, { controller, promise });
         this.#requests.set(adapterExecutionId, request);
-        return { protocolVersion: 1, adapterExecutionId, startedAt };
+        return {
+            protocolVersion: 1,
+            adapterExecutionId,
+            startedAt,
+            subject: { schemaVersion: 1, backendId: "direct-process", subjectId: adapterExecutionId },
+        };
     }
     async reattach(request) {
         const environment = adapterEnvironment(request);
@@ -318,6 +349,7 @@ export class CliHarnessAdapter {
             protocolVersion: 1,
             adapterExecutionId: handle.executionId,
             startedAt: handle.startedAt,
+            subject: { schemaVersion: 1, backendId: "process-supervisor", subjectId: handle.executionId },
             supervisor: { schemaVersion: 1, directory: handle.directory, requestHash: handle.requestHash },
         };
     }
