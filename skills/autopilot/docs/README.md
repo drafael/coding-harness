@@ -18,6 +18,7 @@ The [main README](../README.md) is the short path for starting an unattended run
 - [Implementation plan](implementation-plan.md): original phased implementation, acceptance evidence, and unverified integrations.
 - [Continuity and evidence plan](2026-08-30-continuity-evidence-implementation-plan.md): attempt context, predicate evidence, independent review, and blocked/deferred supervision work.
 - [Cooperative harness execution plan](2026-08-31-cooperative-harness-execution-plan.md): approved binary-free Windows execution assurance, unknown-state recovery, Pi integration, and delivery sequence.
+- [OpenCode server execution evaluation](2026-08-31-opencode-server-evaluation.md): version-pinned protocol evidence, controlled probes, GO decision, assurance boundary, and implementation acceptance criteria.
 - [Restack successor lifecycle design](restack-successor-design.md): explicit authority, verification, Git mutation, and recovery contract for successful-stack restacking.
 - [Runtime CLI reference](runtime-cli.md): maintainer automation, state overrides, journal repair, and build commands.
 
