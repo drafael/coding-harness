@@ -1,3 +1,4 @@
+import type { ExecutionAssurance } from "./adapter-protocol.js";
 import type { RunCharter } from "./charter.js";
 import { AutopilotError } from "./errors.js";
 import type { LifecycleEvent, WaitingDetails } from "./events.js";
@@ -19,6 +20,16 @@ export interface AttemptProjection {
   readonly contextHash?: string;
   readonly contextJournalSequence?: number;
   readonly executionSupervised?: boolean;
+  readonly executionAssurance?: ExecutionAssurance;
+  readonly execution?: {
+    readonly adapterName: string;
+    readonly adapterVersion: string;
+    readonly harnessVersion: string;
+    readonly adapterExecutionId: string;
+    readonly backendId: string;
+    readonly subjectId: string;
+    readonly harnessInstanceId?: string;
+  };
   readonly deadline: string;
   readonly idempotencyKey: string;
   readonly outcome?: "completed" | "failed" | "cancelled" | "timed-out" | "stale";
@@ -155,8 +166,12 @@ function assertRunTransition(current: RunState, event: LifecycleEvent): RunState
       if (event.waiting?.kind === "operator-pause") {
         return "WAITING";
       }
-      if (current !== "RUNNING" && current !== "WAITING") {
-        throw new AutopilotError("ILLEGAL_TRANSITION", `${event.type} requires RUNNING or WAITING, received ${current}`);
+      if (current !== "RUNNING" && current !== "WAITING"
+        && !(current === "RECONCILING" && event.waiting?.kind === "execution-unknown")) {
+        throw new AutopilotError(
+          "ILLEGAL_TRANSITION",
+          `${event.type} requires RUNNING or WAITING, or RECONCILING for an unknown execution; received ${current}`,
+        );
       }
       return "WAITING";
     case "RUN_WOKEN":
@@ -221,11 +236,38 @@ function transitionItem(item: ItemProjection, event: LifecycleEvent): ItemProjec
             ...(event.contextHash === undefined ? {} : { contextHash: event.contextHash }),
             ...(event.contextJournalSequence === undefined ? {} : { contextJournalSequence: event.contextJournalSequence }),
             ...(event.executionSupervised === undefined ? {} : { executionSupervised: event.executionSupervised }),
+            ...(event.executionAssurance === undefined ? {} : { executionAssurance: event.executionAssurance }),
             deadline: event.deadline,
             idempotencyKey: event.idempotencyKey,
           },
         ],
       };
+    case "ATTEMPT_EXECUTION_ADMITTED": {
+      if (item.state !== "ACTIVE") {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `ATTEMPT_EXECUTION_ADMITTED cannot follow ${item.state}`);
+      }
+      const currentAttempt = item.attempts.at(-1);
+      if (currentAttempt?.attemptId !== event.attemptId || currentAttempt.execution !== undefined) {
+        throw new AutopilotError("ILLEGAL_TRANSITION", `execution admission is stale or duplicated for ${item.itemId}`);
+      }
+      return {
+        ...item,
+        attempts: item.attempts.map((attempt) => attempt.attemptId === event.attemptId
+          ? {
+              ...attempt,
+              execution: {
+                adapterName: event.adapterName,
+                adapterVersion: event.adapterVersion,
+                harnessVersion: event.harnessVersion,
+                adapterExecutionId: event.adapterExecutionId,
+                backendId: event.backendId,
+                subjectId: event.subjectId,
+                ...(event.harnessInstanceId === undefined ? {} : { harnessInstanceId: event.harnessInstanceId }),
+              },
+            }
+          : attempt),
+      };
+    }
     case "ATTEMPT_FINISHED": {
       if (item.state !== "ACTIVE") {
         throw new AutopilotError("ILLEGAL_TRANSITION", `ATTEMPT_FINISHED cannot follow ${item.state}`);
@@ -449,7 +491,7 @@ export function reduce(projection: RunProjection, event: LifecycleEvent): RunPro
   const nextState = assertRunTransition(projection.state, event);
   let items = projection.items;
   const ordinaryItemLifecycle = [
-    "DECISION_RECORDED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED",
+    "DECISION_RECORDED", "ITEM_READY", "ATTEMPT_STARTED", "ATTEMPT_EXECUTION_ADMITTED", "ATTEMPT_FINISHED", "ITEM_VERIFYING", "ATTEMPT_PAUSED",
     "ITEM_VERIFIED", "ITEM_SATISFIED", "ITEM_BLOCKED", "ITEM_ABANDONED",
   ];
   if (event.itemId !== undefined && projection.restacks[event.itemId] !== undefined

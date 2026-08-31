@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot implementation plan
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation reattachment and controlled-fixture sealed restack successors are packaged. The reviewed Windows x64 Job Object artifact will not be packaged; Windows restart reattachment remains disabled while cooperative harness execution is implemented.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation reattachment, versioned per-mode execution assurance, exact admitted-subject journaling, and controlled-fixture sealed restack successors are packaged. The reviewed Windows x64 Job Object artifact will not be packaged; Windows restart reattachment remains disabled while operator recovery and cooperative harness integration are implemented.
 - **Date:** 2026-08-22
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Autopilot architecture](architecture.md)

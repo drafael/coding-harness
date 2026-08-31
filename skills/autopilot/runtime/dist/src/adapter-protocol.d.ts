@@ -1,4 +1,16 @@
 import { type AssuranceLevel, type CapabilityGrant, type GrantFamily, type Predicate, type VerificationGate } from "./charter.js";
+export interface ExecutionAssurance {
+    readonly schemaVersion: 1;
+    readonly owner: "runtime" | "harness";
+    readonly continuity: "session" | "same-harness-instance" | "durable-subject";
+    readonly terminality: "cooperative" | "process-supervised";
+    readonly admission: "single-shot" | "idempotent";
+}
+export interface ExecutionAssuranceProfiles {
+    readonly schemaVersion: 1;
+    readonly implementation: ExecutionAssurance;
+    readonly review: ExecutionAssurance;
+}
 export interface CapabilityManifest {
     readonly protocolVersion: 1;
     readonly adapterName: string;
@@ -11,6 +23,7 @@ export interface CapabilityManifest {
     readonly eventStreaming: boolean;
     readonly cancellation: boolean;
     readonly restartReattachment: boolean;
+    readonly executionAssurance?: ExecutionAssuranceProfiles;
     readonly restrictions: "enforced" | "cooperative";
     readonly limitations: readonly string[];
 }
@@ -81,6 +94,7 @@ export interface ReviewResult {
 export interface ExecutionRequest {
     readonly protocolVersion: 1;
     readonly role: "implementation" | "review";
+    readonly executionAssurance?: ExecutionAssurance;
     readonly runId: string;
     readonly itemId: string;
     readonly attemptId: string;
@@ -98,10 +112,17 @@ export interface ExecutionRequest {
     readonly maximumOutputBytes: number;
     readonly supervisionDirectory?: string;
 }
+export interface ExecutionSubject {
+    readonly schemaVersion: 1;
+    readonly backendId: string;
+    readonly subjectId: string;
+    readonly harnessInstanceId?: string;
+}
 export interface ExecutionHandle {
     readonly protocolVersion: 1;
     readonly adapterExecutionId: string;
     readonly startedAt: string;
+    readonly subject?: ExecutionSubject;
     readonly supervisor?: {
         readonly schemaVersion: 1;
         readonly directory: string;
@@ -130,6 +151,8 @@ export interface HarnessPort {
     observe(handle: ExecutionHandle): Promise<ExecutionObservation>;
     cancel(handle: ExecutionHandle): Promise<CancelResult>;
 }
+export declare function executionAssuranceFor(manifest: CapabilityManifest, role: ExecutionRequest["role"]): ExecutionAssurance;
+export declare function parseExecutionAssurance(value: unknown, label: string): ExecutionAssurance;
 export type AdapterMessage = {
     readonly protocolVersion: 1;
     readonly type: "capabilities";

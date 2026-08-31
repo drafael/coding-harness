@@ -1,3 +1,4 @@
+import type { ExecutionAssurance } from "./adapter-protocol.js";
 import type { RunCharter } from "./charter.js";
 import type { LifecycleEvent, WaitingDetails } from "./events.js";
 export type RunState = "COMPILED" | "RECONCILING" | "RUNNING" | "WAITING" | "VERIFYING" | "SUCCEEDED" | "STOPPED";
@@ -16,6 +17,16 @@ export interface AttemptProjection {
     readonly contextHash?: string;
     readonly contextJournalSequence?: number;
     readonly executionSupervised?: boolean;
+    readonly executionAssurance?: ExecutionAssurance;
+    readonly execution?: {
+        readonly adapterName: string;
+        readonly adapterVersion: string;
+        readonly harnessVersion: string;
+        readonly adapterExecutionId: string;
+        readonly backendId: string;
+        readonly subjectId: string;
+        readonly harnessInstanceId?: string;
+    };
     readonly deadline: string;
     readonly idempotencyKey: string;
     readonly outcome?: "completed" | "failed" | "cancelled" | "timed-out" | "stale";

@@ -9,6 +9,20 @@ import {
 import { AutopilotError } from "./errors.js";
 import { expectBoolean, expectInteger, expectLiteral, expectRecord, expectString, expectStringArray } from "./json.js";
 
+export interface ExecutionAssurance {
+  readonly schemaVersion: 1;
+  readonly owner: "runtime" | "harness";
+  readonly continuity: "session" | "same-harness-instance" | "durable-subject";
+  readonly terminality: "cooperative" | "process-supervised";
+  readonly admission: "single-shot" | "idempotent";
+}
+
+export interface ExecutionAssuranceProfiles {
+  readonly schemaVersion: 1;
+  readonly implementation: ExecutionAssurance;
+  readonly review: ExecutionAssurance;
+}
+
 export interface CapabilityManifest {
   readonly protocolVersion: 1;
   readonly adapterName: string;
@@ -21,6 +35,7 @@ export interface CapabilityManifest {
   readonly eventStreaming: boolean;
   readonly cancellation: boolean;
   readonly restartReattachment: boolean;
+  readonly executionAssurance?: ExecutionAssuranceProfiles;
   readonly restrictions: "enforced" | "cooperative";
   readonly limitations: readonly string[];
 }
@@ -91,6 +106,7 @@ export interface ReviewResult {
 export interface ExecutionRequest {
   readonly protocolVersion: 1;
   readonly role: "implementation" | "review";
+  readonly executionAssurance?: ExecutionAssurance;
   readonly runId: string;
   readonly itemId: string;
   readonly attemptId: string;
@@ -109,10 +125,18 @@ export interface ExecutionRequest {
   readonly supervisionDirectory?: string;
 }
 
+export interface ExecutionSubject {
+  readonly schemaVersion: 1;
+  readonly backendId: string;
+  readonly subjectId: string;
+  readonly harnessInstanceId?: string;
+}
+
 export interface ExecutionHandle {
   readonly protocolVersion: 1;
   readonly adapterExecutionId: string;
   readonly startedAt: string;
+  readonly subject?: ExecutionSubject;
   readonly supervisor?: {
     readonly schemaVersion: 1;
     readonly directory: string;
@@ -143,6 +167,64 @@ export interface HarnessPort {
   reattach?(request: ExecutionRequest): Promise<ExecutionHandle | undefined>;
   observe(handle: ExecutionHandle): Promise<ExecutionObservation>;
   cancel(handle: ExecutionHandle): Promise<CancelResult>;
+}
+
+const SESSION_COOPERATIVE_ASSURANCE: ExecutionAssurance = {
+  schemaVersion: 1,
+  owner: "runtime",
+  continuity: "session",
+  terminality: "cooperative",
+  admission: "single-shot",
+};
+
+function legacyExecutionAssurance(manifest: Pick<CapabilityManifest, "restartReattachment">): ExecutionAssuranceProfiles {
+  return {
+    schemaVersion: 1,
+    implementation: manifest.restartReattachment
+      ? {
+          schemaVersion: 1,
+          owner: "runtime",
+          continuity: "durable-subject",
+          terminality: "process-supervised",
+          admission: "idempotent",
+        }
+      : SESSION_COOPERATIVE_ASSURANCE,
+    review: SESSION_COOPERATIVE_ASSURANCE,
+  };
+}
+
+export function executionAssuranceFor(manifest: CapabilityManifest, role: ExecutionRequest["role"]): ExecutionAssurance {
+  return manifest.executionAssurance?.[role] ?? legacyExecutionAssurance(manifest)[role];
+}
+
+export function parseExecutionAssurance(value: unknown, label: string): ExecutionAssurance {
+  const object = expectRecord(value, label);
+  if (object.schemaVersion !== 1) {
+    throw new AutopilotError("ADAPTER_UNSUPPORTED", `${label} schema version is not supported`);
+  }
+  return {
+    schemaVersion: 1,
+    owner: expectLiteral(object.owner, ["runtime", "harness"], `${label}.owner`),
+    continuity: expectLiteral(
+      object.continuity,
+      ["session", "same-harness-instance", "durable-subject"],
+      `${label}.continuity`,
+    ),
+    terminality: expectLiteral(object.terminality, ["cooperative", "process-supervised"], `${label}.terminality`),
+    admission: expectLiteral(object.admission, ["single-shot", "idempotent"], `${label}.admission`),
+  };
+}
+
+function parseExecutionAssuranceProfiles(value: unknown): ExecutionAssuranceProfiles {
+  const object = expectRecord(value, "manifest.executionAssurance");
+  if (object.schemaVersion !== 1) {
+    throw new AutopilotError("ADAPTER_UNSUPPORTED", "execution assurance schema version is not supported");
+  }
+  return {
+    schemaVersion: 1,
+    implementation: parseExecutionAssurance(object.implementation, "manifest.executionAssurance.implementation"),
+    review: parseExecutionAssurance(object.review, "manifest.executionAssurance.review"),
+  };
 }
 
 export type AdapterMessage =
@@ -186,6 +268,9 @@ export function parseAdapterMessage(line: string, maximumBytes: number): Adapter
         eventStreaming: expectBoolean(manifest.eventStreaming, "manifest.eventStreaming"),
         cancellation: expectBoolean(manifest.cancellation, "manifest.cancellation"),
         restartReattachment: expectBoolean(manifest.restartReattachment, "manifest.restartReattachment"),
+        ...(manifest.executionAssurance === undefined
+          ? {}
+          : { executionAssurance: parseExecutionAssuranceProfiles(manifest.executionAssurance) }),
         restrictions: expectLiteral(manifest.restrictions, ["cooperative", "enforced"], "manifest.restrictions"),
         limitations: expectStringArray(manifest.limitations, "manifest.limitations"),
       },

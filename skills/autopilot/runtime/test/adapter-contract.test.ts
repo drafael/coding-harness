@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
-import { parseAdapterMessage, type ExecutionRequest } from "../src/adapter-protocol.js";
+import { executionAssuranceFor, parseAdapterMessage, type ExecutionRequest } from "../src/adapter-protocol.js";
 import { CliHarnessAdapter, parseReviewResult } from "../src/adapter-process.js";
 import { boundUtf8, runProcess, terminateProcessTree } from "../src/process.js";
 import { windowsRestartReattachmentAvailable } from "../src/windows-job.js";
@@ -366,7 +366,7 @@ test("review result parser accepts one structured marker and rejects contradicto
   assert.equal(contradictory, undefined);
 });
 
-test("adapter protocol parses a complete capability manifest", () => {
+test("adapter protocol derives execution assurance for a legacy capability manifest", () => {
   const message = parseAdapterMessage(JSON.stringify({
     protocolVersion: 1,
     type: "capabilities",
@@ -388,4 +388,57 @@ test("adapter protocol parses a complete capability manifest", () => {
   }), 4096);
 
   assert.equal(message.type, "capabilities");
+  assert.ok(message.type === "capabilities");
+  assert.deepEqual(executionAssuranceFor(message.manifest, "implementation"), {
+    schemaVersion: 1,
+    owner: "runtime",
+    continuity: "session",
+    terminality: "cooperative",
+    admission: "single-shot",
+  });
+});
+
+test("adapter protocol parses separate implementation and review assurance", () => {
+  const message = parseAdapterMessage(JSON.stringify({
+    protocolVersion: 1,
+    type: "capabilities",
+    manifest: {
+      protocolVersion: 1,
+      adapterName: "fake",
+      adapterVersion: "2",
+      harnessVersion: "1",
+      families: ["files.read"],
+      assurance: "cooperative",
+      unattended: true,
+      maxConcurrency: 1,
+      eventStreaming: true,
+      cancellation: true,
+      restartReattachment: false,
+      executionAssurance: {
+        schemaVersion: 1,
+        implementation: {
+          schemaVersion: 1,
+          owner: "harness",
+          continuity: "same-harness-instance",
+          terminality: "cooperative",
+          admission: "single-shot",
+        },
+        review: {
+          schemaVersion: 1,
+          owner: "runtime",
+          continuity: "session",
+          terminality: "cooperative",
+          admission: "single-shot",
+        },
+      },
+      restrictions: "cooperative",
+      limitations: [],
+    },
+  }), 4096);
+
+  assert.equal(message.type, "capabilities");
+  assert.ok(message.type === "capabilities");
+  assert.equal(executionAssuranceFor(message.manifest, "implementation").owner, "harness");
+  assert.equal(executionAssuranceFor(message.manifest, "implementation").continuity, "same-harness-instance");
+  assert.equal(executionAssuranceFor(message.manifest, "review").continuity, "session");
 });

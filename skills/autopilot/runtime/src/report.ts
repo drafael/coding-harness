@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ExecutionAssurance } from "./adapter-protocol.js";
 import type { RunCharter } from "./charter.js";
 import { projectPredicateEvidence, type PredicateEvidenceEntry } from "./evidence-map.js";
 import type { JournalRecord } from "./journal.js";
@@ -21,6 +22,16 @@ export interface RunReport {
     readonly blocker?: string;
     readonly attempts: number;
     readonly chargedAttempts: number;
+    readonly execution?: {
+      readonly assurance?: ExecutionAssurance;
+      readonly adapterName?: string;
+      readonly adapterVersion?: string;
+      readonly harnessVersion?: string;
+      readonly adapterExecutionId?: string;
+      readonly backendId?: string;
+      readonly subjectId?: string;
+      readonly harnessInstanceId?: string;
+    };
   }[];
   readonly restacks: readonly {
     readonly itemId: string;
@@ -167,6 +178,8 @@ export async function writeReports(
     state: projection.state,
     items: ordinaryWork.map((item) => {
       const itemProjection = projection.items[item.id];
+      const lastAttempt = itemProjection?.attempts.at(-1);
+      const execution = lastAttempt?.execution;
       return {
         itemId: item.id,
         state: itemProjection?.state ?? "PENDING",
@@ -175,6 +188,12 @@ export async function writeReports(
         chargedAttempts: consumedAttempts(itemProjection),
         ...(itemProjection?.subject === undefined ? {} : { subject: itemProjection.subject }),
         ...(itemProjection?.blocker === undefined ? {} : { blocker: itemProjection.blocker }),
+        ...(lastAttempt?.executionAssurance === undefined && execution === undefined ? {} : {
+          execution: {
+            ...(lastAttempt?.executionAssurance === undefined ? {} : { assurance: lastAttempt.executionAssurance }),
+            ...(execution === undefined ? {} : execution),
+          },
+        }),
       };
     }),
     restacks: Object.values(projection.restacks).map((restack) => ({

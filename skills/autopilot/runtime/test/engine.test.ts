@@ -43,13 +43,20 @@ async function waitForFile(path: string, timeoutMs = 5_000): Promise<void> {
 class BlockingAdapter implements HarnessPort {
   cancelCalls = 0;
   readonly launched: Promise<void>;
+  readonly observing: Promise<void>;
   #resolveLaunched: (() => void) | undefined;
+  #resolveObserving: (() => void) | undefined;
   #resolveObservation: ((observation: ExecutionObservation) => void) | undefined;
   #cancelledHandle: ExecutionHandle | undefined;
+  #cancellationFailuresRemaining: number;
 
-  constructor() {
+  constructor(cancellationFailures = 0) {
+    this.#cancellationFailuresRemaining = cancellationFailures;
     this.launched = new Promise((resolve) => {
       this.#resolveLaunched = resolve;
+    });
+    this.observing = new Promise((resolve) => {
+      this.#resolveObserving = resolve;
     });
   }
 
@@ -77,6 +84,7 @@ class BlockingAdapter implements HarnessPort {
   }
 
   async observe(handle: ExecutionHandle): Promise<ExecutionObservation> {
+    this.#resolveObserving?.();
     if (this.#cancelledHandle?.adapterExecutionId === handle.adapterExecutionId) {
       return this.#cancelledObservation(handle);
     }
@@ -100,6 +108,10 @@ class BlockingAdapter implements HarnessPort {
 
   async cancel(handle: ExecutionHandle): Promise<CancelResult> {
     this.cancelCalls += 1;
+    if (this.#cancellationFailuresRemaining > 0) {
+      this.#cancellationFailuresRemaining -= 1;
+      return { protocolVersion: 1, accepted: false };
+    }
     this.#cancelledHandle = handle;
     this.#resolveObservation?.(this.#cancelledObservation(handle));
     return { protocolVersion: 1, accepted: true };
@@ -178,7 +190,73 @@ class TrackingAdapter extends FakeAdapter {
   }
 }
 
+class CooperativeHarnessAdapter extends TrackingAdapter {
+  reattachments = 0;
+
+  override async describe(): Promise<CapabilityManifest> {
+    return {
+      ...await super.describe(),
+      adapterName: "cooperative-harness",
+      executionAssurance: {
+        schemaVersion: 1,
+        implementation: {
+          schemaVersion: 1,
+          owner: "harness",
+          continuity: "same-harness-instance",
+          terminality: "cooperative",
+          admission: "single-shot",
+        },
+        review: {
+          schemaVersion: 1,
+          owner: "runtime",
+          continuity: "session",
+          terminality: "cooperative",
+          admission: "single-shot",
+        },
+      },
+    };
+  }
+
+  override async launch(request: ExecutionRequest): Promise<ExecutionHandle> {
+    const handle = await super.launch(request);
+    return {
+      ...handle,
+      subject: {
+        schemaVersion: 1,
+        backendId: "cooperative-test",
+        subjectId: `subject-${request.attemptId}`,
+        harnessInstanceId: "harness-instance-1",
+      },
+    };
+  }
+
+  async reattach(_request: ExecutionRequest): Promise<ExecutionHandle | undefined> {
+    this.reattachments += 1;
+    return undefined;
+  }
+}
+
+class LostAdmissionAdapter extends CooperativeHarnessAdapter {
+  override async launch(_request: ExecutionRequest): Promise<ExecutionHandle> {
+    this.launches += 1;
+    throw new Error("connection lost after request emission");
+  }
+}
+
+class LostObservationAdapter extends CooperativeHarnessAdapter {
+  override async observe(_handle: ExecutionHandle): Promise<ExecutionObservation> {
+    throw new Error("harness connection lost before terminal response");
+  }
+}
+
+class FailingDescribeAdapter extends CooperativeHarnessAdapter {
+  override async describe(): Promise<CapabilityManifest> {
+    throw new Error("owning harness instance is unavailable");
+  }
+}
+
 class ReattachableAdapter extends TrackingAdapter {
+  cancelCalls = 0;
   reattachments = 0;
   readonly #reattachedId = "reattached-execution";
   readonly #reattachedStatus: ExecutionObservation["status"];
@@ -195,6 +273,11 @@ class ReattachableAdapter extends TrackingAdapter {
   async reattach(_request: ExecutionRequest): Promise<ExecutionHandle> {
     this.reattachments += 1;
     return { protocolVersion: 1, adapterExecutionId: this.#reattachedId, startedAt: new Date().toISOString() };
+  }
+
+  override async cancel(handle: ExecutionHandle): Promise<CancelResult> {
+    this.cancelCalls += 1;
+    return await super.cancel(handle);
   }
 
   override async observe(handle: ExecutionHandle): Promise<ExecutionObservation> {
@@ -376,6 +459,37 @@ test("engine cancellation stops active work before verification or runtime effec
   assert.equal(finalJournal.records.some(({ event }) => event.type === "EFFECT_INTENDED"), false);
 });
 
+test("engine retries cancellation on stop after a pause cancellation was not accepted", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit, "single", "run-cancel-retry"));
+  const stateRoot = await mkdtemp(join(tmpdir(), "autopilot-engine-cancel-retry-"));
+  const runDirectory = join(stateRoot, "runs", charter.runId);
+  await mkdir(join(runDirectory, "receipts"), { recursive: true });
+  await writeImmutableJson(join(runDirectory, "charter.json"), charter);
+  const journalPath = join(runDirectory, "events.jsonl");
+  await appendEvent(journalPath, { ...event("compiled"), type: "CHARTER_COMPILED" });
+  const journal = await readJournal(journalPath);
+  const adapter = new BlockingAdapter(1);
+  const engine = new AutopilotEngine({
+    stateRoot,
+    runDirectory,
+    charter,
+    adapter,
+    records: journal.records,
+    projection: rebuildProjection(charter, journal.records),
+  });
+
+  const running = engine.run();
+  await adapter.observing;
+  await engine.requestPause();
+  assert.equal(adapter.cancelCalls, 1);
+  await engine.requestStop();
+  const report = await running;
+
+  assert.equal(adapter.cancelCalls, 2);
+  assert.equal(report.state, "STOPPED");
+});
+
 test("engine pauses only after cancellation quiesces and resumes with an uncharged replacement attempt", async () => {
   const repository = await createRepository();
   const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit, "single", "run-pause-active"));
@@ -507,11 +621,31 @@ test("engine does not launch a replacement when interrupted execution quiescence
     expectedBaseCommit: observation.headCommit,
     contextHash,
     contextJournalSequence: context.sourceJournalSequence,
+    executionAssurance: {
+      schemaVersion: 1,
+      owner: "harness",
+      continuity: "same-harness-instance",
+      terminality: "cooperative",
+      admission: "single-shot",
+    },
     deadline: new Date(Date.now() + 30_000).toISOString(),
     idempotencyKey: "attempt:orphaned",
   });
+  await appendEvent(journalPath, {
+    ...event("cooperative subject admitted before harness loss"),
+    type: "ATTEMPT_EXECUTION_ADMITTED",
+    itemId: item.id,
+    attemptId,
+    adapterName: "cooperative-harness",
+    adapterVersion: "1",
+    harnessVersion: "1",
+    adapterExecutionId: "request-orphaned",
+    backendId: "cooperative-test",
+    subjectId: "subject-orphaned",
+    harnessInstanceId: "harness-instance-old",
+  });
   const journal = await readJournal(journalPath);
-  const adapter = new TrackingAdapter();
+  const adapter = new CooperativeHarnessAdapter();
   const engine = new AutopilotEngine({
     stateRoot,
     runDirectory,
@@ -531,9 +665,102 @@ test("engine does not launch a replacement when interrupted execution quiescence
   assert.equal(report.items[0]?.attempts, 1);
   assert.equal(report.items[0]?.chargedAttempts, 1);
   assert.equal(adapter.launches, 0);
+  assert.equal(adapter.reattachments, 0);
   assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
     lifecycleEvent.type === "RUN_WAITING" && lifecycleEvent.waiting?.kind === "operator-pause"
   ), false);
+});
+
+test("engine treats lost single-shot admission as unknown without retrying launch", async () => {
+  const adapter = new LostAdmissionAdapter();
+  const { report, runDirectory } = await runMode("single", false, false, adapter);
+  const journal = await readJournal(join(runDirectory, "events.jsonl"));
+
+  assert.equal(report.state, "WAITING");
+  assert.equal(report.waiting?.kind, "execution-unknown");
+  assert.equal(report.items[0]?.blocker, "EXECUTION_STATE_UNKNOWN");
+  assert.equal(report.items[0]?.execution?.assurance?.continuity, "same-harness-instance");
+  assert.equal(adapter.launches, 1);
+  assert.equal(journal.records.filter(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_STARTED"
+  ).length, 1);
+  assert.equal(journal.records.some(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_EXECUTION_ADMITTED"
+  ), false);
+});
+
+test("engine treats a missing cooperative terminal response as unknown without replacement", async () => {
+  const adapter = new LostObservationAdapter();
+  const { report, runDirectory } = await runMode("single", false, false, adapter);
+  const journal = await readJournal(join(runDirectory, "events.jsonl"));
+
+  assert.equal(report.state, "WAITING");
+  assert.equal(report.waiting?.kind, "execution-unknown");
+  assert.equal(report.items[0]?.blocker, "EXECUTION_STATE_UNKNOWN");
+  assert.equal(report.items[0]?.execution?.subjectId?.startsWith("subject-"), true);
+  assert.equal(adapter.launches, 1);
+  assert.equal(journal.records.filter(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_STARTED"
+  ).length, 1);
+  assert.equal(journal.records.some(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_EXECUTION_ADMITTED"
+  ), true);
+  assert.equal(journal.records.some(({ event: lifecycleEvent }) =>
+    lifecycleEvent.type === "ATTEMPT_FINISHED"
+  ), false);
+});
+
+test("engine keeps an admitted execution unknown when adapter discovery fails on restart", async () => {
+  const repository = await createRepository();
+  const charter = sealCharter(proposedCharter(repository.root, repository.baseCommit, "single", "run-describe-loss"));
+  const item = charter.work[0];
+  assert.ok(item !== undefined);
+  const stateRoot = await mkdtemp(join(tmpdir(), "autopilot-engine-describe-loss-"));
+  const runDirectory = join(stateRoot, "runs", charter.runId);
+  await mkdir(join(runDirectory, "receipts"), { recursive: true });
+  const journalPath = join(runDirectory, "events.jsonl");
+  await appendEvent(journalPath, { ...event("compiled"), type: "CHARTER_COMPILED" });
+  await appendEvent(journalPath, { ...event("reconciling"), type: "RECONCILIATION_STARTED" });
+  await appendEvent(journalPath, { ...event("running"), type: "RECONCILIATION_COMPLETED" });
+  await appendEvent(journalPath, { ...event("ready"), type: "ITEM_READY", itemId: item.id });
+  const attemptId = "attempt-describe-loss";
+  await appendEvent(journalPath, {
+    ...event("cooperative admission intent"), type: "ATTEMPT_STARTED", itemId: item.id, attemptId, leaseEpoch: 1,
+    expectedBaseCommit: repository.baseCommit,
+    executionAssurance: {
+      schemaVersion: 1,
+      owner: "harness",
+      continuity: "same-harness-instance",
+      terminality: "cooperative",
+      admission: "single-shot",
+    },
+    deadline: new Date(Date.now() + 30_000).toISOString(), idempotencyKey: "attempt:describe-loss",
+  });
+  await appendEvent(journalPath, {
+    ...event("cooperative subject admitted"), type: "ATTEMPT_EXECUTION_ADMITTED", itemId: item.id, attemptId,
+    adapterName: "cooperative-harness", adapterVersion: "1", harnessVersion: "1",
+    adapterExecutionId: "request-describe-loss", backendId: "cooperative-test", subjectId: "subject-describe-loss",
+    harnessInstanceId: "harness-instance-old",
+  });
+  const journal = await readJournal(journalPath);
+  const adapter = new FailingDescribeAdapter();
+  const engine = new AutopilotEngine({
+    stateRoot,
+    runDirectory,
+    charter,
+    adapter,
+    records: journal.records,
+    projection: rebuildProjection(charter, journal.records),
+  });
+
+  const report = await engine.run();
+  const finalJournal = await readJournal(journalPath);
+
+  assert.equal(report.state, "WAITING");
+  assert.equal(report.waiting?.kind, "execution-unknown");
+  assert.equal(report.items[0]?.blocker, "EXECUTION_STATE_UNKNOWN");
+  assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) => lifecycleEvent.type === "RUN_STOPPED"), false);
+  assert.equal(adapter.launches, 0);
 });
 
 test("engine reattaches an interrupted supervised execution before launching a replacement", async () => {
@@ -680,6 +907,7 @@ test("engine preserves an uncharged pause when supervised cancellation is first 
   assert.equal(report.items[0]?.attempts, 1);
   assert.equal(report.items[0]?.chargedAttempts, 0);
   assert.equal(adapter.reattachments, 1);
+  assert.equal(adapter.cancelCalls, 1);
   assert.equal(finalJournal.records.some(({ event: lifecycleEvent }) =>
     lifecycleEvent.type === "ATTEMPT_PAUSED" && lifecycleEvent.attemptId === attemptId
   ), true);
