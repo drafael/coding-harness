@@ -8,6 +8,7 @@ import { expectRecord, expectString } from "./json.js";
 import { writeJsonAtomic } from "./journal.js";
 import { readSupervisedRequest, supervisorArtifactNames, supervisorRequestHash, } from "./process-supervisor.js";
 import { boundUtf8, runProcess } from "./process.js";
+import { launchWindowsJob, queryWindowsJob, resolveWindowsCommand, windowsBrokerIdentity, } from "./windows-job.js";
 function redactionValues(environment, credentialEnvironmentNames) {
     const credentialNames = new Set(credentialEnvironmentNames);
     return Object.entries(environment).flatMap(([name, value]) => {
@@ -69,6 +70,20 @@ async function waitForWatchdogReady(directory, requestHash) {
     }
     throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "attempt watchdog did not confirm readiness before harness launch");
 }
+async function waitForWindowsJobReady(identity) {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+        const observation = await queryWindowsJob(identity);
+        if (observation.state === "ready") {
+            return;
+        }
+        if (observation.state === "empty") {
+            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object became empty before launch readiness");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object did not confirm assignment-before-resume readiness");
+}
 async function main() {
     const directory = process.argv[2];
     if (directory === undefined) {
@@ -125,43 +140,84 @@ async function main() {
         }
     };
     recordActivity(true);
-    await publishStatus("running");
+    const onStderrLine = request.displayStderrActivity ? (line) => {
+        const remaining = request.maximumOutputBytes - activityBytes;
+        if (remaining <= 0) {
+            return;
+        }
+        const value = Buffer.from(`${redactSecrets(line, environment, request.credentialEnvironmentNames)}\n`);
+        const bounded = value.subarray(0, remaining);
+        appendFileSync(join(directory, supervisorArtifactNames.activity), bounded, { mode: 0o600 });
+        activityBytes += bounded.length;
+    } : undefined;
+    const sensitiveValues = redactionValues(environment, request.credentialEnvironmentNames);
     let result;
     let state;
     try {
-        result = await runProcess({
-            executable: request.executable,
-            arguments: request.arguments,
-            cwd: request.cwd,
-            environment,
-            maxOutputBytes: request.maximumOutputBytes,
-            redactValues: redactionValues(environment, request.credentialEnvironmentNames),
-            detached: false,
-            terminationProcessGroupId: process.pid,
-            onActivity: recordActivity,
-            onSpawn: (childPid) => {
-                writeChildIdentity(directory, {
-                    schemaVersion: 1,
-                    executionId: request.executionId,
-                    requestHash,
-                    childPid,
-                    supervisorPid: process.pid,
-                    startedAt: new Date().toISOString(),
-                });
-            },
-            ...(request.displayStderrActivity ? {
-                onStderrLine: (line) => {
-                    const remaining = request.maximumOutputBytes - activityBytes;
-                    if (remaining <= 0) {
-                        return;
-                    }
-                    const value = Buffer.from(`${redactSecrets(line, environment, request.credentialEnvironmentNames)}\n`);
-                    const bounded = value.subarray(0, remaining);
-                    appendFileSync(join(directory, supervisorArtifactNames.activity), bounded, { mode: 0o600 });
-                    activityBytes += bounded.length;
+        if (process.platform === "win32") {
+            const identity = await windowsBrokerIdentity(request.executionId, requestHash);
+            if (request.windowsHelperSha256 === undefined || identity.helperSha256 !== request.windowsHelperSha256) {
+                throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object helper identity changed before launch");
+            }
+            const command = await resolveWindowsCommand(request.executable, request.arguments, request.cwd, environment);
+            let resolveHelperPid = () => undefined;
+            const helperPid = new Promise((resolve) => {
+                resolveHelperPid = resolve;
+            });
+            const launch = launchWindowsJob(identity, {
+                executable: command.executable,
+                arguments: command.arguments,
+                cwd: request.cwd,
+                environment,
+            }, {
+                maximumOutputBytes: request.maximumOutputBytes,
+                redactValues: sensitiveValues,
+                onActivity: recordActivity,
+                ...(onStderrLine === undefined ? {} : { onStderrLine }),
+                onSpawn: resolveHelperPid,
+            });
+            void launch.catch(() => undefined);
+            const launchedHelperPid = await Promise.race([
+                helperPid,
+                launch.then(() => {
+                    throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object helper exited before publishing its process identity");
+                }),
+            ]);
+            await waitForWindowsJobReady(identity);
+            writeChildIdentity(directory, {
+                ...identity,
+                helperPid: launchedHelperPid,
+                supervisorPid: process.pid,
+                startedAt: new Date().toISOString(),
+            });
+            await publishStatus("running");
+            result = await launch;
+        }
+        else {
+            await publishStatus("running");
+            result = await runProcess({
+                executable: request.executable,
+                arguments: request.arguments,
+                cwd: request.cwd,
+                environment,
+                maxOutputBytes: request.maximumOutputBytes,
+                redactValues: sensitiveValues,
+                detached: false,
+                terminationProcessGroupId: process.pid,
+                onActivity: recordActivity,
+                onSpawn: (childPid) => {
+                    writeChildIdentity(directory, {
+                        schemaVersion: 1,
+                        executionId: request.executionId,
+                        requestHash,
+                        childPid,
+                        supervisorPid: process.pid,
+                        startedAt: new Date().toISOString(),
+                    });
                 },
-            } : {}),
-        });
+                ...(onStderrLine === undefined ? {} : { onStderrLine }),
+            });
+        }
         state = result.exitCode === 0 ? "completed" : "failed";
     }
     catch (error) {

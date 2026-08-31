@@ -1,4 +1,5 @@
 import type { ProcessResult } from "./process.js";
+import { type WindowsBrokerIdentity } from "./windows-job.js";
 export interface SupervisedProcessRequest {
     readonly schemaVersion: 1;
     readonly executionId: string;
@@ -6,6 +7,7 @@ export interface SupervisedProcessRequest {
     readonly itemId: string;
     readonly attemptId: string;
     readonly contextHash: string;
+    readonly windowsHelperSha256?: string;
     readonly executable: string;
     readonly arguments: readonly string[];
     readonly cwd: string;
@@ -39,6 +41,7 @@ export declare function supervisorDirectory(runDirectory: string, executionId: s
 export declare function supervisorRequestHash(request: SupervisedProcessRequest): string;
 export declare function readSupervisedRequest(directory: string): Promise<SupervisedProcessRequest | undefined>;
 export declare function readSupervisedStatus(directory: string): Promise<SupervisedProcessStatus | undefined>;
+export declare function readWindowsBrokerIdentity(directory: string): Promise<WindowsBrokerIdentity | undefined>;
 export declare function readSupervisedResult(directory: string): Promise<ProcessResult | undefined>;
 export declare function readSupervisedCompletion(directory: string): Promise<{
     readonly state: "completed" | "failed" | "state-unknown";

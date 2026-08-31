@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AutopilotError } from "./errors.js";
 import { canonicalJson, expectBoolean, expectInteger, expectRecord, expectString, expectStringArray, sha256 } from "./json.js";
 import { writeImmutableJson, writeJsonAtomic } from "./journal.js";
+import { queryWindowsJob, verifiedWindowsJobHelperSha256, windowsBrokerIdentity, } from "./windows-job.js";
 const REQUEST_FILE = "request.json";
 const STATUS_FILE = "status.json";
 const RESULT_FILE = "result.json";
@@ -26,6 +27,9 @@ function parseRequest(value) {
         itemId: expectString(object.itemId, "supervisor request.itemId"),
         attemptId: expectString(object.attemptId, "supervisor request.attemptId"),
         contextHash: expectString(object.contextHash, "supervisor request.contextHash"),
+        ...(object.windowsHelperSha256 === undefined
+            ? {}
+            : { windowsHelperSha256: expectString(object.windowsHelperSha256, "supervisor request.windowsHelperSha256") }),
         executable: expectString(object.executable, "supervisor request.executable"),
         arguments: expectStringArray(object.arguments, "supervisor request.arguments"),
         cwd: expectString(object.cwd, "supervisor request.cwd"),
@@ -101,6 +105,26 @@ function parseProcessResult(value, label) {
         truncated: expectBoolean(object.truncated, `${label}.truncated`),
     };
 }
+export async function readWindowsBrokerIdentity(directory) {
+    const value = await readJson(join(directory, CHILD_FILE));
+    if (value === undefined) {
+        return undefined;
+    }
+    const object = expectRecord(value, "Windows Job Object broker identity");
+    if (object.schemaVersion !== 1 || typeof object.executionId !== "string" || typeof object.requestHash !== "string"
+        || typeof object.brokerName !== "string" || typeof object.brokerToken !== "string"
+        || typeof object.helperSha256 !== "string") {
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "persisted Windows Job Object broker identity is malformed");
+    }
+    return {
+        schemaVersion: 1,
+        executionId: object.executionId,
+        requestHash: object.requestHash,
+        brokerName: object.brokerName,
+        brokerToken: object.brokerToken,
+        helperSha256: object.helperSha256,
+    };
+}
 export async function readSupervisedResult(directory) {
     const value = await readJson(join(directory, RESULT_FILE));
     return value === undefined ? undefined : parseProcessResult(value, "supervisor result");
@@ -138,6 +162,16 @@ async function publishRequest(directory, request) {
         return false;
     }
 }
+async function validateWindowsHelperIdentity(request) {
+    if (process.platform !== "win32") {
+        return;
+    }
+    const helperSha256 = await verifiedWindowsJobHelperSha256();
+    if (request.windowsHelperSha256 === undefined || helperSha256 === undefined
+        || request.windowsHelperSha256 !== helperSha256) {
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervised Windows execution helper identity is missing or changed");
+    }
+}
 async function waitForStatus(directory, requestHash, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -146,13 +180,16 @@ async function waitForStatus(directory, requestHash, timeoutMs) {
             if (status.requestHash !== requestHash) {
                 throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor status request identity changed");
             }
-            return status;
+            if (process.platform !== "win32" || status.state !== "starting") {
+                return status;
+            }
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
     }
     throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervisor did not publish bootstrap status");
 }
 export async function launchSupervisedProcess(directory, request, environment) {
+    await validateWindowsHelperIdentity(request);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const created = await publishRequest(directory, request);
     const persistedRequest = await readSupervisedRequest(directory);
@@ -194,6 +231,7 @@ export async function launchSupervisedProcess(directory, request, environment) {
     };
 }
 export async function reattachSupervisedProcess(directory, request) {
+    await validateWindowsHelperIdentity(request);
     const existing = await readSupervisedRequest(directory);
     if (existing === undefined) {
         return undefined;
@@ -205,6 +243,18 @@ export async function reattachSupervisedProcess(directory, request) {
     const status = await readSupervisedStatus(directory);
     if (status === undefined || status.requestHash !== requestHash) {
         throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervised execution bootstrap is incomplete");
+    }
+    if (process.platform === "win32" && !["completed", "failed", "cancelled", "timed-out", "state-unknown"].includes(status.state)) {
+        const expected = await windowsBrokerIdentity(request.executionId, requestHash);
+        const persisted = await readWindowsBrokerIdentity(directory);
+        if (persisted !== undefined && canonicalJson(persisted) !== canonicalJson(expected)) {
+            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "persisted Windows Job Object broker identity changed before reattachment");
+        }
+        const completion = await readSupervisedCompletion(directory);
+        const observation = await queryWindowsJob(expected);
+        if (completion === undefined && observation.state !== "ready" && observation.state !== "starting") {
+            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object is absent before terminal publication");
+        }
     }
     return { schemaVersion: 1, executionId: request.executionId, directory, requestHash, startedAt: status.startedAt };
 }
