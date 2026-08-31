@@ -1,24 +1,26 @@
-# Windows Job Object helper
+# Windows Job Object helper source
 
-`windows-job-helper.c` is the source of the optional `win32-x64` process-containment helper. It uses only Win32 APIs and is not an npm dependency or Node native addon.
+- **Status:** Retained temporarily for removal; not approved for packaging
+- **Decision:** [Use cooperative harness execution on Windows](../../docs/adr/0002-use-cooperative-harness-execution-on-windows.md)
+- **Implementation plan:** [Cooperative harness execution](../../docs/2026-08-31-cooperative-harness-execution-plan.md)
 
-The runtime enables Windows restart reattachment only when both files exist under `native/bin/win32-x64/` and the executable matches the manifest SHA-256 and x64 PE machine identity:
+`windows-job-helper.c` is the source of the optional `win32-x64` process-containment helper that was developed and validated before the project chose a binary-free Windows package boundary.
+
+The helper creates the harness suspended, assigns it to an unnamed Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and resumes it only after assignment. A persistent broker owns the sole lifetime Job handle and exposes authenticated query and termination through a request-derived named pipe. These mechanics remain historical implementation evidence; they are not the approved future package architecture.
+
+Protected workflow run [`33353702353`](https://github.com/drafael/coding-harness/actions/runs/33353702353) built the x64 helper reproducibly, passed 179 tests exactly once, and produced reviewed executable SHA-256:
 
 ```text
-job-helper.exe
-job-helper.json
+e9017028a38c8e564aa7b73541dd1996e5b5ddf8075a7c136e06b5d55c7effef
 ```
 
-Do not build or fabricate this executable on another operating system. Run the manually dispatched `Autopilot Windows Job Object helper` GitHub Actions workflow in `drafael/coding-harness`; manifests from local builds or other workflow events are marked untrusted and rejected by packaged capability discovery. It selects the hosted x64 MSVC toolchain, builds twice in clean directories with reproducible linker flags, compares SHA-256, checks the PE architecture, runs the real Windows containment and restart suite, and uploads a commit-named bootstrap artifact.
+The artifact will not be copied into `native/bin/win32-x64/` or checked into the repository. The protected artifact-producing workflow has been removed so it cannot be promoted accidentally. Local builds remain `local-untrusted` and cannot enable packaged capability discovery.
 
-After reviewing the exact workflow run, compiler line, test output, artifact digest, and source commit:
+Until the retained source and runtime paths are removed in the planned cleanup PR:
 
-1. Download that workflow artifact without executing it.
-2. Independently hash `job-helper.exe` and compare it with `job-helper.json` and the workflow log.
-3. Copy only the reviewed executable and manifest into `native/bin/win32-x64/`.
-4. Run the ordinary Ubuntu/Windows runtime CI and confirm generated `dist/native/win32-x64/` is identical.
-5. Record the workflow URL, source commit, compiler version, and SHA-256 in the delivery evidence.
+- no packaged helper means Windows restart reattachment remains disabled;
+- Windows uses the existing session-scoped direct execution and cancellation fallback;
+- helper absence or changed execution state must fail closed;
+- no documentation or report may imply that the reviewed artifact ships.
 
-The helper receives a bounded binary request on stdin. Executable arguments and environment values are never unsafely shell-interpolated or persisted in broker identity artifacts. Bare native commands are resolved to absolute `.exe`/`.com` targets. Recognized npm `.cmd` launchers are resolved to their Node entry point and receive the original argument array directly; arbitrary batch files fail closed. The broker creates an **unnamed** Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, creates the target suspended, assigns it before any user code runs, and then resumes it. The broker is the sole lifetime job-handle owner. Restarted coordinators query or terminate through its versioned named-pipe channel and never open or inherit a Job Object handle.
-
-The two-build comparison proves repeatability only within the exact toolset recorded by that workflow run. The manifest binds the helper and C-source SHA-256 values to the source commit, workflow-file Git blob SHA, workflow name/ref/run identity, and complete `cl.exe /Bv` toolset output. Toolset drift requires a fresh reviewed artifact; the workflow does not claim cross-toolset reproducibility. Windows ARM64 is intentionally unsupported.
+Do not build, install, or substitute a local helper. The retained source, build script, protocol implementation, and tests remain only to keep the transition reviewable until cooperative execution and native cleanup land in their ordered PRs.

@@ -14,8 +14,10 @@ The [main README](../README.md) is the short path for starting an unattended run
 
 - [Architecture](architecture.md): goals, contracts, event model, scheduling, adapters, Git ownership, verification, recovery, and remaining boundaries.
 - [ADR 0001: Use a durable event engine with explicit authority](adr/0001-durable-event-engine.md): the central architectural decision and its consequences.
+- [ADR 0002: Use cooperative harness execution on Windows](adr/0002-use-cooperative-harness-execution-on-windows.md): the decision not to package a project-owned native helper and the resulting assurance boundary.
 - [Implementation plan](implementation-plan.md): original phased implementation, acceptance evidence, and unverified integrations.
 - [Continuity and evidence plan](2026-08-30-continuity-evidence-implementation-plan.md): attempt context, predicate evidence, independent review, and blocked/deferred supervision work.
+- [Cooperative harness execution plan](2026-08-31-cooperative-harness-execution-plan.md): approved binary-free Windows execution assurance, unknown-state recovery, Pi integration, and delivery sequence.
 - [Restack successor lifecycle design](restack-successor-design.md): explicit authority, verification, Git mutation, and recovery contract for successful-stack restacking.
 - [Runtime CLI reference](runtime-cli.md): maintainer automation, state overrides, journal repair, and build commands.
 

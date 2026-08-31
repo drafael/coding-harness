@@ -1,10 +1,10 @@
 # Harness-agnostic Autopilot implementation plan
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation reattachment and controlled-fixture sealed restack successors are packaged. The Windows x64 Job Object source and trusted bootstrap workflow are implemented, but Windows restart reattachment remains disabled until the reproducible native artifact is reviewed and checked into the package.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation reattachment and controlled-fixture sealed restack successors are packaged. The reviewed Windows x64 Job Object artifact will not be packaged; Windows restart reattachment remains disabled while cooperative harness execution is implemented.
 - **Date:** 2026-08-22
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Autopilot architecture](architecture.md)
-- **Decision record:** [Use a durable event engine with explicit authority](adr/0001-durable-event-engine.md)
+- **Decision records:** [Use a durable event engine with explicit authority](adr/0001-durable-event-engine.md) and [use cooperative harness execution on Windows](adr/0002-use-cooperative-harness-execution-on-windows.md)
 
 ## Objective
 
