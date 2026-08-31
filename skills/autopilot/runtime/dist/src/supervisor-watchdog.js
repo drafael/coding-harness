@@ -52,6 +52,49 @@ async function lastActivityAt(directory, startedAt) {
         throw error;
     }
 }
+async function publishWatchdogFailure(directory, error) {
+    const request = await readSupervisedRequest(directory);
+    const status = await readSupervisedStatus(directory);
+    if (request === undefined || status === undefined) {
+        return;
+    }
+    const requestHash = supervisorRequestHash(request);
+    if (status.executionId !== request.executionId || status.requestHash !== requestHash
+        || ["completed", "failed", "cancelled", "timed-out", "state-unknown"].includes(status.state)) {
+        return;
+    }
+    const failedAt = new Date().toISOString();
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+        await writeJsonAtomic(join(directory, supervisorArtifactNames.watchdogError), {
+            schemaVersion: 1,
+            executionId: request.executionId,
+            requestHash,
+            failedAt,
+            error: message,
+        });
+    }
+    catch {
+        // The exact-identity state-unknown status remains the caller-visible fail-closed path.
+    }
+    try {
+        const current = await readSupervisedStatus(directory);
+        if (current === undefined || current.executionId !== request.executionId || current.requestHash !== requestHash
+            || ["completed", "failed", "cancelled", "timed-out", "state-unknown"].includes(current.state)) {
+            return;
+        }
+        await writeJsonAtomic(join(directory, supervisorArtifactNames.status), {
+            ...current,
+            state: "state-unknown",
+            updatedAt: failedAt,
+            completedAt: failedAt,
+            exitCode: 1,
+        });
+    }
+    catch {
+        // The durable watchdog error artifact is observed independently when status replacement still cannot complete.
+    }
+}
 async function main() {
     const directory = process.argv[2];
     if (directory === undefined) {
@@ -133,6 +176,15 @@ async function main() {
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
 }
-main().catch(() => {
+await main().catch(async (error) => {
+    const directory = process.argv[2];
+    if (directory !== undefined) {
+        try {
+            await publishWatchdogFailure(directory, error);
+        }
+        catch {
+            // Callers retain their bounded execution-state-unknown timeout if even fatal publication is unavailable.
+        }
+    }
     process.exitCode = 1;
 });
