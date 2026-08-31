@@ -10,6 +10,7 @@ import {
   supervisorRequestHash,
 } from "./process-supervisor.js";
 import { terminateProcessTree } from "./process.js";
+import { terminateWindowsJob, verifiedWindowsJobHelperSha256, windowsBrokerIdentity } from "./windows-job.js";
 
 function processExists(pid: number): boolean {
   try {
@@ -18,6 +19,39 @@ function processExists(pid: number): boolean {
   } catch (error) {
     return !(error instanceof Error && "code" in error && error.code === "ESRCH");
   }
+}
+
+async function quiesceExecution(
+  supervisorPid: number,
+  executable: string,
+  executionId: string,
+  requestHash: string,
+  windowsHelperSha256?: string,
+): Promise<void> {
+  if (process.platform !== "win32") {
+    await terminateProcessTree(supervisorPid, executable);
+    return;
+  }
+  const helperSha256 = await verifiedWindowsJobHelperSha256();
+  if (windowsHelperSha256 === undefined || helperSha256 === undefined || windowsHelperSha256 !== helperSha256) {
+    throw new Error("Windows Job Object helper identity changed before process-tree quiescence");
+  }
+  await terminateWindowsJob(await windowsBrokerIdentity(executionId, requestHash));
+  try {
+    process.kill(supervisorPid);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+      throw error;
+    }
+  }
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (!processExists(supervisorPid)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Windows Job Object is empty but its attempt supervisor did not terminate");
 }
 
 async function lastActivityAt(directory: string, startedAt: string): Promise<number> {
@@ -84,7 +118,13 @@ async function main(): Promise<void> {
       let terminalState: "cancelled" | "completed" | "failed" | "timed-out" | "state-unknown" = state;
       let terminalMessage = message;
       try {
-        await terminateProcessTree(supervisorPid, request.executable);
+        await quiesceExecution(
+          supervisorPid,
+          request.executable,
+          request.executionId,
+          requestHash,
+          request.windowsHelperSha256,
+        );
       } catch (error) {
         terminalState = "state-unknown";
         terminalMessage = error instanceof Error ? error.message : String(error);

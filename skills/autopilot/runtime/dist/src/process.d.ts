@@ -3,7 +3,7 @@ export interface ProcessRequest {
     readonly arguments: readonly string[];
     readonly cwd: string;
     readonly environment?: Readonly<NodeJS.ProcessEnv>;
-    readonly stdin?: string;
+    readonly stdin?: string | Uint8Array;
     readonly timeoutMs?: number;
     readonly idleTimeoutMs?: number;
     readonly maxOutputBytes?: number;
@@ -13,6 +13,7 @@ export interface ProcessRequest {
     readonly onSpawn?: (pid: number) => void;
     readonly detached?: boolean;
     readonly terminationProcessGroupId?: number;
+    readonly terminate?: (pid: number) => Promise<void>;
     readonly redactValues?: readonly string[];
 }
 export interface ProcessResult {

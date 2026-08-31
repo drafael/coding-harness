@@ -6,10 +6,10 @@ Adapters start fresh noninteractive sessions and normalize observations. They ca
 
 | Adapter | Command surface | Assurance | Restart reattachment | Verification status |
 |---|---|---|---|---|
-| Pi | Pi JSON mode plus `pi-subagents` structured delegation when version 0.53.0+ is installed; direct Pi fallback otherwise | Cooperative | Supervised implementation attempts on POSIX; unsupported on Windows | Local edit, exact-tree review, verification, commit, and provider amendment passed with Pi 0.84.4 through pi-subagents 0.60.0; the direct fallback, process-tree cancellation, and restart reattachment have controlled coverage |
-| Claude Code | `claude --print --output-format stream-json --safe-mode ...` | Cooperative | Supervised implementation attempts on POSIX; unsupported on Windows | The current 2.1.251 credential reaches the API but requires `ANTHROPIC_WORKSPACE_ID`; authenticated edit and review flows remain unverified |
-| Codex | `codex exec --json --ephemeral --sandbox workspace-write ...` | Cooperative overall; Codex enforces the workspace sandbox, while item-path restrictions are post-checked | Supervised implementation attempts on POSIX; unsupported on Windows | Disposable local edit, exact-tree review, verification, and commit passed with 0.151.0 |
-| OpenCode | `opencode run --format json --pure --auto ...` | Cooperative | Supervised implementation attempts on POSIX; unsupported on Windows | Disposable local edit, exact-tree review, verification, and commit passed with 1.18.25 |
+| Pi | Pi JSON mode plus `pi-subagents` structured delegation when version 0.53.0+ is installed; direct Pi fallback otherwise | Cooperative | Supervised implementation attempts on POSIX; Windows x64 only with a verified packaged Job Object helper | Local edit, exact-tree review, verification, commit, and provider amendment passed with Pi 0.84.4 through pi-subagents 0.60.0; the direct fallback, process-tree cancellation, and restart reattachment have controlled coverage |
+| Claude Code | `claude --print --output-format stream-json --safe-mode ...` | Cooperative | Supervised implementation attempts on POSIX; Windows x64 only with a verified packaged Job Object helper | The current 2.1.251 credential reaches the API but requires `ANTHROPIC_WORKSPACE_ID`; authenticated edit and review flows remain unverified |
+| Codex | `codex exec --json --ephemeral --sandbox workspace-write ...` | Cooperative overall; Codex enforces the workspace sandbox, while item-path restrictions are post-checked | Supervised implementation attempts on POSIX; Windows x64 only with a verified packaged Job Object helper | Disposable local edit, exact-tree review, verification, and commit passed with 0.151.0 |
+| OpenCode | `opencode run --format json --pure --auto ...` | Cooperative | Supervised implementation attempts on POSIX; Windows x64 only with a verified packaged Job Object helper | Disposable local edit, exact-tree review, verification, and commit passed with 1.18.25 |
 
 The adapter parser bounds output and rejects malformed JSON-mode output. The runtime ignores model completion claims and inspects the worktree directly.
 
@@ -36,7 +36,7 @@ Unit tests use controlled fake CLIs for command construction, changed-head denia
 
 - Queue execution becomes serial when an adapter reports concurrency one.
 - Missing required assurance or grants stops before edits.
-- On POSIX hosts, supervised implementation processes reattach after coordinator loss; legacy attempts, reviews, and incomplete supervisor bootstraps fail closed. Windows retains direct process-tree cancellation but does not advertise restart reattachment.
+- On POSIX hosts, supervised implementation processes reattach after coordinator loss. Windows x64 advertises the same capability only when the package contains the manifest-bound native Job Object helper; missing, tampered, bootstrap-only, and ARM64 helpers leave it disabled. Legacy attempts, reviews, and incomplete supervisor or Job Object bootstraps fail closed.
 - Late results from expired leases are quarantined.
 - Provider head changes block merge.
 - Review findings block the current attempt and enter the next deterministic attempt context as untrusted data.

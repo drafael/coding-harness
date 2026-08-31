@@ -166,7 +166,9 @@ export async function runProcess(request) {
                 termination = Promise.reject(new AutopilotError("EXECUTION_STATE_UNKNOWN", `cannot prove that ${request.executable} descendants stopped because the process ID is unavailable`));
             }
             else {
-                termination = terminateProcessTree(pid, request.executable);
+                termination = request.terminate === undefined
+                    ? terminateProcessTree(pid, request.executable)
+                    : request.terminate(pid);
             }
             void termination.catch(rejectPromise);
         };

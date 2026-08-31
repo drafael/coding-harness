@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot implementation plan
 
-- **Status:** Developer-preview implementation available; Windows runtime support, POSIX attempt-scoped implementation reattachment, and controlled-fixture sealed restack successors are packaged, while provider notification wake is not promoted and live restack mutation remains unverified without renewed disposable-target authority
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped implementation reattachment and controlled-fixture sealed restack successors are packaged. The Windows x64 Job Object source and trusted bootstrap workflow are implemented, but Windows restart reattachment remains disabled until the reproducible native artifact is reviewed and checked into the package.
 - **Date:** 2026-08-22
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Autopilot architecture](architecture.md)

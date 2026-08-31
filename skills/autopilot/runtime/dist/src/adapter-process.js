@@ -5,6 +5,7 @@ import { AutopilotError } from "./errors.js";
 import { isRecord } from "./json.js";
 import { cancelSupervisedProcess, launchSupervisedProcess, observeSupervisedProcess, reattachSupervisedProcess, supervisedExecutionId, supervisorDirectory, } from "./process-supervisor.js";
 import { boundUtf8, runProcess } from "./process.js";
+import { verifiedWindowsJobHelperSha256 } from "./windows-job.js";
 function adapterCredentialNames(request) {
     return [...new Set(request.grants
             .filter(({ actor, family }) => actor === "adapter" && family === "credentials.use")
@@ -19,9 +20,15 @@ function executionPrompt(request) {
         ? renderReviewContext(request.context, request.reviewFocus ?? "Review the exact subject for actionable correctness defects.")
         : renderAttemptContext(request.context);
 }
-function supervisedRequest(configuration, request, environment) {
-    if (request.supervisionDirectory === undefined || process.platform === "win32") {
+async function supervisedRequest(configuration, request, environment, discoveredWindowsHelperSha256) {
+    if (request.supervisionDirectory === undefined) {
         return undefined;
+    }
+    const windowsHelperSha256 = process.platform === "win32" ? await verifiedWindowsJobHelperSha256() : undefined;
+    if (process.platform === "win32" && (windowsHelperSha256 === undefined
+        || discoveredWindowsHelperSha256 === null
+        || (discoveredWindowsHelperSha256 !== undefined && discoveredWindowsHelperSha256 !== windowsHelperSha256))) {
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "supervised Windows execution helper is missing or changed after capability discovery");
     }
     const executionId = supervisedExecutionId(request.runId, request.itemId, request.attemptId, request.role, request.contextHash);
     return {
@@ -33,6 +40,7 @@ function supervisedRequest(configuration, request, environment) {
             itemId: request.itemId,
             attemptId: request.attemptId,
             contextHash: request.contextHash,
+            ...(windowsHelperSha256 === undefined ? {} : { windowsHelperSha256 }),
             executable: configuration.executable,
             arguments: configuration.buildArguments(request, executionPrompt(request)),
             cwd: request.worktreePath,
@@ -166,6 +174,7 @@ export class CliHarnessAdapter {
     #executions = new Map();
     #cancelledExecutions = new Set();
     #requests = new Map();
+    #discoveredWindowsHelperSha256;
     constructor(configuration) {
         this.#configuration = configuration;
     }
@@ -180,6 +189,8 @@ export class CliHarnessAdapter {
         if (version.exitCode !== 0) {
             throw new AutopilotError("ADAPTER_UNSUPPORTED", `${this.#configuration.name} is missing or did not report a version`);
         }
+        const windowsHelperSha256 = process.platform === "win32" ? await verifiedWindowsJobHelperSha256() : undefined;
+        this.#discoveredWindowsHelperSha256 = process.platform === "win32" ? windowsHelperSha256 ?? null : undefined;
         const manifest = {
             protocolVersion: 1,
             adapterName: this.#configuration.name,
@@ -191,7 +202,7 @@ export class CliHarnessAdapter {
             maxConcurrency: this.#configuration.maxConcurrency,
             eventStreaming: this.#configuration.expectsJsonLines,
             cancellation: this.#configuration.cancellation,
-            restartReattachment: process.platform !== "win32",
+            restartReattachment: process.platform !== "win32" || windowsHelperSha256 !== undefined,
             restrictions: this.#configuration.assurance,
             limitations: [
                 ...this.#configuration.limitations,
@@ -247,7 +258,7 @@ export class CliHarnessAdapter {
             throw new AutopilotError("ADAPTER_UNSUPPORTED", "execution request protocol version is not supported");
         }
         const environment = adapterEnvironment(request);
-        const supervised = supervisedRequest(this.#configuration, request, environment);
+        const supervised = await supervisedRequest(this.#configuration, request, environment, this.#discoveredWindowsHelperSha256);
         if (supervised !== undefined) {
             const handle = await launchSupervisedProcess(supervised.directory, supervised.request, environment);
             this.#requests.set(handle.executionId, request);
@@ -294,7 +305,7 @@ export class CliHarnessAdapter {
     }
     async reattach(request) {
         const environment = adapterEnvironment(request);
-        const supervised = supervisedRequest(this.#configuration, request, environment);
+        const supervised = await supervisedRequest(this.#configuration, request, environment, this.#discoveredWindowsHelperSha256);
         if (supervised === undefined) {
             return undefined;
         }

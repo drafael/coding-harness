@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { parseAdapterMessage, type ExecutionRequest } from "../src/adapter-protocol.js";
 import { CliHarnessAdapter, parseReviewResult } from "../src/adapter-process.js";
 import { boundUtf8, runProcess, terminateProcessTree } from "../src/process.js";
+import { windowsRestartReattachmentAvailable } from "../src/windows-job.js";
 import { attemptContextFixture, writeNodeExecutable } from "./helpers.js";
 
 test("UTF-8 output bounds retain only complete code points", () => {
@@ -16,7 +17,7 @@ test("UTF-8 output bounds retain only complete code points", () => {
   assert.equal(bounded.truncated, true);
 });
 
-test("Windows CLI adapters do not advertise restart reattachment", {
+test("Windows CLI adapters advertise restart reattachment only with the verified x64 helper", {
   skip: process.platform !== "win32",
 }, async () => {
   const adapter = new CliHarnessAdapter({
@@ -31,7 +32,49 @@ test("Windows CLI adapters do not advertise restart reattachment", {
     expectsJsonLines: false,
   });
 
+  assert.equal((await adapter.describe()).restartReattachment, await windowsRestartReattachmentAvailable());
+});
+
+test("Windows supervised launch and reattach fail closed when the packaged helper is unavailable", {
+  skip: process.platform !== "win32" || await windowsRestartReattachmentAvailable(),
+}, async () => {
+  const adapter = new CliHarnessAdapter({
+    name: "fake",
+    executable: process.execPath,
+    versionArguments: ["--version"],
+    buildArguments: () => ["--version"],
+    assurance: "cooperative",
+    maxConcurrency: 1,
+    cancellation: true,
+    limitations: [],
+    expectsJsonLines: false,
+  });
+  const supervisionDirectory = await mkdtemp(join(tmpdir(), "autopilot-missing-windows-helper-"));
+  const request: ExecutionRequest = {
+    protocolVersion: 1,
+    role: "implementation",
+    runId: "run",
+    itemId: "item",
+    attemptId: "missing-helper",
+    worktreePath: process.cwd(),
+    objective: "test",
+    acceptanceSummary: "test",
+    context: attemptContextFixture("missing-helper"),
+    contextHash: "context-hash",
+    writableRoots: ["."],
+    grants: [],
+    deadline: new Date(Date.now() + 10_000).toISOString(),
+    idleTimeoutMs: 5_000,
+    maximumLineBytes: 1024,
+    maximumOutputBytes: 4096,
+    supervisionDirectory,
+  };
+  const isUnknown = (error: unknown): boolean =>
+    error instanceof Error && "code" in error && error.code === "EXECUTION_STATE_UNKNOWN";
+
   assert.equal((await adapter.describe()).restartReattachment, false);
+  await assert.rejects(adapter.launch(request), isUnknown);
+  await assert.rejects(adapter.reattach(request), isUnknown);
 });
 
 test("adapter protocol parses normalized lifecycle messages", () => {
