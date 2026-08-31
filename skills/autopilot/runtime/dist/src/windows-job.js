@@ -306,11 +306,17 @@ export async function queryWindowsJob(identity) {
     return await control("query", identity);
 }
 export async function terminateWindowsJob(identity) {
-    const observation = await control("terminate", identity);
-    if (observation.state !== "terminated" && observation.state !== "absent" && observation.state !== "empty") {
-        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object did not become quiescent");
+    const deadline = Date.now() + 5_000;
+    while (true) {
+        const observation = await control("terminate", identity);
+        if (observation.state === "terminated" || observation.state === "absent" || observation.state === "empty") {
+            return observation;
+        }
+        if (observation.state !== "busy" || Date.now() >= deadline) {
+            throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object did not become quiescent");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    return observation;
 }
 export async function launchWindowsJob(identity, request, processOptions) {
     const helper = await checkedHelper();

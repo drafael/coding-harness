@@ -15,6 +15,7 @@ import {
   cancelSupervisedProcess,
   launchSupervisedProcess,
   observeSupervisedProcess,
+  readSupervisedRequest,
   reattachSupervisedProcess,
   supervisedExecutionId,
   supervisorDirectory,
@@ -59,6 +60,16 @@ function requestFor(root: string, script: string, deadlineMs = 10_000): Supervis
     displayStderrActivity: false,
   };
 }
+
+test("supervisor request preserves empty process arguments", async () => {
+  const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-empty-argument-"));
+  const request = requestFor(root, "child.mjs");
+  const directory = supervisorDirectory(root, request.executionId);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "request.json"), JSON.stringify({ ...request, arguments: [""] }));
+
+  assert.deepEqual((await readSupervisedRequest(directory))?.arguments, [""]);
+});
 
 supervisedTest("supervised process survives client replacement and returns its durable result", async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-"));
@@ -261,7 +272,7 @@ test("Windows broker preserves npm shim argv and environment casing end to end",
   });
 });
 
-test("Windows broker reports an occupied unauthenticated pipe as busy and not quiescent", {
+test("Windows broker retries transient unauthenticated contention before exact termination", {
   skip: !windowsJobSupported,
 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "autopilot-supervisor-broker-busy-"));
@@ -282,16 +293,11 @@ test("Windows broker reports an occupied unauthenticated pipe as busy and not qu
   await once(occupier, "connect");
 
   assert.deepEqual(await queryWindowsJob(identity), { state: "busy", activeProcesses: 0 });
-  await assert.rejects(
-    terminateWindowsJob(identity),
-    (error: unknown) => error instanceof Error && "code" in error && error.code === "EXECUTION_STATE_UNKNOWN",
-  );
+  const termination = await terminateWindowsJob(identity);
   occupier.destroy();
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal((await queryWindowsJob(identity)).state, "ready");
 
-  await cancelSupervisedProcess(handle);
-  assert.equal((await observeSupervisedProcess(handle)).state, "cancelled");
+  assert.deepEqual(termination, { state: "terminated", activeProcesses: 0 });
+  assert.equal((await observeSupervisedProcess(handle)).state, "failed");
 });
 
 test("Windows launch-helper death closes the Job Object and leaves no harness descendant", {

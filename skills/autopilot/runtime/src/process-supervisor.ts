@@ -62,6 +62,13 @@ const WATCHDOG_READY_FILE = "watchdog-ready.json";
 const ACTIVITY_PULSE_FILE = "activity-pulse";
 const COMPLETION_FILE = "completion.json";
 
+function parseArguments(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.some((argument) => typeof argument !== "string")) {
+    throw new AutopilotError("CHARTER_INVALID", "supervisor request.arguments must be an array of strings");
+  }
+  return value as string[];
+}
+
 function parseRequest(value: unknown): SupervisedProcessRequest {
   const object = expectRecord(value, "supervisor request");
   if (object.schemaVersion !== 1) {
@@ -78,7 +85,7 @@ function parseRequest(value: unknown): SupervisedProcessRequest {
       ? {}
       : { windowsHelperSha256: expectString(object.windowsHelperSha256, "supervisor request.windowsHelperSha256") }),
     executable: expectString(object.executable, "supervisor request.executable"),
-    arguments: expectStringArray(object.arguments, "supervisor request.arguments"),
+    arguments: parseArguments(object.arguments),
     cwd: expectString(object.cwd, "supervisor request.cwd"),
     environmentNames: expectStringArray(object.environmentNames, "supervisor request.environmentNames"),
     credentialEnvironmentNames: expectStringArray(
@@ -331,10 +338,20 @@ export async function reattachSupervisedProcess(
     if (persisted !== undefined && canonicalJson(persisted) !== canonicalJson(expected)) {
       throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "persisted Windows Job Object broker identity changed before reattachment");
     }
-    const completion = await readSupervisedCompletion(directory);
-    const observation = await queryWindowsJob(expected);
-    if (completion === undefined && observation.state !== "ready" && observation.state !== "starting") {
-      throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object is absent before terminal publication");
+    const reconciliationDeadline = Date.now() + 5_000;
+    while (true) {
+      const completion = await readSupervisedCompletion(directory);
+      if (completion !== undefined) {
+        break;
+      }
+      const observation = await queryWindowsJob(expected);
+      if (observation.state === "ready" || observation.state === "starting") {
+        break;
+      }
+      if (Date.now() >= reconciliationDeadline) {
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Windows Job Object is absent before terminal publication");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
   return { schemaVersion: 1, executionId: request.executionId, directory, requestHash, startedAt: status.startedAt };
