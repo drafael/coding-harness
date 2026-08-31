@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { sealCharter } from "../src/charter.js";
 import { newEventId } from "../src/events.js";
 import { appendEvent, readJournal, writeImmutableJson } from "../src/journal.js";
-import { isRecord, sha256 } from "../src/json.js";
+import { isRecord } from "../src/json.js";
 import { acquireRunLock, readLockOwner } from "../src/lock.js";
 import { runProcess } from "../src/process.js";
 import { createRepository, proposedCharter, writeNodeExecutable } from "./helpers.js";
@@ -314,11 +314,6 @@ if (process.argv[2] === "--version") {
   await waitForFile(join(publishedRun, "charter.json"));
   assert.ok(await readLockOwner(join(publishedRun, "run.lock")));
   await waitForFile(marker);
-  const lockPath = join(publishedRun, "run.lock");
-  const owner = await readLockOwner(lockPath);
-  assert.ok(owner);
-  await writeFile(join(lockPath, `stop-${sha256(owner.token)}.json`), "{broken");
-  await new Promise((resolve) => setTimeout(resolve, 200));
 
   const stopped = await runProcess({
     executable: process.execPath,

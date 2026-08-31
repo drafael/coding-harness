@@ -45,9 +45,11 @@ test("package contains exactly one verified win32-x64 Job Object helper", {
   });
   assert.ok((await readFile(sourceManifest, "utf8")).includes(createHash("sha256").update(source).digest("hex")));
 
+  const npmCli = process.env.npm_execpath;
+  assert.ok(npmCli);
   const packed = await runProcess({
-    executable: process.platform === "win32" ? "npm.cmd" : "npm",
-    arguments: ["pack", "--dry-run", "--json"],
+    executable: process.execPath,
+    arguments: [npmCli, "pack", "--dry-run", "--json"],
     cwd: process.cwd(),
     timeoutMs: 60_000,
   });

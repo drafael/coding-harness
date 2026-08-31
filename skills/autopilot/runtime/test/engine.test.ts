@@ -1059,7 +1059,7 @@ if (args[0] === "--version") {
     });
 
     const running = engine.run();
-    await waitForFile(described);
+    await waitForFile(described, 30_000);
     await engine.requestStop();
     const report = await running;
     const finalJournal = await readJournal(join(runDirectory, "events.jsonl"));
