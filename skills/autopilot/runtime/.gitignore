@@ -3,6 +3,5 @@ node_modules/
 !dist/**
 .test-dist/
 coverage/
-native/build/
 *.log
 *.tmp

@@ -6,7 +6,6 @@ import { test } from "node:test";
 import { executionAssuranceFor, parseAdapterMessage, type ExecutionRequest } from "../src/adapter-protocol.js";
 import { CliHarnessAdapter, parseReviewResult } from "../src/adapter-process.js";
 import { boundUtf8, runProcess, terminateProcessTree } from "../src/process.js";
-import { windowsRestartReattachmentAvailable } from "../src/windows-job.js";
 import { attemptContextFixture, writeNodeExecutable } from "./helpers.js";
 
 test("UTF-8 output bounds retain only complete code points", () => {
@@ -17,9 +16,7 @@ test("UTF-8 output bounds retain only complete code points", () => {
   assert.equal(bounded.truncated, true);
 });
 
-test("Windows CLI adapters advertise restart reattachment only with the verified x64 helper", {
-  skip: process.platform !== "win32",
-}, async () => {
+test("CLI adapters advertise process supervision only on POSIX", async () => {
   const adapter = new CliHarnessAdapter({
     name: "fake",
     executable: process.execPath,
@@ -32,11 +29,30 @@ test("Windows CLI adapters advertise restart reattachment only with the verified
     expectsJsonLines: false,
   });
 
-  assert.equal((await adapter.describe()).restartReattachment, await windowsRestartReattachmentAvailable());
+  const manifest = await adapter.describe();
+  const processSupervisionAvailable = process.platform !== "win32";
+
+  assert.equal(manifest.restartReattachment, processSupervisionAvailable);
+  assert.equal(
+    manifest.executionAssurance?.implementation.continuity,
+    processSupervisionAvailable ? "durable-subject" : "session",
+  );
+  assert.equal(
+    manifest.executionAssurance?.implementation.terminality,
+    processSupervisionAvailable ? "process-supervised" : "cooperative",
+  );
+  assert.equal(
+    manifest.executionAssurance?.implementation.admission,
+    processSupervisionAvailable ? "idempotent" : "single-shot",
+  );
+  assert.equal(
+    manifest.limitations.some((limitation) => limitation.includes("session-scoped")),
+    !processSupervisionAvailable,
+  );
 });
 
-test("Windows supervised launch and reattach fail closed when the packaged helper is unavailable", {
-  skip: process.platform !== "win32" || await windowsRestartReattachmentAvailable(),
+test("Windows process supervision requests fail closed instead of launching a direct replacement", {
+  skip: process.platform !== "win32",
 }, async () => {
   const adapter = new CliHarnessAdapter({
     name: "fake",

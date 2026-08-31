@@ -1,6 +1,6 @@
 # Cooperative harness execution implementation plan
 
-- **Status:** Approved design; PR 1 decision/promotion shutdown, PR 2 execution assurance, PR 3 fenced unknown-execution recovery, and PR 4 Pi process-local integration are complete; Windows native-path removal remains pending
+- **Status:** Implemented through PR 5: decision/promotion shutdown, execution assurance, fenced unknown-execution recovery, Pi process-local integration, and Windows native-path removal are complete; later provider investigations remain separate
 - **Date:** 2026-08-31
 - **Audience:** Autopilot implementers and reviewers
 - **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [durable event engine ADR](adr/0001-durable-event-engine.md)
@@ -336,6 +336,8 @@ Validation in a disposable repository:
 10. operator abandon, adopt, and stop.
 
 ### PR 5: Remove Windows native containment
+
+**Status:** Completed.
 
 **Objective:** Complete the binary-removal boundary after cooperative behavior is available.
 

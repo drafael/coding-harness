@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot implementation plan
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped reattachment, versioned execution assurance, fenced unknown recovery, and the Pi process-local structured delegation backend are packaged. The reviewed Windows x64 Job Object artifact will not be packaged; its source and runtime path remain only until the ordered native-removal change.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped reattachment, versioned execution assurance, fenced unknown recovery, and the Pi process-local structured delegation backend are packaged. The Windows native-helper source, runtime path, build scripts, and tests have been removed; Windows restart reattachment remains unsupported.
 - **Date:** 2026-08-22
 - **Audience:** Autopilot implementers and reviewers
 - **Governing design:** [Autopilot architecture](architecture.md)
