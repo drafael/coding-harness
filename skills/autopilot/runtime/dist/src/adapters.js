@@ -1,3 +1,4 @@
+import { createClaudeAgentSdkAdapter } from "../adapters/claude-agent-sdk/index.js";
 import { createClaudeCodeAdapter } from "../adapters/claude-code/index.js";
 import { createCodexAdapter, createCodexAppServerAdapter } from "../adapters/codex/index.js";
 import { createOpenCodeAdapter, createOpenCodeServerAdapter } from "../adapters/opencode/index.js";
@@ -9,6 +10,8 @@ export function createAdapter(name) {
             return createPiAdapter();
         case "claude-code":
             return createClaudeCodeAdapter();
+        case "claude-agent-sdk":
+            return createClaudeAgentSdkAdapter();
         case "codex":
             return createCodexAdapter();
         case "codex-app-server":

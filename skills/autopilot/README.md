@@ -6,7 +6,7 @@ Autopilot is not a prompt loop. It seals your request into an immutable charter,
 
 ## Use it
 
-You need Node.js 24+, Git, and at least one supported harness CLI. Remote delivery also needs authenticated `gh` or `glab`. Pi can use the packaged Autopilot extension with an installed and active `pi-subagents` 0.53.0+ owner for process-local execution; otherwise it reports the distinct direct CLI fallback. Autopilot checks the environment before launch; it never installs tools, enables extensions, or signs you in.
+You need Node.js 24+, Git, and at least one supported harness CLI. Remote delivery also needs authenticated `gh` or `glab`. Pi can use the packaged Autopilot extension with an installed and active `pi-subagents` 0.53.0+ owner for process-local execution; otherwise it reports the distinct direct CLI fallback. Claude can use an explicitly supplied Agent SDK 0.3.246+ and matching executable for same-query implementation execution. Autopilot checks the environment before launch; it never installs tools, finds private caches, enables extensions, or signs you in.
 
 From the project repository, invoke the skill through your host:
 
@@ -20,6 +20,8 @@ changes and rollback notes. Open a PR, but do not merge or deploy it.
 ```
 
 When using Pi's process-local backend, load `runtime/dist/src/pi-extension-entry.js` through Pi's documented extension or package mechanism, then start the sealed charter with `/autopilot-start <charter-file>`. The owning Pi process must remain uninterrupted; losing it makes the exact attempt unknown and never triggers a replacement.
+
+Claude offers two explicit charter modes. `claude-agent-sdk` binds implementation to one in-memory query, captured child, exact session, and caller-selected user message; query or process loss becomes unknown. Set `AUTOPILOT_CLAUDE_AGENT_SDK_ROOT` and `AUTOPILOT_CLAUDE_AGENT_SDK_CLI` to operator-provided matching artifacts. `claude-code` remains the direct CLI mode, and Agent SDK independent review still uses that direct path.
 
 Codex offers two explicit charter modes. `codex-app-server` binds an implementation to one per-attempt app-server instance and exact ephemeral thread/turn; connection or server loss becomes unknown. `codex` retains the direct CLI fallback and POSIX process-supervised restart reattachment. App-server independent review still uses the direct read-only CLI path.
 

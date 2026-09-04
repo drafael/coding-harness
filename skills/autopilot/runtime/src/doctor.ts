@@ -2,6 +2,11 @@ import { constants } from "node:fs";
 import { access, mkdtemp, open, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  CLAUDE_AGENT_SDK_CLI_ENVIRONMENT,
+  CLAUDE_AGENT_SDK_ROOT_ENVIRONMENT,
+  inspectClaudeAgentSdkInstallation,
+} from "./claude-agent-sdk.js";
 import { findPiSubagentsInstallation } from "./pi-subagents.js";
 import { runProcess } from "./process.js";
 
@@ -34,6 +39,28 @@ async function authenticationCheck(name: string, executable: string, arguments_:
     };
   } catch {
     return { name, status: "missing", detail: `${executable} is unavailable` };
+  }
+}
+
+async function claudeAgentSdkCheck(): Promise<DoctorCheck> {
+  try {
+    const installation = await inspectClaudeAgentSdkInstallation();
+    return {
+      name: "claude-agent-sdk",
+      status: "ok",
+      detail: `${installation.sdkVersion} with Claude Code ${installation.claudeCodeVersion}`,
+    };
+  } catch (error) {
+    const missing = process.env[CLAUDE_AGENT_SDK_ROOT_ENVIRONMENT] === undefined
+      || process.env[CLAUDE_AGENT_SDK_CLI_ENVIRONMENT] === undefined;
+    return {
+      name: "claude-agent-sdk",
+      status: missing ? "unverified" : "unsupported",
+      detail: missing
+        ? "an operator-provided SDK root and matching Claude Code executable were not configured"
+        : error instanceof Error ? error.message : String(error),
+      setup: `Set ${CLAUDE_AGENT_SDK_ROOT_ENVIRONMENT} and ${CLAUDE_AGENT_SDK_CLI_ENVIRONMENT}; Autopilot never installs or searches private caches for them.`,
+    };
   }
 }
 
@@ -80,6 +107,7 @@ export async function runDoctor(): Promise<readonly DoctorCheck[]> {
       ? { name: "pi-subagents", status: "unverified", detail: "version 0.53.0 or newer was not found; Pi will use its distinct direct CLI fallback", setup: "Install and enable pi-subagents through Pi to use the process-local backend; Autopilot never installs it." }
       : { name: "pi-subagents", status: "ok", detail: `${piSubagents.version} at ${piSubagents.extensionPath}; process-local owner availability is checked by the Autopilot Pi extension before launch` },
     await commandCheck("claude-code", "claude", ["--version"], "Install Claude Code only if you plan to use that adapter."),
+    await claudeAgentSdkCheck(),
     await commandCheck("codex", "codex", ["--version"], "Install Codex only if you plan to use that adapter."),
     await commandCheck(
       "codex-app-server",

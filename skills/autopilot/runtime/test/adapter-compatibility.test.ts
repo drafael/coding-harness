@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createAdapter } from "../src/adapters.js";
 
 test("all documented harness adapter names resolve through one port factory", () => {
-  for (const name of ["pi", "claude-code", "codex", "codex-app-server", "opencode", "opencode-server"]) {
+  for (const name of ["pi", "claude-code", "claude-agent-sdk", "codex", "codex-app-server", "opencode", "opencode-server"]) {
     const adapter = createAdapter(name);
 
     assert.equal(typeof adapter.describe, "function");

@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Autopilot
 
-Autopilot delegates bounded coding work to a fresh Claude Code, Codex, Pi, or OpenCode execution. Pi implementations prefer the packaged process-local extension backend. Codex charters select either the exact same-instance `codex-app-server` backend or the distinct direct `codex` CLI path. OpenCode charters similarly select the same-instance `opencode-server` backend or distinct direct `opencode` CLI path. Other modes and fallbacks use their declared boundaries. The runtime owns lifecycle state, Git commits, verification, remote delivery, and completion decisions.
+Autopilot delegates bounded coding work to a fresh Claude Code, Codex, Pi, or OpenCode execution. Pi implementations prefer the packaged process-local extension backend. Claude charters select either the exact same-instance `claude-agent-sdk` backend or the distinct direct `claude-code` CLI path. Codex charters select either the exact same-instance `codex-app-server` backend or the distinct direct `codex` CLI path. OpenCode charters similarly select the same-instance `opencode-server` backend or distinct direct `opencode` CLI path. Other modes and fallbacks use their declared boundaries. The runtime owns lifecycle state, Git commits, verification, remote delivery, and completion decisions.
 
 ## New-run preconditions
 
@@ -20,6 +20,7 @@ For a new implementation run:
 5. Do not install tools, download runtimes, authenticate providers, or modify global configuration.
 6. For Codex, select `codex-app-server` only when the operator accepts same-instance cooperative terminality; select `codex` for the distinct direct CLI mode. Never switch between them after admission or infer one mode's guarantees from the other.
 7. For OpenCode, select `opencode-server` only when the operator accepts one owned loopback server, an uninterrupted non-replayable event stream, and same-instance cooperative terminality; select `opencode` for the distinct direct CLI mode. Never reuse a shared server or switch modes after admission.
+8. For Claude, select `claude-agent-sdk` only when the operator explicitly supplies SDK 0.3.246 or newer and its matching Claude Code executable and accepts same-query-instance cooperative terminality; select `claude-code` for the distinct direct CLI mode. Never discover private caches, resume a lost query, replace an unknown execution, or switch modes after admission.
 
 Treat “I am going to sleep,” “work overnight,” and “have this ready in the morning” as explicit unattended-run intent. Preserve that intent in `sourceText`, but do not turn it into a deadline, merge grant, deployment grant, or guarantee of completion time.
 

@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped process reattachment, fenced unknown recovery, Pi process-local cooperative execution, native-free Windows packaging, controlled-fixture sealed restack successors, and the normal live GitLab restack path are complete. Notification wake is not promoted, and live GitHub restack mutation remains unverified.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped process reattachment, fenced unknown recovery, Pi and Claude Agent SDK same-instance execution, native-free Windows packaging, controlled-fixture sealed restack successors, and the normal live GitLab restack path are complete. Notification wake is not promoted, and live GitHub restack mutation remains unverified.
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
@@ -136,7 +136,7 @@ interface RunCharter {
     readonly baseCommit: string;
     readonly writableRoots: readonly string[];
   };
-  readonly harnessAdapter: "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode" | "opencode-server";
+  readonly harnessAdapter: "pi" | "claude-code" | "claude-agent-sdk" | "codex" | "codex-app-server" | "opencode" | "opencode-server";
   readonly mode: "single" | "independent-queue" | "ordered-stack";
   readonly work: readonly WorkItem[];
   readonly delivery: "local-commits" | "change-request-ready" | "merge-verified";
@@ -310,7 +310,9 @@ Capability degradation is explicit:
 - Missing or incomplete attempt-supervisor evidence fails closed as `EXECUTION_STATE_UNKNOWN`; the runtime never spends another attempt on a speculative replacement.
 - Missing a required delivery or enforcement capability stops before edits.
 
-The first adapters target Claude Code, Codex, Pi, and OpenCode. They share one conformance suite. The `codex`/`codex-app-server` and `opencode`/`opencode-server` charter pairs are distinct execution modes: direct CLIs retain runtime-owned POSIX supervision, while server-backed implementation attempts use harness-owned same-instance cooperative terminality. OpenCode server terminality additionally requires an uninterrupted non-replayable SSE stream and fresh exact-message REST reconciliation.
+The first adapters target Claude Code, Codex, Pi, and OpenCode. They share one conformance suite. The `claude-code`/`claude-agent-sdk`, `codex`/`codex-app-server`, and `opencode`/`opencode-server` charter pairs are distinct execution modes: direct CLIs retain runtime-owned POSIX supervision, while SDK/server-backed implementation attempts use harness-owned same-instance cooperative terminality. OpenCode server terminality additionally requires an uninterrupted non-replayable SSE stream and fresh exact-message REST reconciliation.
+
+The Claude Agent SDK adapter requires explicit paths to an operator-provided SDK 0.3.246 or newer and its matching Claude Code executable. It creates one streaming-input query and captures one direct child, then admits only the exact package/CLI version, realpath worktree, permission and tool surface, required capabilities, session ID, and caller-selected user-message UUID. An isolated temporary Claude configuration directory, disabled settings sources and skills, strict empty MCP, exact tools, and `PreToolUse` narrow the cooperative surface. Completion and cancellation require exact results from the uninterrupted query; an interrupt receipt or `Query.close()` alone is not terminality. Query, child, iterator, coordinator, or identity loss is `EXECUTION_STATE_UNKNOWN`, with no resume, continuation, reinitialization, or replacement. Independent review remains on the direct Claude Code adapter.
 
 The Codex app-server adapter starts one per-attempt stdio server with its process working directory set to the dedicated worktree. After `initialize`, it creates an ephemeral workspace-write thread with unattended approvals and deliberately omits the `cwd` request field, avoiding Codex's persistent project-trust update while still verifying the returned working directory. It journals an exact subject derived from the app-server instance nonce, thread ID, and turn ID. Only the matching `turn/completed` notification on the same connection is terminal; interruption must finish that turn as `interrupted`. Server requests are denied. The stdio connection cannot be reattached, while reconnectable Codex transports remain experimental or require separately managed daemon state, so any coordinator, connection, or server loss is `EXECUTION_STATE_UNKNOWN`. Independent review remains on the direct read-only Codex CLI adapter.
 
@@ -518,6 +520,7 @@ skills/autopilot/
     │   ├── report.ts
     │   └── cli.ts
     ├── adapters/
+    │   ├── claude-agent-sdk/
     │   ├── claude-code/
     │   ├── codex/
     │   ├── pi/
