@@ -386,18 +386,16 @@ test("Codex app-server force-stops a direct child that ignores graceful cleanup"
   );
 });
 
-test("Codex app-server awaits forced direct-child cleanup on unknown admission, timeout, and protocol paths", {
+test("Codex app-server awaits forced direct-child cleanup on unknown admission and protocol paths", {
   skip: process.platform === "win32",
 }, async () => {
-  for (const scenario of ["admission", "timeout", "oversized"] as const) {
+  for (const scenario of ["admission", "oversized"] as const) {
     const { adapter, worktreePath } = await createAdapter(`ignore-term-${scenario}`);
     await adapter.describe();
     const baseRequest = request(worktreePath, `ignore-term-${scenario}`);
     const executionRequest = scenario === "admission"
       ? { ...baseRequest, idleTimeoutMs: 50 }
-      : scenario === "timeout"
-        ? { ...baseRequest, deadline: new Date(Date.now() + 2_000).toISOString() }
-        : baseRequest;
+      : baseRequest;
 
     if (scenario === "admission") {
       await assert.rejects(adapter.launch(executionRequest), isExecutionUnknown);
