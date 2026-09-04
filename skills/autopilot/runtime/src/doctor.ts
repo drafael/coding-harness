@@ -88,6 +88,12 @@ export async function runDoctor(): Promise<readonly DoctorCheck[]> {
       "Install a Codex version with app-server support only if you plan to use that adapter.",
     ),
     await commandCheck("opencode", "opencode", ["--version"], "Install OpenCode only if you plan to use that adapter."),
+    await commandCheck(
+      "opencode-server",
+      "opencode",
+      ["serve", "--help"],
+      "Install an OpenCode version with server support only if you plan to use that adapter.",
+    ),
     await commandCheck("github-cli", "gh", ["--version"], "Install gh only for GitHub delivery."),
     await commandCheck("gitlab-cli", "glab", ["--version"], "Install glab only for GitLab delivery."),
     await authenticationCheck("claude-auth-config", "claude", ["auth", "status"]),

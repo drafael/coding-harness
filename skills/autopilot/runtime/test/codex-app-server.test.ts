@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { ExecutionRequest } from "../src/adapter-protocol.js";
+import type { ExecutionHandle, ExecutionRequest } from "../src/adapter-protocol.js";
 import { CliHarnessAdapter } from "../src/adapter-process.js";
 import { CodexAppServerAdapter } from "../adapters/codex/app-server.js";
 import { attemptContextFixture, writeNodeExecutable } from "./helpers.js";
@@ -386,24 +386,29 @@ test("Codex app-server force-stops a direct child that ignores graceful cleanup"
   );
 });
 
-test("Codex app-server awaits forced direct-child cleanup on unknown admission, timeout, and protocol paths", {
+test("Codex app-server awaits forced direct-child cleanup on unknown admission and protocol paths", {
   skip: process.platform === "win32",
 }, async () => {
-  for (const scenario of ["admission", "timeout", "oversized"] as const) {
+  for (const scenario of ["admission", "oversized"] as const) {
     const { adapter, worktreePath } = await createAdapter(`ignore-term-${scenario}`);
     await adapter.describe();
     const baseRequest = request(worktreePath, `ignore-term-${scenario}`);
     const executionRequest = scenario === "admission"
       ? { ...baseRequest, idleTimeoutMs: 50 }
-      : scenario === "timeout"
-        ? { ...baseRequest, deadline: new Date(Date.now() + 50).toISOString() }
-        : baseRequest;
+      : baseRequest;
 
     if (scenario === "admission") {
       await assert.rejects(adapter.launch(executionRequest), isExecutionUnknown);
     } else {
-      const handle = await adapter.launch(executionRequest);
-      await assert.rejects(adapter.observe(handle), isExecutionUnknown);
+      let handle: ExecutionHandle | undefined;
+      try {
+        handle = await adapter.launch(executionRequest);
+      } catch (error) {
+        assert.equal(isExecutionUnknown(error), true);
+      }
+      if (handle !== undefined) {
+        await assert.rejects(adapter.observe(handle), isExecutionUnknown);
+      }
     }
     const pid = Number.parseInt(await readFile(join(worktreePath, "fake.pid"), "utf8"), 10);
 

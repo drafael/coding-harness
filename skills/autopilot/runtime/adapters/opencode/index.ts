@@ -1,4 +1,5 @@
 import { CliHarnessAdapter } from "../../src/adapter-process.js";
+import { OpenCodeServerAdapter } from "./server.js";
 
 export function createOpenCodeAdapter(): CliHarnessAdapter {
   return new CliHarnessAdapter({
@@ -22,5 +23,12 @@ export function createOpenCodeAdapter(): CliHarnessAdapter {
       "The exact-tree review role is cooperative and has no version-pinned live verification.",
     ],
     expectsJsonLines: true,
+  });
+}
+
+export function createOpenCodeServerAdapter(): OpenCodeServerAdapter {
+  return new OpenCodeServerAdapter({
+    executable: "opencode",
+    reviewAdapter: createOpenCodeAdapter(),
   });
 }

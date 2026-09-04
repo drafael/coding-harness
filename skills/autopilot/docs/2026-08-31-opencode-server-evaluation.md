@@ -1,6 +1,6 @@
 # OpenCode server execution evaluation
 
-- **Status:** Complete
+- **Status:** Implemented with controlled fault coverage and live production-adapter validation
 - **Decision:** GO for a controlled implementation of a distinct `opencode-server` backend
 - **Evidence baseline:** OpenCode 1.18.25, upstream tag `v1.18.25` at commit `cb7d8b2f5e44876ef98b661dc10590c915af3a9f`
 - **Scope:** Implementation execution only; independent review remains on the direct `opencode` CLI adapter
@@ -11,7 +11,7 @@ OpenCode 1.18.25 provides enough identity and lifecycle information for a same-h
 
 The implementation must remain separate from the current `opencode` charter value. It must not claim restart reattachment, replayable event delivery, operating-system process-tree quiescence, path sandboxing, or durable recovery after loss of the owning Autopilot process.
 
-This is not approval to reuse a global OpenCode server. Autopilot must start and stop one loopback server for each attempt.
+This is not approval to reuse a global OpenCode server. Autopilot must start one loopback server for each attempt and await direct-child cleanup on every path while the owning harness survives. Whole-harness loss remains unknown and can leave the process running because no OS containment is claimed.
 
 ## Constraints
 
@@ -138,9 +138,9 @@ A temporary home and temporary XDG data, config, cache, and state roots were use
 4. created and read a dedicated session with explicit deny-all permissions;
 5. deleted the session;
 6. disposed the directory instance; and
-7. stopped the server process.
+7. attempted to stop the server process.
 
-All OpenCode files created by this probe remained under the temporary root.
+The process was later found orphaned under PID 42930 after the probe's parent harness had ended and was removed manually. That invalidates the probe's process-cleanup claim, though not its HTTP/SSE protocol observations. It also confirms the stated boundary: whole-harness loss does not provide process containment or descendant quiescence. All OpenCode files created by this probe remained under the temporary root.
 
 ### Version-pinned live probe
 
@@ -165,9 +165,15 @@ Cancellation produced:
 
 The tracked repository tree remained clean. The digest of files under `~/.config/opencode` was unchanged. These probes establish the normal same-process path; they do not establish restart recovery or descendant quiescence.
 
+### Production adapter validation
+
+The implemented adapter was then exercised with auto-update disabled against installed OpenCode 1.18.28 in a disposable local Git repository. A completion attempt created only the requested untracked `result.txt` containing `validation`, returned an exact completed observation, and left tracked files unchanged. A second attempt ran a long shell command; cancellation returned accepted only after fresh reconciliation produced the exact assistant `MessageAbortedError` and exit code 130.
+
+The adapter reported `opencode-server@1.18.28`, `same-harness-instance` continuity, cooperative terminality, single-shot admission, and no restart reattachment. The digest under `~/.config/opencode` was unchanged. Awaited cleanup completed, and a post-run process scan found no OpenCode server. This validates normal live cleanup while the owning harness survives; it does not supersede the whole-harness-loss limitation demonstrated by the orphaned earlier probe.
+
 ## Required backend contract
 
-A future implementation should advertise:
+The controlled implementation advertises:
 
 ```json
 {
@@ -185,7 +191,7 @@ The direct `opencode` backend remains unchanged. It retains POSIX process-superv
 
 ## Implementation acceptance criteria
 
-Production promotion requires controlled tests for:
+Production promotion used controlled tests for:
 
 - exact loopback server startup, Basic Auth, health version, and worktree routing;
 - durable admission intent followed by one session and one caller-selected message ID;

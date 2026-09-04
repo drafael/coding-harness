@@ -1,11 +1,11 @@
 import { createClaudeCodeAdapter } from "../adapters/claude-code/index.js";
 import { createCodexAdapter, createCodexAppServerAdapter } from "../adapters/codex/index.js";
-import { createOpenCodeAdapter } from "../adapters/opencode/index.js";
+import { createOpenCodeAdapter, createOpenCodeServerAdapter } from "../adapters/opencode/index.js";
 import { createPiAdapter } from "../adapters/pi/index.js";
 import type { HarnessPort } from "./adapter-protocol.js";
 import { AutopilotError } from "./errors.js";
 
-export type AdapterName = "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode";
+export type AdapterName = "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode" | "opencode-server";
 
 export function createAdapter(name: string): HarnessPort {
   switch (name) {
@@ -19,6 +19,8 @@ export function createAdapter(name: string): HarnessPort {
       return createCodexAppServerAdapter();
     case "opencode":
       return createOpenCodeAdapter();
+    case "opencode-server":
+      return createOpenCodeServerAdapter();
     default:
       throw new AutopilotError("ADAPTER_UNSUPPORTED", `unknown harness adapter: ${name}`);
   }

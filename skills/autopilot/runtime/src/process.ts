@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { TextDecoder } from "node:util";
 import { AutopilotError } from "./errors.js";
@@ -42,6 +42,38 @@ async function waitForPosixProcessGroupExit(pid: number, timeoutMs: number): Pro
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   return false;
+}
+
+async function waitForDirectChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return true;
+  }
+  return await new Promise<boolean>((resolvePromise) => {
+    const timer = setTimeout(() => {
+      child.off("close", onClose);
+      resolvePromise(false);
+    }, timeoutMs);
+    timer.unref();
+    const onClose = (): void => {
+      clearTimeout(timer);
+      resolvePromise(true);
+    };
+    child.once("close", onClose);
+  });
+}
+
+export async function terminateDirectChild(child: ChildProcessWithoutNullStreams, label: string): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  child.kill();
+  if (await waitForDirectChildClose(child, 5_000)) {
+    return;
+  }
+  child.kill("SIGKILL");
+  if (!await waitForDirectChildClose(child, 5_000)) {
+    throw new AutopilotError("EXECUTION_STATE_UNKNOWN", `${label} process did not terminate after forced cleanup`);
+  }
 }
 
 export async function terminateProcessTree(pid: number, executable: string): Promise<void> {

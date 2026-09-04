@@ -20,7 +20,7 @@ import {
 import { renderAttemptContext } from "../../src/attempt-context.js";
 import { AutopilotError } from "../../src/errors.js";
 import { canonicalJson, isRecord, sha256 } from "../../src/json.js";
-import { boundUtf8, runProcess, StreamingRedactor } from "../../src/process.js";
+import { boundUtf8, runProcess, StreamingRedactor, terminateDirectChild } from "../../src/process.js";
 
 interface CodexAppServerAdapterOptions {
   readonly executable: string;
@@ -127,38 +127,6 @@ function turnFromNotification(value: unknown): {
     ...(turnError === undefined ? {} : { error: turnError }),
     agentOutput,
   };
-}
-
-async function waitForChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return true;
-  }
-  return await new Promise<boolean>((resolvePromise) => {
-    const timer = setTimeout(() => {
-      child.off("close", onClose);
-      resolvePromise(false);
-    }, timeoutMs);
-    timer.unref();
-    const onClose = (): void => {
-      clearTimeout(timer);
-      resolvePromise(true);
-    };
-    child.once("close", onClose);
-  });
-}
-
-async function terminateAppServer(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  child.kill();
-  if (await waitForChildClose(child, 5_000)) {
-    return;
-  }
-  child.kill("SIGKILL");
-  if (!await waitForChildClose(child, 5_000)) {
-    throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Codex app-server process did not terminate after forced cleanup");
-  }
 }
 
 class AppServerConnection {
@@ -366,7 +334,7 @@ class AppServerConnection {
       this.#child.stdout.destroy();
       this.#child.stderr.destroy();
       try {
-        await terminateAppServer(this.#child);
+        await terminateDirectChild(this.#child, "Codex app-server");
       } finally {
         this.#child.stdin.off("error", this.#onStdinError);
         this.#child.stdout.off("error", this.#onStdoutError);

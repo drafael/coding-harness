@@ -1,3 +1,4 @@
+import { type ChildProcessWithoutNullStreams } from "node:child_process";
 export interface ProcessRequest {
     readonly executable: string;
     readonly arguments: readonly string[];
@@ -22,6 +23,7 @@ export interface ProcessResult {
     readonly stderr: string;
     readonly truncated: boolean;
 }
+export declare function terminateDirectChild(child: ChildProcessWithoutNullStreams, label: string): Promise<void>;
 export declare function terminateProcessTree(pid: number, executable: string): Promise<void>;
 export declare class StreamingRedactor {
     #private;

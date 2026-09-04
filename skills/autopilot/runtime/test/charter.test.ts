@@ -17,6 +17,15 @@ test("sealCharter accepts each supported graph mode and produces a stable immuta
   }
 });
 
+test("sealCharter accepts explicit server-backed harness adapter names", async () => {
+  const repository = await createRepository();
+  const proposed = proposedCharter(repository.root, repository.baseCommit);
+
+  for (const harnessAdapter of ["codex-app-server", "opencode-server"] as const) {
+    assert.equal(sealCharter({ ...proposed, harnessAdapter }).harnessAdapter, harnessAdapter);
+  }
+});
+
 test("sealCharter accepts bounded provider-check waiting only for merge-verified delivery", async () => {
   const repository = await createRepository();
   const proposed = proposedCharter(repository.root, repository.baseCommit);

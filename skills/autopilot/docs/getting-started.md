@@ -40,6 +40,8 @@ For the Pi process-local backend, load the packaged runtime extension through Pi
 
 For Codex, choose the charter adapter deliberately. `codex-app-server` runs one exact ephemeral thread and turn over a per-attempt stdio app-server connection; losing that coordinator, connection, or server makes the attempt unknown. `codex` keeps the direct CLI boundary, including POSIX process-supervised restart reattachment. The app-server mode never bootstraps a daemon or changes Codex authentication. It starts the server in the worktree and omits explicit thread `cwd` so Codex does not persist project trust.
 
+For OpenCode, `opencode-server` starts one authenticated `--pure` loopback server and dedicated session for each implementation attempt. It requires one uninterrupted event stream and fresh reconciliation of the exact caller-selected message and terminal assistant. Stream or identity loss makes the attempt unknown; OpenCode events and abort acknowledgments alone never prove terminality. `opencode` preserves the distinct direct CLI mode, and independent review remains direct in both cases. Autopilot never reuses or bootstraps a shared OpenCode server.
+
 ## Understand the run
 
 A run uses one of three graph modes:
