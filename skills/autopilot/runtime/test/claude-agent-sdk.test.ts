@@ -172,6 +172,8 @@ function fakeSdk(scenario: FakeScenario, captured: { options?: Readonly<Record<s
         throw new Error("missing spawn hook");
       }
       const childMode = scenario.child ?? "idle";
+      const childExited = deferred<void>();
+      const protocolFailed = deferred<void>();
       const childScript = childMode === "exit"
         ? "process.exit(17)"
         : childMode === "exit-stderr"
@@ -200,10 +202,16 @@ function fakeSdk(scenario: FakeScenario, captured: { options?: Readonly<Record<s
           cwd: input.options.cwd,
           env: spawnEnvironment,
           signal: new AbortController().signal,
-        }) as { readonly pid?: number };
+        }) as {
+          readonly pid?: number;
+          readonly once?: (event: string, listener: () => void) => void;
+          readonly stdout?: { readonly once: (event: string, listener: () => void) => void };
+        };
         if (spawned.pid !== undefined) {
           captured.pid = spawned.pid;
         }
+        spawned.once?.("exit", () => childExited.resolve());
+        spawned.stdout?.once("error", () => protocolFailed.resolve());
         if (scenario.secondSpawn) {
           spawnProcess({
             command: process.execPath,
@@ -222,8 +230,10 @@ function fakeSdk(scenario: FakeScenario, captured: { options?: Readonly<Record<s
         const userMessage = first.value as { readonly uuid: string };
         const userMessageId = userMessage.uuid;
         const cwd = input.options.cwd;
-        if (scenario.child === "oversized" || scenario.child === "exit" || scenario.child === "exit-stderr") {
-          await new Promise((resolve) => setTimeout(resolve, 50));
+        if (scenario.child === "exit" || scenario.child === "exit-stderr") {
+          await childExited.promise;
+        } else if (scenario.child === "oversized") {
+          await protocolFailed.promise;
         }
         const init = {
           type: "system",
