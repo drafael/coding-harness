@@ -219,13 +219,13 @@ Controlled fixtures must prove:
 - no executed Git argument contains force, rebase, reset, or cherry-pick;
 - Ubuntu and Windows Node 24 CI pass at the exact PR head and merge commit.
 
-Live provider evidence is limited to an already-authorized disposable stack. Without it, controlled provider fixtures may establish implementation behavior, but remote restacking remains documented as unverified.
+Live provider mutation was validated on 2026-09-04 against an authorized private reusable GitLab project. The normal one-descendant path confirmed the exact merge-forward commit locally, remotely, and on the existing merge request; regenerated exact-tree receipts passed, `main` did not move, and temporary refs were removed. See [GitLab sealed-restack live validation](2026-09-04-gitlab-restack-validation.md). GitHub restack mutation remains unverified.
 
 ## Recorded implementation decisions
 
 1. Merge-forward commits are accepted. The branch movement remains fast-forward even though Git history gains a second parent.
 2. Temporary candidate worktrees are removed only when cleanup is provably safe; uncertain cleanup preserves them with diagnostics.
 3. A blocked descendant preserves already-confirmed earlier fast-forwards and blocks the remaining suffix.
-4. Live provider mutation requires renewed authority on an already-authorized disposable target. Without it, controlled fixtures may merge but provider restacking remains unverified.
+4. Live provider mutation requires renewed authority on an already-authorized target. The GitLab normal path now has live evidence; GitHub and live failure-path behavior remain unverified.
 
 These decisions authorize the dedicated implementation deliverable without weakening its evidence gates.

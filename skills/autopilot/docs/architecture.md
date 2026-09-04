@@ -1,6 +1,6 @@
 # Harness-agnostic Autopilot design
 
-- **Status:** Developer-preview implementation available; POSIX attempt-scoped process reattachment, fenced unknown recovery, Pi process-local cooperative execution, native-free Windows packaging, and controlled-fixture sealed restack successors are complete. Notification wake is not promoted, and live restack mutation remains unverified without renewed target authority.
+- **Status:** Developer-preview implementation available; POSIX attempt-scoped process reattachment, fenced unknown recovery, Pi process-local cooperative execution, native-free Windows packaging, controlled-fixture sealed restack successors, and the normal live GitLab restack path are complete. Notification wake is not promoted, and live GitHub restack mutation remains unverified.
 - **Date:** 2026-08-22
 - **Audience:** Coding-harness maintainers and adapter authors
 - **Implementation plan:** [Autopilot implementation plan](implementation-plan.md)
