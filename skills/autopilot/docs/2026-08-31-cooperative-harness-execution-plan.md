@@ -1,6 +1,6 @@
 # Cooperative harness execution implementation plan
 
-- **Status:** Implemented through the Codex app-server integration: decision/promotion shutdown, execution assurance, fenced unknown-execution recovery, Pi process-local integration, Windows native-path removal, and exact same-instance Codex turns are complete; the OpenCode server boundary has a separate implementation-ready evaluation, while Claude remains separate
+- **Status:** Implemented through the explicit OpenCode server backend and controlled fault matrix; the separate Claude boundary remains pending
 - **Date:** 2026-08-31
 - **Audience:** Autopilot implementers and reviewers
 - **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [OpenCode server evaluation](2026-08-31-opencode-server-evaluation.md), [durable event engine ADR](adr/0001-durable-event-engine.md)
@@ -378,7 +378,7 @@ The default stdio transport cannot reconnect after coordinator loss. WebSocket t
 
 Investigate and implement each remaining provider as a separate boundary.
 
-- OpenCode: the [server evaluation](2026-08-31-opencode-server-evaluation.md) establishes an implementation-ready same-instance contract based on one owned server process, one dedicated session, one caller-selected message ID, uninterrupted live events, and fresh REST reconciliation. Production code and fault coverage remain unimplemented.
+- OpenCode: the [server evaluation](2026-08-31-opencode-server-evaluation.md) established the same-instance contract. The explicit `opencode-server` adapter owns one server process, dedicated session, caller-selected message ID, uninterrupted live events, and fresh REST reconciliation. Controlled fault coverage passes, and live completion and cancellation passed with OpenCode 1.18.28.
 - Claude Code: remain session-scoped until an active execution attachment surface exists.
 
 Do not add a provider-neutral durable-subject framework based only on hypothetical future consumers.
@@ -467,6 +467,6 @@ Pause and revisit the design if implementation shows any of the following:
 - Controlled Pi process-local tests cover exact admission, cancellation, terminal-before-shutdown precedence, reload/session invalidation, lost admission, late/mismatched result rejection, direct fallback, and runtime-core completion in one reused local repository fixture. Whole-process live fault evidence remains environment-specific and does not prove OS quiescence or provider parity.
 - No provider currently proves Windows process-tree quiescence through its public subagent contract.
 - Codex app-server 0.151.0 exact completion and interruption were exercised over one uninterrupted stdio connection. Cross-connection live rejoin is intentionally unimplemented because the default transport is not reconnectable; continuity loss remains unknown.
-- OpenCode 1.18.25 same-process completion and cancellation passed controlled live probes. Disconnect remains intentionally unrecoverable because SSE has no replay cursor; production fault handling and Claude interruption behavior remain unimplemented.
+- OpenCode 1.18.25 protocol probes and the production adapter's 1.18.28 live completion and cancellation passed. An earlier isolated probe process was later found still running after its parent harness had ended, invalidating that probe's cleanup claim and reinforcing the documented absence of whole-harness process containment. The production live run awaited cleanup and a post-run process scan found no remaining server. Disconnect remains intentionally unrecoverable because SSE has no replay cursor; Claude interruption behavior remains unimplemented.
 - Cooperative terminality does not prevent external effects performed by worker tools before terminal response.
 - The Pi entry point follows the documented package manifest at `runtime/dist/src/pi-extension-entry.js` and registers `/autopilot-start`, `/autopilot-resume`, and `/autopilot-recover`; callers must load it through Pi's normal package or extension mechanism.

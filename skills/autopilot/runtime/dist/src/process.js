@@ -17,6 +17,36 @@ async function waitForPosixProcessGroupExit(pid, timeoutMs) {
     }
     return false;
 }
+async function waitForDirectChildClose(child, timeoutMs) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+        return true;
+    }
+    return await new Promise((resolvePromise) => {
+        const timer = setTimeout(() => {
+            child.off("close", onClose);
+            resolvePromise(false);
+        }, timeoutMs);
+        timer.unref();
+        const onClose = () => {
+            clearTimeout(timer);
+            resolvePromise(true);
+        };
+        child.once("close", onClose);
+    });
+}
+export async function terminateDirectChild(child, label) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+    }
+    child.kill();
+    if (await waitForDirectChildClose(child, 5_000)) {
+        return;
+    }
+    child.kill("SIGKILL");
+    if (!await waitForDirectChildClose(child, 5_000)) {
+        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", `${label} process did not terminate after forced cleanup`);
+    }
+}
 export async function terminateProcessTree(pid, executable) {
     if (process.platform === "win32") {
         await new Promise((resolveTermination, rejectTermination) => {

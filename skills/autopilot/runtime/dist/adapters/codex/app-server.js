@@ -6,7 +6,7 @@ import { adapterCredentialNames, adapterEnvironment, redactSecrets, redactionVal
 import { renderAttemptContext } from "../../src/attempt-context.js";
 import { AutopilotError } from "../../src/errors.js";
 import { canonicalJson, isRecord, sha256 } from "../../src/json.js";
-import { boundUtf8, runProcess, StreamingRedactor } from "../../src/process.js";
+import { boundUtf8, runProcess, StreamingRedactor, terminateDirectChild } from "../../src/process.js";
 function deferred() {
     let resolvePromise = () => undefined;
     let rejectPromise = () => undefined;
@@ -70,36 +70,6 @@ function turnFromNotification(value) {
         ...(turnError === undefined ? {} : { error: turnError }),
         agentOutput,
     };
-}
-async function waitForChildClose(child, timeoutMs) {
-    if (child.exitCode !== null || child.signalCode !== null) {
-        return true;
-    }
-    return await new Promise((resolvePromise) => {
-        const timer = setTimeout(() => {
-            child.off("close", onClose);
-            resolvePromise(false);
-        }, timeoutMs);
-        timer.unref();
-        const onClose = () => {
-            clearTimeout(timer);
-            resolvePromise(true);
-        };
-        child.once("close", onClose);
-    });
-}
-async function terminateAppServer(child) {
-    if (child.exitCode !== null || child.signalCode !== null) {
-        return;
-    }
-    child.kill();
-    if (await waitForChildClose(child, 5_000)) {
-        return;
-    }
-    child.kill("SIGKILL");
-    if (!await waitForChildClose(child, 5_000)) {
-        throw new AutopilotError("EXECUTION_STATE_UNKNOWN", "Codex app-server process did not terminate after forced cleanup");
-    }
 }
 class AppServerConnection {
     #child;
@@ -286,7 +256,7 @@ class AppServerConnection {
             this.#child.stdout.destroy();
             this.#child.stderr.destroy();
             try {
-                await terminateAppServer(this.#child);
+                await terminateDirectChild(this.#child, "Codex app-server");
             }
             finally {
                 this.#child.stdin.off("error", this.#onStdinError);

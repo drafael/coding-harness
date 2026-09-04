@@ -23,6 +23,8 @@ When using Pi's process-local backend, load `runtime/dist/src/pi-extension-entry
 
 Codex offers two explicit charter modes. `codex-app-server` binds an implementation to one per-attempt app-server instance and exact ephemeral thread/turn; connection or server loss becomes unknown. `codex` retains the direct CLI fallback and POSIX process-supervised restart reattachment. App-server independent review still uses the direct read-only CLI path.
 
+OpenCode also offers two explicit modes. `opencode-server` owns one authenticated loopback server, dedicated session, caller-selected message, and uninterrupted event stream per implementation attempt; any identity or stream gap becomes unknown. `opencode` remains the direct CLI mode. Server-mode independent review still uses the direct CLI path.
+
 Autopilot will:
 
 1. turn the request into explicit work items, completion predicates, budgets, and grants;
