@@ -349,8 +349,7 @@ test("OpenCode server lets natural completion win cancellation", async () => {
 test("OpenCode server rejects wrong subject identities", async () => {
   const { adapter, worktreePath } = await createAdapter("hang");
   await adapter.describe();
-  const baseRequest = request(worktreePath, "wrong-subject", "implementation", 5_000);
-  const handle = await adapter.launch({ ...baseRequest, idleTimeoutMs: 120 });
+  const handle = await adapter.launch(request(worktreePath, "wrong-subject", "implementation", 5_000));
   assert.ok(handle.subject);
   const wrong = {
     ...handle,
@@ -359,7 +358,8 @@ test("OpenCode server rejects wrong subject identities", async () => {
 
   assert.deepEqual(await adapter.cancel(wrong), { protocolVersion: 1, accepted: false });
   await assert.rejects(adapter.observe(wrong), isExecutionUnknown);
-  await assert.rejects(adapter.observe(handle), isExecutionUnknown);
+  assert.deepEqual(await adapter.cancel(handle), { protocolVersion: 1, accepted: true });
+  assert.equal((await adapter.observe(handle)).status, "cancelled");
 });
 
 for (const [mode, label] of [
