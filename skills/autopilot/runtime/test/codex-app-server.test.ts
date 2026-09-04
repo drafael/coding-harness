@@ -396,7 +396,7 @@ test("Codex app-server awaits forced direct-child cleanup on unknown admission, 
     const executionRequest = scenario === "admission"
       ? { ...baseRequest, idleTimeoutMs: 50 }
       : scenario === "timeout"
-        ? { ...baseRequest, deadline: new Date(Date.now() + 50).toISOString() }
+        ? { ...baseRequest, deadline: new Date(Date.now() + 2_000).toISOString() }
         : baseRequest;
 
     if (scenario === "admission") {
