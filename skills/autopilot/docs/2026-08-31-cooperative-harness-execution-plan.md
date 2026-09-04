@@ -1,9 +1,9 @@
 # Cooperative harness execution implementation plan
 
-- **Status:** Implemented through the explicit OpenCode server backend and controlled fault matrix; the separate Claude boundary remains pending
+- **Status:** Implemented through the explicit OpenCode server backend; the Claude Agent SDK boundary has a conditional GO and remains unimplemented
 - **Date:** 2026-08-31
 - **Audience:** Autopilot implementers and reviewers
-- **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [OpenCode server evaluation](2026-08-31-opencode-server-evaluation.md), [durable event engine ADR](adr/0001-durable-event-engine.md)
+- **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [OpenCode server evaluation](2026-08-31-opencode-server-evaluation.md), [Claude Agent SDK evaluation](2026-09-04-claude-agent-sdk-evaluation.md), [durable event engine ADR](adr/0001-durable-event-engine.md)
 
 ## Objective
 
@@ -56,7 +56,7 @@ The approved design follows a read-only review of the current runtime, Pi 0.84.4
 |---|---|---|---|
 | Pi structured delegation | Exact `requestId`, `ownerRunId`, and `nodeId`; exact cancellation tuple; at most one terminal response | Process-local extension context | Events and ownership maps are process-local; terminal status is logical |
 | Pi async RPC | Durable run artifacts, exact run status, stop requests, conservative process-terminal projection | Same Pi process/session is the narrow candidate | On Windows, pi-subagents 0.60.0 reports process-tree terminality as unknown; launch reply is not an idempotent admission key |
-| Claude Agent SDK | Session identity, streaming result, interrupt/close, conversation resume | Original SDK query while connected | Resume starts or reconstructs execution through a provider subprocess; no active-query attachment contract |
+| Claude Agent SDK | Session ID, caller-selected user-message UUID echoed on current first replies/results, capability-gated interrupt receipt, structured terminal reason | Original in-memory query and child while connected | Resume starts or reconstructs execution through another query; local query loss has no active-execution attachment contract |
 | Codex app-server | Durable thread ID, turn ID, status/events, interrupt, live turn rejoin while the same server survives | Same app-server process | Turn interruption can leave background terminals; stored history is not OS quiescence |
 | OpenCode server | Dedicated session, caller-selected message ID, status, live SSE, abort, child sessions | Same Autopilot-owned server process and uninterrupted live event stream | SSE has no replay cursor; abort and exact-message completion remain cooperative rather than process proof |
 
@@ -379,7 +379,7 @@ The default stdio transport cannot reconnect after coordinator loss. WebSocket t
 Investigate and implement each remaining provider as a separate boundary.
 
 - OpenCode: the [server evaluation](2026-08-31-opencode-server-evaluation.md) established the same-instance contract. The explicit `opencode-server` adapter owns one server process, dedicated session, caller-selected message ID, uninterrupted live events, and fresh REST reconciliation. Controlled fault coverage passes, and live completion and cancellation passed with OpenCode 1.18.28.
-- Claude Code: remain session-scoped until an active execution attachment surface exists.
+- Claude Code: the [Agent SDK evaluation](2026-09-04-claude-agent-sdk-evaluation.md) established a conditional same-instance contract for a distinct `claude-agent-sdk` implementation backend. Promotion requires an explicitly supplied SDK at 0.3.246 or later, controlled fault coverage, and exact-version live completion and cancellation. The direct `claude-code` mode remains session-scoped.
 
 Do not add a provider-neutral durable-subject framework based only on hypothetical future consumers.
 
@@ -467,6 +467,7 @@ Pause and revisit the design if implementation shows any of the following:
 - Controlled Pi process-local tests cover exact admission, cancellation, terminal-before-shutdown precedence, reload/session invalidation, lost admission, late/mismatched result rejection, direct fallback, and runtime-core completion in one reused local repository fixture. Whole-process live fault evidence remains environment-specific and does not prove OS quiescence or provider parity.
 - No provider currently proves Windows process-tree quiescence through its public subagent contract.
 - Codex app-server 0.151.0 exact completion and interruption were exercised over one uninterrupted stdio connection. Cross-connection live rejoin is intentionally unimplemented because the default transport is not reconnectable; continuity loss remains unknown.
-- OpenCode 1.18.25 protocol probes and the production adapter's 1.18.28 live completion and cancellation passed. An earlier isolated probe process was later found still running after its parent harness had ended, invalidating that probe's cleanup claim and reinforcing the documented absence of whole-harness process containment. The production live run awaited cleanup and a post-run process scan found no remaining server. Disconnect remains intentionally unrecoverable because SSE has no replay cursor; Claude interruption behavior remains unimplemented.
+- OpenCode 1.18.25 protocol probes and the production adapter's 1.18.28 live completion and cancellation passed. An earlier isolated probe process was later found still running after its parent harness had ended, invalidating that probe's cleanup claim and reinforcing the documented absence of whole-harness process containment. The production live run awaited cleanup and a post-run process scan found no remaining server. Disconnect remains intentionally unrecoverable because SSE has no replay cursor.
+- Agent SDK 0.3.220 with bundled Claude Code 2.1.220 produced an exact natural completion and an interrupt receipt followed by `aborted_tools`, with normal-path cleanup and unchanged Claude configuration digests. Its cancellation result lacked the required user-message UUID. The current 0.3.260 API shape closes that identity gap, but controlled and live validation on 0.3.246 or later remains required before implementation promotion.
 - Cooperative terminality does not prevent external effects performed by worker tools before terminal response.
 - The Pi entry point follows the documented package manifest at `runtime/dist/src/pi-extension-entry.js` and registers `/autopilot-start`, `/autopilot-resume`, and `/autopilot-recover`; callers must load it through Pi's normal package or extension mechanism.
