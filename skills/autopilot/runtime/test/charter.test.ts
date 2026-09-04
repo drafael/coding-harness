@@ -21,7 +21,7 @@ test("sealCharter accepts explicit server-backed harness adapter names", async (
   const repository = await createRepository();
   const proposed = proposedCharter(repository.root, repository.baseCommit);
 
-  for (const harnessAdapter of ["codex-app-server", "opencode-server"] as const) {
+  for (const harnessAdapter of ["claude-agent-sdk", "codex-app-server", "opencode-server"] as const) {
     assert.equal(sealCharter({ ...proposed, harnessAdapter }).harnessAdapter, harnessAdapter);
   }
 });

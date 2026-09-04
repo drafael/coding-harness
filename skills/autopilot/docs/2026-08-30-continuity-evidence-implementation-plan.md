@@ -65,7 +65,7 @@ The implementation began from this boundary:
 3. Reports listed receipt IDs but did not provide one evidence result for every acceptance predicate.
 4. The baseline package suite contained 111 passing Node tests.
 
-Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, an exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. The exact-tree review gate passed with Pi 0.84.4, Codex 0.151.0, and OpenCode 1.18.25. Claude Code 2.1.251 now reaches its identity-linked API key but requires an `ANTHROPIC_WORKSPACE_ID` absent from the validation environment, and production notification wake remains unverified.
+Phases 0–6A replaced that boundary with versioned attempt context, structured predicate receipts and reports, continuity status, an exact-tree review gate, journal-safe pause, verified-item continuation, effect reconciliation, and exact-subject provider heartbeat waiting. The exact-tree review gate passed with Pi 0.84.4, Claude Code 2.1.251, Codex 0.151.0, and OpenCode 1.18.25. The direct Claude Code adapter also passed an exact disposable edit without changing HEAD, Git configuration, or global Claude configuration; production notification wake remains unverified.
 
 ## Phase 0: Align documentation with executable support
 
@@ -487,7 +487,7 @@ skills/autopilot/runtime/test/fault-injection.test.ts
 
 ## Phase 7: Finish documentation and packaging
 
-**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 234 Node tests locally after adding Codex app-server and OpenCode server contract coverage. The earlier 187-test native-free, 200-test Pi process-local, 162-test, and 137-test baselines passed at their recorded revisions on Ubuntu and Windows.
+**Result:** Implemented for Phases 0–6A. Phase 6B is not promoted under the recorded no-receiver decision and is not a current release blocker. The current validation baseline is 253 Node tests locally after adding Claude Agent SDK, Codex app-server, and OpenCode server contract coverage. The earlier 187-test native-free, 200-test Pi process-local, 162-test, and 137-test baselines passed at their recorded revisions on Ubuntu and Windows.
 
 ### Files
 

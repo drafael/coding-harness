@@ -1,9 +1,10 @@
 # Claude Agent SDK execution evaluation
 
-- **Status:** Evaluation complete; production adapter not yet implemented
-- **Decision:** CONDITIONAL GO for a distinct `claude-agent-sdk` implementation backend
+- **Status:** Evaluation complete; production adapter implemented and validated separately
+- **Decision:** GO for a distinct `claude-agent-sdk` implementation backend at the tested boundary
 - **API baseline:** `@anthropic-ai/claude-agent-sdk` 0.3.260, tag `v0.3.260` at commit `a79d677cbd0a627bddf8ad37d8d010c727c71fc7`
-- **Live probe baseline:** Agent SDK 0.3.220 with its bundled Claude Code 2.1.220
+- **Evaluation probe baseline:** Agent SDK 0.3.220 with its bundled Claude Code 2.1.220
+- **Promotion evidence:** [Agent SDK implementation validation](2026-09-04-claude-agent-sdk-validation.md)
 - **Scope:** Implementation execution only; independent review remains on the direct `claude-code` adapter
 
 ## Decision summary
@@ -12,7 +13,7 @@ The TypeScript Agent SDK now exposes enough identity and lifecycle data for an e
 
 Autopilot can therefore implement a backend whose subject is the original in-memory `Query`, its Claude Code subprocess, the reported session ID, and the caller-selected user-message UUID. Completion or cancellation is acceptable only while that exact query remains uninterrupted and only from a terminal result bound to both identities.
 
-This is a conditional GO rather than production promotion. The locally available 0.3.220 SDK proved natural completion and cooperative interruption, but its cancellation result did not echo the user-message UUID. The required identity fields arrived in later releases. Autopilot must not ship the backend until an explicitly provided SDK at 0.3.246 or later passes the controlled fault matrix and live completion and cancellation probes. The runtime must not install that SDK or its platform binary.
+The evaluation originally issued a conditional GO because the locally available 0.3.220 cancellation result did not echo the user-message UUID. The required identity fields arrived in later releases. An explicitly operator-supplied 0.3.260 SDK and matching Claude Code 2.1.260 executable subsequently passed the controlled fault matrix and live completion and cancellation probes, allowing the distinct backend to ship. The runtime still must not install the SDK or its platform binary.
 
 The backend must remain separate from `claude-code`. It must advertise no restart reattachment and must not use transcript resume to infer the state of an interrupted query. SDK or subprocess loss before an exact terminal result becomes `EXECUTION_STATE_UNKNOWN` and cannot launch a replacement automatically.
 
@@ -252,4 +253,4 @@ The implementation must not claim:
 
 ## Outcome
 
-Agent SDK 0.3.260 resolves the earlier API-shape blocker: current result and first-reply messages can bind the provider terminal to a caller-selected user-message UUID, while interrupt receipts and structured terminal reasons distinguish acknowledgment from cancellation. The remaining blocker is empirical, not architectural. Autopilot needs an explicitly supplied current SDK, a controlled fault implementation, and exact-version live completion and cancellation before promoting `claude-agent-sdk` into the charter schema.
+Agent SDK 0.3.260 resolves the earlier API-shape blocker: current result and first-reply messages bind the provider terminal to a caller-selected user-message UUID, while interrupt receipts and structured terminal reasons distinguish acknowledgment from cancellation. The [promotion validation](2026-09-04-claude-agent-sdk-validation.md) supplied the required controlled and exact-version live evidence. `claude-agent-sdk` is now an explicit charter value while `claude-code` remains the distinct direct CLI and independent-review path.

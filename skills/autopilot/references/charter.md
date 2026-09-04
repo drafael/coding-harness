@@ -11,7 +11,7 @@ Runtime validation in `runtime/src/charter.ts` is authoritative. `runtime/schema
 - `sourceText`: original user request
 - `createdAt`: ISO timestamp
 - `repository`: canonical real root, immutable base ref/commit, and maximum writable roots
-- `harnessAdapter`: `pi`, `claude-code`, `codex`, `codex-app-server`, `opencode`, or `opencode-server`; the Codex and OpenCode pairs are distinct direct-CLI and same-server-instance execution modes
+- `harnessAdapter`: `pi`, `claude-code`, `claude-agent-sdk`, `codex`, `codex-app-server`, `opencode`, or `opencode-server`; Claude, Codex, and OpenCode same-instance modes remain distinct from their direct-CLI modes
 - `mode`: `single`, `independent-queue`, or `ordered-stack`
 - `work`: resolved items with concise change-request titles, full objectives, dependencies, predicates, writable roots, and branches
 - `delivery`: `local-commits`, `change-request-ready`, or `merge-verified`

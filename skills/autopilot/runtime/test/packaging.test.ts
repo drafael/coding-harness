@@ -28,9 +28,12 @@ test("compiled skill CLI starts from a clean copy without node_modules", async (
   assert.ok(Array.isArray(checks));
   const node = checks.find((entry) => isRecord(entry) && entry.name === "node");
   const processSupervision = checks.find((entry) => isRecord(entry) && entry.name === "process-supervision");
+  const claudeAgentSdk = checks.find((entry) => isRecord(entry) && entry.name === "claude-agent-sdk");
   assert.ok(isRecord(node));
   assert.ok(isRecord(processSupervision));
+  assert.ok(isRecord(claudeAgentSdk));
   assert.equal(node.status, "ok");
+  assert.equal(claudeAgentSdk.status, "unverified");
   assert.equal(processSupervision.status, process.platform === "win32" ? "unsupported" : "ok");
 });
 

@@ -186,7 +186,7 @@ export interface ProposedRunCharter {
   readonly sourceText: string;
   readonly createdAt: string;
   readonly repository: RepositorySpec;
-  readonly harnessAdapter: "pi" | "claude-code" | "codex" | "codex-app-server" | "opencode" | "opencode-server";
+  readonly harnessAdapter: "pi" | "claude-code" | "claude-agent-sdk" | "codex" | "codex-app-server" | "opencode" | "opencode-server";
   readonly mode: RunMode;
   readonly work: readonly WorkItem[];
   readonly delivery: DeliveryMode;
@@ -482,7 +482,7 @@ function parseProposed(value: unknown, allowHash: boolean): ProposedRunCharter {
     repository: parseRepository(object.repository, "charter.repository"),
     harnessAdapter: expectLiteral(
       object.harnessAdapter,
-      ["pi", "claude-code", "codex", "codex-app-server", "opencode", "opencode-server"],
+      ["pi", "claude-code", "claude-agent-sdk", "codex", "codex-app-server", "opencode", "opencode-server"],
       "charter.harnessAdapter",
     ),
     mode: expectLiteral(object.mode, ["single", "independent-queue", "ordered-stack"], "charter.mode"),

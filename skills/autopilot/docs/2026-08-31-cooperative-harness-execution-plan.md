@@ -1,6 +1,6 @@
 # Cooperative harness execution implementation plan
 
-- **Status:** Implemented through the explicit OpenCode server backend; the Claude Agent SDK boundary has a conditional GO and remains unimplemented
+- **Status:** Implemented through the explicit Claude Agent SDK, Codex app-server, and OpenCode server backends
 - **Date:** 2026-08-31
 - **Audience:** Autopilot implementers and reviewers
 - **Related:** [Architecture](architecture.md), [continuity implementation plan](2026-08-30-continuity-evidence-implementation-plan.md), [OpenCode server evaluation](2026-08-31-opencode-server-evaluation.md), [Claude Agent SDK evaluation](2026-09-04-claude-agent-sdk-evaluation.md), [durable event engine ADR](adr/0001-durable-event-engine.md)
@@ -379,7 +379,7 @@ The default stdio transport cannot reconnect after coordinator loss. WebSocket t
 Investigate and implement each remaining provider as a separate boundary.
 
 - OpenCode: the [server evaluation](2026-08-31-opencode-server-evaluation.md) established the same-instance contract. The explicit `opencode-server` adapter owns one server process, dedicated session, caller-selected message ID, uninterrupted live events, and fresh REST reconciliation. Controlled fault coverage passes, and live completion and cancellation passed with OpenCode 1.18.28.
-- Claude Code: the [Agent SDK evaluation](2026-09-04-claude-agent-sdk-evaluation.md) established a conditional same-instance contract for a distinct `claude-agent-sdk` implementation backend. Promotion requires an explicitly supplied SDK at 0.3.246 or later, controlled fault coverage, and exact-version live completion and cancellation. The direct `claude-code` mode remains session-scoped.
+- Claude Code: the [Agent SDK evaluation](2026-09-04-claude-agent-sdk-evaluation.md) established the same-instance contract for a distinct `claude-agent-sdk` implementation backend. An explicitly supplied SDK 0.3.260 and matching Claude Code 2.1.260 passed controlled fault coverage and exact-version live completion and cancellation. The direct `claude-code` mode remains separate and session-scoped for review.
 
 Do not add a provider-neutral durable-subject framework based only on hypothetical future consumers.
 
@@ -468,6 +468,6 @@ Pause and revisit the design if implementation shows any of the following:
 - No provider currently proves Windows process-tree quiescence through its public subagent contract.
 - Codex app-server 0.151.0 exact completion and interruption were exercised over one uninterrupted stdio connection. Cross-connection live rejoin is intentionally unimplemented because the default transport is not reconnectable; continuity loss remains unknown.
 - OpenCode 1.18.25 protocol probes and the production adapter's 1.18.28 live completion and cancellation passed. An earlier isolated probe process was later found still running after its parent harness had ended, invalidating that probe's cleanup claim and reinforcing the documented absence of whole-harness process containment. The production live run awaited cleanup and a post-run process scan found no remaining server. Disconnect remains intentionally unrecoverable because SSE has no replay cursor.
-- Agent SDK 0.3.220 with bundled Claude Code 2.1.220 produced an exact natural completion and an interrupt receipt followed by `aborted_tools`, with normal-path cleanup and unchanged Claude configuration digests. Its cancellation result lacked the required user-message UUID. The current 0.3.260 API shape closes that identity gap, but controlled and live validation on 0.3.246 or later remains required before implementation promotion.
+- Agent SDK 0.3.220 with bundled Claude Code 2.1.220 produced an exact natural completion and an interrupt receipt followed by `aborted_tools`, but its cancellation result lacked the required user-message UUID. The promoted adapter used an explicitly supplied SDK 0.3.260 and Claude Code 2.1.260; controlled faults plus exact live completion and cancellation passed with the required identities, isolated configuration, and awaited direct-child cleanup.
 - Cooperative terminality does not prevent external effects performed by worker tools before terminal response.
 - The Pi entry point follows the documented package manifest at `runtime/dist/src/pi-extension-entry.js` and registers `/autopilot-start`, `/autopilot-resume`, and `/autopilot-recover`; callers must load it through Pi's normal package or extension mechanism.

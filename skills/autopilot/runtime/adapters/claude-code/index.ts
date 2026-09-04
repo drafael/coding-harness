@@ -1,11 +1,15 @@
 import { CliHarnessAdapter } from "../../src/adapter-process.js";
+import { isClaudeAgentSdkScriptCli } from "../../src/claude-agent-sdk.js";
 
-export function createClaudeCodeAdapter(): CliHarnessAdapter {
+export function createClaudeCodeAdapter(executable = "claude"): CliHarnessAdapter {
+  const scriptCli = isClaudeAgentSdkScriptCli(executable);
+  const argumentPrefix = scriptCli ? [executable] : [];
   return new CliHarnessAdapter({
     name: "claude-code",
-    executable: "claude",
-    versionArguments: ["--version"],
+    executable: scriptCli ? process.execPath : executable,
+    versionArguments: [...argumentPrefix, "--version"],
     buildArguments: (request, prompt) => [
+      ...argumentPrefix,
       "--print",
       "--output-format", "stream-json",
       "--verbose",
@@ -24,7 +28,7 @@ export function createClaudeCodeAdapter(): CliHarnessAdapter {
       "Bash restrictions are cooperative.",
       "Safe mode excludes customizations; admin-managed policy may still apply.",
       "Implementation executions use the attempt-scoped supervisor for restart reattachment; review executions remain session-scoped.",
-      "The exact-tree review role is implemented but has no version-pinned live verification.",
+      "Version 2.1.251 passed a disposable exact-tree review without changing HEAD, Git configuration, or global Claude configuration.",
     ],
     expectsJsonLines: true,
   });

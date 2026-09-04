@@ -28,7 +28,7 @@
     "sourceText": { "type": "string", "minLength": 1 },
     "createdAt": { "type": "string", "format": "date-time" },
     "repository": { "$ref": "#/$defs/repository" },
-    "harnessAdapter": { "enum": ["pi", "claude-code", "codex", "codex-app-server", "opencode", "opencode-server"] },
+    "harnessAdapter": { "enum": ["pi", "claude-code", "claude-agent-sdk", "codex", "codex-app-server", "opencode", "opencode-server"] },
     "mode": { "enum": ["single", "independent-queue", "ordered-stack"] },
     "work": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/workItem" } },
     "delivery": { "enum": ["local-commits", "change-request-ready", "merge-verified"] },
