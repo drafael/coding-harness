@@ -45,10 +45,9 @@ For local Java desktop applications, load [`references/desktop-apps.md`](referen
 
 - Always prefer simple class names over fully qualified names — add an import instead:
   - ✅ `ClassName` | ❌ `com.package.ClassName` *(unless the name conflicts with another import)*
-- Always use **static imports** for utility methods, including but not limited to:
-  - `Collections.emptyList()`, `Collections.emptyMap()`, `Collections.emptySet()`
-  - `Collectors.toList()`, `Collectors.toSet()`, `Collectors.toMap()`, `Collectors.joining()`
-  - `Predicate.not(...)` — write `not(User::isDeleted)`, not `Predicate.not(User::isDeleted)`
+- In production code, use **static imports** only when the unqualified call is conventional and immediately obvious, such as `emptyList()` or `joining()`
+- Keep the owning type when it adds important meaning; never statically import methods from `Optional`, `Validate`, `StringUtils`, or `Arrays` — write `Optional.empty()`, `Validate.notBlank(...)`, `StringUtils.isBlank(...)`, and `Arrays.stream(...)`
+- This production-code rule does not override the static-import conventions for established test DSLs such as AssertJ and Mockito
 
 ---
 
