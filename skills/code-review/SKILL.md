@@ -10,6 +10,7 @@ Review the requested code or diff in repository context. Load applicable languag
 ## Scope
 
 - Review the user-specified target. For uncommitted work, inspect the complete diff and relevant call paths rather than auditing unrelated code.
+- Treat reviewing, drafting comments, posting comments, and implementing fixes as distinct actions. Short confirmations inherit the current requested action; agreement with a finding does not authorize implementation. Require an explicit implementation request before editing project source or switching branches to apply a fix, and clarify ambiguous transitions. Isolated temporary reproduction tests remain appropriate during review.
 - Distinguish regressions introduced by the change from pre-existing issues.
 - Use `blast-radius`, when explicitly invoked and available, when the primary task is to trace what a concrete change could break beyond the obvious diff and prove its decision-critical safety assumptions.
 - Do not broaden a focused review into an architecture, dependency, formatting, or security program without approval.
