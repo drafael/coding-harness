@@ -1,6 +1,6 @@
 ---
 name: execution-verification
-description: Discover suitable execution environments and obtain evidence for infrastructure-dependent behavior during planning, implementation, or review. Use before declaring material migration, transaction, concurrency, service-integration, or runtime assumptions unverified. Prefer isolated local verification; support explicitly user-approved CI/CD and cloud tests. Own resource cleanup and report evidence, blockers, and remaining limits. Complements existing test suites; not a general workstation-setup or deployment skill.
+description: Discover the OS, available CLI tools, and suitable execution environments to verify material migration, transaction, concurrency, API, service-integration, or runtime claims during planning, implementation, or review. Prefer isolated local verification; support explicitly user-approved endpoint discovery and invocation through OpenAPI/Swagger, CI/CD, and cloud tests. Recommend missing tools with OS-appropriate installation instructions tied to the claim. Own cleanup and report evidence, blockers, and limits. Not a general workstation-setup or deployment skill.
 ---
 
 # Execution Verification
@@ -23,6 +23,8 @@ Isolation is a requirement, not a particular technology. Containers are one opti
 
 ## Load references when relevant
 
+- [Discovery and installation guidance](references/discovery-and-installation.md): automatic OS/tool discovery, capability checks, and claim-specific installation instructions.
+- [Endpoint verification](references/endpoints.md): user-approved API discovery and invocation using OpenAPI/Swagger.
 - [Database verification](references/databases.md): migrations, transactions, locks, concurrency, and upgrade behavior.
 - [CI/CD and cloud verification](references/remote-verification.md): approval scope, remote execution, cost, data handling, and cleanup.
 
@@ -36,7 +38,7 @@ Separate what a disposable environment can establish from properties requiring a
 
 ### 2. Discover before declaring a blocker
 
-Inspect relevant repository instructions, runtime pins, test harnesses, build wrappers, migration configuration, and CI definitions. Then check available local tools and services.
+Automatically establish the execution host's OS, version, architecture, and shell/interface from host metadata or safe read-only probes. Do not assume the agent host, a remote runner, and the target service use the same platform. Inspect relevant repository instructions, runtime pins, test harnesses, build wrappers, migration configuration, and CI definitions, then discover CLI tools and services relevant to the claim. Follow the discovery reference; reuse existing capabilities before recommending installation.
 
 Discover capabilities relevant to the claim: isolated processes, temporary service instances, containers, virtual machines, or existing test environments. Establish target location and ownership before connecting, then check reachability and required artifacts within the authorized scope. An installed client alone is not execution capability, and a local-looking target name does not establish that execution is local or private.
 
@@ -46,7 +48,9 @@ Select the target explicitly for each operation rather than changing global defa
 
 Within the authorized task, use available local capabilities and create isolated, task-owned environments without asking redundant setup questions. Prefer disposable resources over changing a developer's existing database or service.
 
-Ask before installing or upgrading tools, starting or changing shared services, or taking network/cost actions outside existing authorization. If local verification is inadequate, propose a specific CI/CD or cloud check and obtain explicit approval under the remote reference. Possession of credentials is not permission.
+Ask before installing or upgrading tools, starting or changing shared services, or taking network/cost actions outside existing authorization. When a required capability is missing, recommend the smallest suitable tool, provide OS/shell-appropriate installation steps, and explain exactly which claim it will help test and how. Instructions are not permission to execute an installation.
+
+Endpoint discovery and invocation require user-approved target and operation scope under the endpoint reference. If local verification is inadequate, propose a specific CI/CD or cloud check and obtain explicit approval under the remote reference. Existing approval may cover the work; possession of credentials alone is not permission.
 
 If the boundary cannot be exercised safely or proportionately, report the concrete capability checked, blocker encountered, and remaining uncertainty. Do not invent a passing substitute or repeatedly retry an unchanged failure.
 

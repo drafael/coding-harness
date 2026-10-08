@@ -2,6 +2,8 @@
 
 Use remote execution when the required boundary cannot be established locally or the user explicitly requests a remote check. Prefer an existing isolated test workflow or sandbox over creating new infrastructure. These rules apply to hosted or self-managed CI systems, remote execution services, and cloud environments. Use the available supported interface; no particular provider, CLI, SDK, workflow format, or credential mechanism is required.
 
+For application API discovery and invocation, also use [endpoint verification](endpoints.md). A CI/cloud approval covers those requests only when their targets and operations are included in its scope.
+
 ## Approval before remote activity
 
 Before inspecting or operating a remote verification environment, establish explicit user approval for the intended scope. Read relevant local configuration first where that can identify the target without remote access. Existing explicit authorization may cover the work; do not ask repeatedly when it already covers the exact scope.
