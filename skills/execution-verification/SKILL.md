@@ -1,9 +1,9 @@
 ---
-name: environment-verification
+name: execution-verification
 description: Discover suitable execution environments and obtain evidence for infrastructure-dependent behavior during planning, implementation, or review. Use before declaring material migration, transaction, concurrency, service-integration, or runtime assumptions unverified. Prefer isolated local verification; support explicitly user-approved CI/CD and cloud tests. Own resource cleanup and report evidence, blockers, and remaining limits. Complements existing test suites; not a general workstation-setup or deployment skill.
 ---
 
-# Environment Verification
+# Execution Verification
 
 Before settling for “unverified,” check whether available infrastructure can safely provide meaningful evidence. Prefer the smallest environment that exercises the actual boundary—not necessarily the most production-like environment.
 
