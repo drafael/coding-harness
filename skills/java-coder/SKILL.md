@@ -78,6 +78,7 @@ For the full guidance — including the `@RequiredArgsConstructor` / `@Builder` 
 
 ### Code Style
 
+- Name schema/domain validation limits: reuse an existing named limit or introduce a descriptive local constant without changing accepted values. Do not merge unrelated limits because their values match or replace every numeric literal mechanically.
 - **Always wrap statement bodies in braces**, even for single-line blocks
 - Prefer `String.formatted(...)` over `+` string concatenation
 - Prefer **stream-based functional iteration** over `for`/`while` loops
@@ -114,8 +115,17 @@ For the full guidance — including the `@RequiredArgsConstructor` / `@Builder` 
 
 ---
 
+### Method Design
+
+- Prefer small, single-purpose methods over large, multi-purpose methods. Extract cohesive phases, deeply nested branches, or complex inline lambdas into clearly named private helpers so the calling method reads as an outline of the operation.
+- Private helpers may have a single caller when they clarify a meaningful step or reduce nesting; reuse is not required. Avoid arbitrary line-count limits, pass-through wrappers, and excessive fragmentation that makes control flow harder to follow.
+- Preserve validation order, transaction/lock boundaries, side effects, and exception behavior when extracting helpers. Do not introduce new services or frameworks merely to shorten methods.
+
+---
+
 ### Method Formatting
 
+- In **multiline fluent builders**, put each chained call on its own line, in production code and tests. Compact single-line builders may stay on one line; do not expand this into an unrelated formatting sweep.
 - Keep method declarations and invocations on a **single line** when they fit reasonably
 - When a method has multiple arguments and the line becomes too long or hard to read, **format each argument on its own line** with the closing parenthesis on a separate line — except for lambda blocks, where `})` should remain on the same line:
 
