@@ -51,6 +51,19 @@ Autopilot requires Node.js 24+ and Git. Pi can load the packaged Autopilot exten
 
 Use `/autopilot status` to check overnight progress, `/autopilot resume` to continue an interrupted nonterminal run, or `/autopilot stop` to end a run while preserving its work. `/autopilot address review comments` snapshots feedback from the exact open PR/MR, creates a sealed amendment successor, and resolves provider-resolvable threads only after the fix passes. After provider-confirmed merge, `/autopilot wrap up` performs guarded remote-branch, sibling-worktree, local-branch, and amendment-chain cleanup; use `/autopilot wrap up with handoff` to preserve project-local summaries.
 
+### Check understanding and sharpen a task
+
+These skills are manual-only. Claude Code uses `/<name>`; Pi uses `/skill:<name>`. In OpenCode, ask to use the skill by name; slash commands require the skill's `opencode/slash` metadata to be enabled.
+
+- [`bro`](skills/bro): restate the assistant's last answer in plain language.
+- [`in-your-own-words`](skills/in-your-own-words): restate your goals and the problem to check understanding, without solving it.
+- [`sharpen`](skills/sharpen): deepen a task's methods and evidence without broadening its scope, then rewrite the prompt.
+- [`ketchup`](skills/ketchup): catch up on chat progress and every decision still waiting on you, without starting more work.
+
+```text
+/sharpen Review this migration plan for correctness, keeping its scope unchanged.
+```
+
 ### Implement a user story
 
 Activate the [`brainstorm`](skills/brainstorm) skill:
@@ -140,6 +153,14 @@ debug this error: """stack trace or errors in logs"""
 ```text
 clarify why the response status is 500 instead of 201
 ```
+
+For an explicit test-first bug fix, invoke [`tdd`](skills/tdd):
+
+```text
+/tdd Fix the parser bug and demonstrate a regression test failing before the fix and passing afterward.
+```
+
+It uses a focused existing test boundary, avoids broad harness setup, and reports missing execution evidence rather than claiming an unobserved result.
 
 ### Refactoring
 
