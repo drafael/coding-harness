@@ -1,9 +1,7 @@
 {
   "profile": "groq",
   "capture": {
-    "type": "ffmpeg",
-    "inputFormat": "avfoundation",
-    "input": ":0"
+    "type": "ffmpeg"
   },
   "output": {
     "submitOnStop": false
