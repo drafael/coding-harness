@@ -17,6 +17,7 @@ Before installing an agent, review the [prerequisites](docs/prerequisites.md) fo
   - [pi-web-access package](https://github.com/nicobailon/pi-web-access) - Adds web search, content fetching, and library research tools.
   - [pi-intercom package](https://github.com/nicobailon/pi-intercom) - Lets multiple Pi sessions communicate locally.
   - [pi-review-loop package](https://github.com/nicobailon/pi-review-loop) - Automates repeated code-review passes until issues are resolved.
+  - [pi-voice-stt package](https://github.com/cgarrot/pi-voice-stt) - Adds multi-provider voice dictation and audio file transcription.
 
 ### Also worth trying
 - [Codex CLI](https://developers.openai.com/codex/quickstart?setup=cli) with [revdiff plugin](https://github.com/umputun/revdiff?tab=readme-ov-file#codex-plugin) or [Codex app](https://developers.openai.com/codex/quickstart?setup=app)

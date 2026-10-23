@@ -1,0 +1,54 @@
+{
+  "profile": "groq",
+  "capture": {
+    "type": "ffmpeg",
+    "inputFormat": "avfoundation",
+    "input": ":0"
+  },
+  "output": {
+    "submitOnStop": false
+  },
+  "profiles": {
+    "groq": {
+      "provider": {
+        "type": "groq",
+        "model": "whisper-large-v3-turbo",
+        "apiKeyEnv": "GROQ_API_KEY",
+        "language": "auto"
+      }
+    },
+    "deepgram": {
+      "provider": {
+        "type": "deepgram",
+        "model": "nova-3",
+        "apiKeyEnv": "DEEPGRAM_API_KEY",
+        "language": "auto",
+        "smartFormat": true
+      }
+    },
+    "elevenlabs": {
+      "provider": {
+        "type": "elevenlabs",
+        "model": "scribe_v1",
+        "apiKeyEnv": "ELEVENLABS_API_KEY",
+        "language": "auto"
+      }
+    },
+    "assemblyai": {
+      "provider": {
+        "type": "assemblyai",
+        "model": "universal-3-5-pro",
+        "apiKeyEnv": "ASSEMBLYAI_API_KEY",
+        "language": "auto"
+      }
+    },
+    "mistral": {
+      "provider": {
+        "type": "mistral",
+        "model": "voxtral-mini-2602",
+        "apiKeyEnv": "MISTRAL_API_KEY",
+        "language": "auto"
+      }
+    }
+  }
+}
