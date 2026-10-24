@@ -37,21 +37,6 @@ To use `coding-harness/skills` in your projects, copy or symlink the `skills` fo
 
 Ask your coding agent in natural language or use the skill command syntax supported by your host. The examples below use portable prompts; direct skill invocations use `/<skill-name>` explicitly.
 
-### Run a bounded unattended implementation
-
-[`autopilot`](skills/autopilot) is manual-only. Invoke it explicitly when the objective has checkable completion predicates and the user wants restart-resumable execution through a supported coding harness:
-
-```text
-/autopilot I am going to sleep. Work overnight on migrating this multi-module Java backend
-from Spring Boot 3.x to Spring Boot 4.0.0. Done means the Maven verify build,
-integration tests, and application-context smoke tests pass; no Spring Boot 3.x
-artifacts remain; and the migration guide is updated. Open a PR or MR, but do not merge or deploy.
-```
-
-Autopilot requires Node.js 24+ and Git. Pi can load the packaged Autopilot extension and an active `pi-subagents` owner for process-local structured execution; an unavailable owner selects the distinct direct Pi CLI fallback before admission. Autopilot never installs or enables these components. Remote delivery also requires `gh` or `glab` and explicit per-run grants.
-
-Use `/autopilot status` to check overnight progress, `/autopilot resume` to continue an interrupted nonterminal run, or `/autopilot stop` to end a run while preserving its work. `/autopilot address review comments` snapshots feedback from the exact open PR/MR, creates a sealed amendment successor, and resolves provider-resolvable threads only after the fix passes. After provider-confirmed merge, `/autopilot wrap up` performs guarded remote-branch, sibling-worktree, local-branch, and amendment-chain cleanup; use `/autopilot wrap up with handoff` to preserve project-local summaries.
-
 ### Check understanding and sharpen a task
 
 These skills are manual-only. Claude Code uses `/<name>`; Pi uses `/skill:<name>`. In OpenCode, ask to use the skill by name; slash commands require the skill's `opencode/slash` metadata to be enabled.
