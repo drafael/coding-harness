@@ -16,7 +16,6 @@ Before installing an agent, review the [prerequisites](docs/prerequisites.md) fo
   - [pi-subagents package](https://github.com/nicobailon/pi-subagents) - Delegates work to focused subagents and chains.
   - [pi-web-access package](https://github.com/nicobailon/pi-web-access) - Adds web search, content fetching, and library research tools.
   - [pi-intercom package](https://github.com/nicobailon/pi-intercom) - Lets multiple Pi sessions communicate locally.
-  - [pi-review-loop package](https://github.com/nicobailon/pi-review-loop) - Automates repeated code-review passes until issues are resolved.
   - [pi-voice-stt package](https://github.com/cgarrot/pi-voice-stt) - Adds multi-provider voice dictation and audio file transcription.
 
 ### Also worth trying
