@@ -3,17 +3,9 @@
 Use a modern terminal emulator, such as:
 
 - [WezTerm](https://wezterm.org/) (cross-platform) - Highly configurable terminal with strong font, tab, pane, and GPU rendering support.
-- [Alacritty](https://alacritty.org) (cross-platform) - Minimal, fast GPU-accelerated terminal focused on performance.
 - [Ghostty](https://ghostty.org/) (Linux and macOS) - Modern native terminal with sensible defaults and good performance.
 - [Kitty](https://sw.kovidgoyal.net/kitty/) (Linux and macOS) - Feature-rich GPU terminal with tabs, splits, images, and extensive customization.
-- [Warp](https://warp.dev/) (macOS) - AI-assisted terminal with command blocks, history, and collaboration features.
 - PowerShell v6+ (Windows) - Cross-platform shell and terminal experience commonly available on Windows.
-
-## Agentic terminals
-
-- [agterm](https://agterm.com/)
-- [Kero](https://kero.sh/)
-- [Herdr](https://herdr.dev/)
 
 ## Configuration examples
 
