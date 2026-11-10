@@ -25,6 +25,8 @@ Follow this systematic approach to analyze and improve test coverage:
 2. **Baseline Coverage Analysis**
    - Run existing tests with coverage reporting
    - Generate comprehensive coverage reports
+   - Before interpreting results, verify collection, reporting and coverage gates use the intended execution data and matching source/build artifacts. After overriding an output path, check all downstream consumers, including inherited configuration.
+   - Distinguish test failures from coverage-tool/data failures before changing tests or thresholds. Compatible multi-run aggregation is valid; a single fresh file is not universally required.
    - Document current coverage percentages:
      - Line coverage
      - Branch coverage

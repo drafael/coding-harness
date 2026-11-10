@@ -19,6 +19,8 @@ Use the **java-coder** skill, but the instructions from this file take precedenc
 - The instance of the class under test: always `subject`
 
 **Structure**
+- Prefer straight-line test-case bodies: split scenarios when parameters select different actions or assertion paths. Retain parameterization when flow and assertions remain uniform.
+- Conditions needed for cleanup, polling, or synchronization helpers are allowed; this is not a blanket ban on conditional syntax.
 - Prefer `@InjectMocks` over constructing the tested class manually in `@BeforeEach`
 - Prefer `var` for locals initialized by a constructor or builder call
 - Extract expected values into named constants only when they appear in multiple test cases; inline single-use values
